@@ -99,14 +99,22 @@ function isOrphanedInterruptedTool(part: SessionV1.ToolPart) {
   return part.state.status === "error" && part.state.metadata?.interrupted === true
 }
 
+// The internal defect crosses the runner without widening ordinary prompt errors.
+export class ScheduledAdmissionDenied extends Schema.TaggedErrorClass<ScheduledAdmissionDenied>()(
+  "ScheduledAdmissionDenied",
+  {},
+) {}
+
+type PersistGuard = (write: Effect.Effect<void>) => Effect.Effect<void>
+
 export interface Interface {
   readonly cancel: (sessionID: SessionID) => Effect.Effect<void>
   readonly prompt: (input: PromptInput) => Effect.Effect<SessionV1.WithParts, Image.Error>
-  /** Scheduler queue admission claims an idle runner before adding a user message. */
+  /** Scheduler queue admission authorizes the final user-message write inside session ownership. */
   readonly scheduled: (
     input: PromptInput,
-    admitted: () => Promise<void>,
-  ) => Effect.Effect<Option.Option<SessionV1.WithParts>>
+    authorize: (persist: () => Promise<void>) => Promise<boolean>,
+  ) => Effect.Effect<Option.Option<SessionV1.WithParts>, ScheduledAdmissionDenied>
   readonly loop: (input: LoopInput) => Effect.Effect<SessionV1.WithParts>
   readonly shell: (input: ShellInput) => Effect.Effect<SessionV1.WithParts, Session.BusyError>
   readonly command: (input: CommandInput) => Effect.Effect<SessionV1.WithParts, Image.Error>
@@ -638,7 +646,10 @@ const layer = Layer.effect(
       return yield* provider.defaultModel().pipe(Effect.orDie)
     })
 
-    const createUserMessage = Effect.fn("SessionPrompt.createUserMessage")(function* (input: PromptInput) {
+    const createUserMessage = Effect.fn("SessionPrompt.createUserMessage")(function* (
+      input: PromptInput,
+      guard?: PersistGuard,
+    ) {
       const agentName = input.agent
       const ag = agentName ? yield* agents.get(agentName) : yield* agents.defaultInfo()
       if (!ag) {
@@ -1049,18 +1060,19 @@ const layer = Layer.effect(
         })
       }
 
-      yield* sessions.updateMessage(info)
-      for (const part of parts) yield* sessions.updatePart(part)
+      const write = Effect.gen(function* () {
+        yield* sessions.updateMessage(info)
+        for (const part of parts) yield* sessions.updatePart(part)
+      })
+      yield* guard ? guard(write) : write
 
       return { info, parts }
     }, Effect.scoped)
 
-    const prompt: (input: PromptInput) => Effect.Effect<SessionV1.WithParts, Image.Error> = Effect.fn(
-      "SessionPrompt.prompt",
-    )(function* (input: PromptInput) {
+    const promptWith = Effect.fn("SessionPrompt.prompt")(function* (input: PromptInput, guard?: PersistGuard) {
       const session = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
       yield* revert.cleanup(session)
-      const message = yield* createUserMessage(input)
+      const message = yield* createUserMessage(input, guard)
       yield* sessions.touch(input.sessionID)
 
       const permissions: PermissionV1.Rule[] = []
@@ -1075,6 +1087,8 @@ const layer = Layer.effect(
       if (input.noReply === true) return message
       return yield* loop({ sessionID: input.sessionID })
     })
+
+    const prompt: (input: PromptInput) => Effect.Effect<SessionV1.WithParts, Image.Error> = (input) => promptWith(input)
 
     const lastAssistant = Effect.fnUntraced(function* (sessionID: SessionID) {
       const match = yield* sessions.findMessage(sessionID, (m) => m.info.role !== "user").pipe(Effect.orDie)
@@ -1354,8 +1368,19 @@ const layer = Layer.effect(
 
     const scheduled = Effect.fn("SessionPrompt.scheduled")(function* (
       input: PromptInput,
-      admitted: () => Promise<void>,
+      authorize: (persist: () => Promise<void>) => Promise<boolean>,
     ) {
+      const guard: PersistGuard = (write) =>
+        Effect.gen(function* () {
+          const context = yield* Effect.context()
+          const allowed = yield* Effect.promise((signal) =>
+            authorize(() => {
+              signal.throwIfAborted()
+              return Effect.runPromiseWith(context)(write, { signal })
+            }),
+          )
+          if (!allowed) yield* Effect.die(new ScheduledAdmissionDenied({}))
+        }).pipe(Effect.uninterruptible)
       const work = Effect.gen(function* () {
         const previous = yield* sessions
           .findMessage(input.sessionID, (message) => message.info.id === input.messageID)
@@ -1364,21 +1389,26 @@ const layer = Layer.effect(
         // this case; never overwrite a message or repeat provider work here.
         if (Option.isSome(previous)) return yield* Effect.die("Scheduled prompt was already admitted")
         const current = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
-        yield* prompt({
-          ...input,
-          agent: input.agent ?? current.agent,
-          model:
-            input.model ??
-            (current.model ? { providerID: current.model.providerID, modelID: current.model.id } : undefined),
-          variant: input.variant ?? (current.model?.variant === "default" ? undefined : current.model?.variant),
-          noReply: true,
-        }).pipe(Effect.orDie)
-        yield* Effect.promise(admitted)
+        yield* promptWith(
+          {
+            ...input,
+            agent: input.agent ?? current.agent,
+            model:
+              input.model ??
+              (current.model ? { providerID: current.model.providerID, modelID: current.model.id } : undefined),
+            variant: input.variant ?? (current.model?.variant === "default" ? undefined : current.model?.variant),
+            noReply: true,
+          },
+          guard,
+        ).pipe(Effect.orDie)
         return yield* runLoop(input.sessionID)
       })
       return yield* state.startShell(input.sessionID, lastAssistant(input.sessionID), work).pipe(
         Effect.map(Option.some),
         Effect.catchTag("SessionBusyError", () => Effect.succeed(Option.none())),
+        Effect.catchDefect((defect) =>
+          defect instanceof ScheduledAdmissionDenied ? Effect.fail(defect) : Effect.die(defect),
+        ),
       )
     })
 

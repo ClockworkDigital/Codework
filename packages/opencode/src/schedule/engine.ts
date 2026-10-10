@@ -45,16 +45,16 @@ export interface Adapter {
   reconcile(occurrence: Occurrence): Promise<"absent" | "admitted" | "completed" | "uncertain">
   execute(
     occurrence: Occurrence,
-    admitted: () => Promise<void>,
+    authorize: (persist: () => Promise<void>) => Promise<boolean>,
     persist: () => Promise<void>,
-  ): Promise<{ state: "completed" | "attention"; detail?: string; assistantID?: string }>
+  ): Promise<{ state: "completed" | "attention" | "cancelled"; detail?: string; assistantID?: string }>
   notify(occurrence: Occurrence): Promise<void>
 }
 
 const unfinished = (item: Occurrence) => !["completed", "skipped"].includes(item.state)
 
-/** One process owns the file. Admission and execution remain outside the serialized
- * state mutations so a running model can pause its own schedule through the tool. */
+/** One process owns the file. Only the prompt commit and admission accounting are
+ * serialized with management writes; model execution can pause its own schedule. */
 export class Scheduler {
   private data: z.output<typeof State> = { version: 1, schedules: [], occurrences: [] }
   private chain: Promise<unknown> = Promise.resolve()
@@ -308,6 +308,7 @@ export class Scheduler {
       return
     }
     this.active.add(item.id)
+    let committing = false
     try {
       if (!(await this.adapter.authenticate(item))) {
         const request = await this.serialize(async () => {
@@ -331,14 +332,21 @@ export class Scheduler {
         if (request.announce) await this.adapter.notify(item).catch(() => undefined)
         return
       }
-      const admitted = () =>
+      const authorize = (persist: () => Promise<void>) =>
         this.serialize(async () => {
+          if (saved.deleted || !saved.definition.enabled || this.closed) return false
+          if (saved.definition.endsAt && this.now() >= epoch(saved.definition.endsAt)) return false
+          if (saved.definition.maxRuns !== undefined && saved.runs >= saved.definition.maxRuns) return false
+          // Once the write starts, any failure requires reconciliation, never a retry.
+          committing = true
+          await persist()
           if (!item.admitted) {
             item.admitted = true
             saved.runs++
           }
           item.state = "running"
           await this.save()
+          return true
         })
       // Persist the uncertainty boundary before calling external admission. A restart
       // reconciles the exact IDs rather than blindly repeating the provider request.
@@ -351,7 +359,25 @@ export class Scheduler {
         return true
       })
       if (!allowed) return
-      const result = await this.adapter.execute(item, admitted, () => this.serialize(() => this.save()))
+      const result = await this.adapter.execute(item, authorize, () => this.serialize(() => this.save()))
+      if (result.state === "cancelled") {
+        await this.serialize(async () => {
+          const expired = saved.definition.endsAt !== undefined && this.now() >= epoch(saved.definition.endsAt)
+          const exhausted = saved.definition.maxRuns !== undefined && saved.runs >= saved.definition.maxRuns
+          item.state = saved.deleted || expired || exhausted ? "skipped" : "pending"
+          item.detail = saved.deleted
+            ? "Schedule deleted before admission"
+            : expired
+              ? "Schedule ended before admission"
+              : exhausted
+                ? "Run limit reached before admission"
+                : this.closed
+                  ? "Scheduler stopped before admission"
+                  : "Schedule paused before admission"
+          await this.save()
+        })
+        return
+      }
       await this.serialize(async () => {
         Object.assign(item, result)
         await this.save()
@@ -360,8 +386,8 @@ export class Scheduler {
         await this.adapter.notify(item).catch(() => undefined)
     } catch (error) {
       await this.serialize(async () => {
-        // Busy means no admission took place and the next tick can safely try again.
-        item.state = error instanceof Busy ? "pending" : "attention"
+        // Busy is retryable only before the prompt write has started.
+        item.state = error instanceof Busy && !committing && !item.admitted ? "pending" : "attention"
         item.detail = error instanceof Error ? error.message : String(error)
         await this.save()
       })
