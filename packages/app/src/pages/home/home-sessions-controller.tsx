@@ -95,12 +95,14 @@ export function createHomeSessionsController(
     () => homeSessions().queryClient,
   )
   const indexedSessions = createMemo(() =>
-    retainHomeSessions(
-      homeSessions().sessions(sessionLoad.data, sessionEventLoad.data),
-      HOME_SESSION_LIMIT,
-      Date.now(),
-      pinnedIDs(),
-    ),
+    options?.allProjects
+      ? homeSessions().sessions(sessionLoad.data, sessionEventLoad.data)
+      : retainHomeSessions(
+          homeSessions().sessions(sessionLoad.data, sessionEventLoad.data),
+          HOME_SESSION_LIMIT,
+          Date.now(),
+          pinnedIDs(),
+        ),
   )
   const allRecords = createMemo(() =>
     buildHomeSessionRecords({

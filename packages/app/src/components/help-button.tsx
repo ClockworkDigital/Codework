@@ -24,7 +24,7 @@ export function TabsInfoPopup() {
 
   return (
     <Drawer open={drawerOpen()} onOpenChange={setDrawerOpen} side={rtl() ? "left" : "right"}>
-      <Show when={settings.general.shouldDisplayTabsToast()}>
+      <Show when={!settings.general.quietCompanion() && settings.general.shouldDisplayTabsToast()}>
         <div
           class="fixed bottom-5 end-5 z-50 h-[240px] w-[192px] rounded-[8px] bg-v2-background-bg-base p-1 shadow-[var(--v2-elevation-floating)]"
           aria-label={language.t("help.tabs.toast.ariaLabel")}

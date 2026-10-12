@@ -1297,6 +1297,8 @@ export const dict = {
   "common.edit": "Edit",
   "common.loadMore": "Load more",
   "common.showMore": "Show more",
+  "sidebar.session.draft": "Draft",
+  "sidebar.session.discardDraft": "Discard draft",
   "common.key.esc": "ESC",
   "common.key.ctrl": "Ctrl",
   "common.key.alt": "Alt",

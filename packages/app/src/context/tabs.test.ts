@@ -13,6 +13,14 @@ function sessionTab(sessionId: string): SessionTab {
 }
 
 describe("tab migration", () => {
+  test("retains draft recency and accepts drafts saved before recency was recorded", () => {
+    const draft = { type: "draft" as const, draftID: "d1", server, directory: "/tmp" }
+    expect(migrateTabs([draft, { ...draft, draftID: "d2", updated: 123 }], server)).toEqual([
+      draft,
+      { ...draft, draftID: "d2", updated: 123 },
+    ])
+    expect(migrateTabs([{ ...draft, updated: "invalid" }], server)).toEqual([draft])
+  })
   test("drops null and malformed persisted tabs", () => {
     expect(
       migrateTabs([null, sessionTab("a"), { type: "session", server }, { type: "unknown", server }, "invalid"], server),

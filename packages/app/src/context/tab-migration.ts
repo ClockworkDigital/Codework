@@ -16,7 +16,16 @@ export function migrateTabs(value: unknown, fallback: ServerConnection.Key): Tab
       typeof tab.directory === "string" &&
       (tab.worktree === undefined || typeof tab.worktree === "string")
     ) {
-      return [{ type: tab.type, server, draftID: tab.draftID, directory: tab.directory, worktree: tab.worktree }]
+      return [
+        {
+          type: tab.type,
+          server,
+          draftID: tab.draftID,
+          directory: tab.directory,
+          worktree: tab.worktree,
+          ...(typeof tab.updated === "number" && Number.isFinite(tab.updated) ? { updated: tab.updated } : {}),
+        },
+      ]
     }
     return []
   })

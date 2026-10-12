@@ -26,6 +26,7 @@ export type DraftTab = {
   server: ServerConnection.Key
   directory: string
   worktree?: string
+  updated?: number
 }
 
 export type Tab = SessionTab | DraftTab
@@ -148,6 +149,13 @@ export const { use: useTabs, provider: TabsProvider } = createSimpleContext({
 
     const navigateTab = (tab: Tab) => {
       const href = tabHref(tab)
+      if (tab.type === "draft")
+        setStore(
+          produce((tabs) => {
+            const draft = tabs.find((item) => item.type === "draft" && item.draftID === tab.draftID)
+            if (draft?.type === "draft") draft.updated = Date.now()
+          }),
+        )
       setRecentKey(tabKey(tab))
       navigate(href)
     }
@@ -208,7 +216,7 @@ export const { use: useTabs, provider: TabsProvider } = createSimpleContext({
       },
       async newDraft(draft: Omit<DraftTab, "type" | "draftID">, prompt?: string, model?: PromptModel) {
         const draftID = uuid()
-        const tab = { type: "draft" as const, draftID, ...draft }
+        const tab = { type: "draft" as const, draftID, ...draft, updated: Date.now() }
         memory.ensure(tabKey(tab), "prompt", () => createDraftPromptSession(draftID, { prompt, model }))
         await startTransition(() => {
           setStore(
@@ -216,7 +224,7 @@ export const { use: useTabs, provider: TabsProvider } = createSimpleContext({
               tabs.push(tab)
             }),
           )
-          navigate(draftHref(draftID))
+          navigateTab(tab)
         })
         return tab
       },
