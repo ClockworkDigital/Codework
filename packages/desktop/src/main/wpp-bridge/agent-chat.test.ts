@@ -9,6 +9,26 @@ import {
 } from "./agent-chat"
 
 describe("published WPP agent chat", () => {
+  test.each(["loading", "interactive"])(
+    "does not launch before the roster document is complete at %s",
+    (readyState) => {
+      const h = harness(["CM_Astra"])
+      h.state.readyState = readyState
+      h.launch("CM_Astra")
+      h.launch("CM_Astra")
+      expect(h.cards[0].button.clicks).toBe(0)
+      expect(h.chat.clicks).toBe(0)
+      h.state.readyState = "complete"
+      h.launch("CM_Astra")
+      h.state.readyState = readyState
+      h.launch("CM_Astra")
+      expect(h.chat.clicks).toBe(0)
+      h.state.readyState = "complete"
+      h.launch("CM_Astra")
+      expect(h.chat.clicks).toBe(1)
+    },
+  )
+
   test("recognizes the agent chat, excluding the editor and assistant panel", () => {
     expect(isAgentChatUrl("https://open-web-agent-builder-cs.wpp.ai/chat/project/foundational?model=agent")).toBe(true)
     expect(isAgentChatUrl("https://open-web-agent-builder-cs.wpp.ai/agent/project/edit/agent")).toBe(false)
@@ -21,14 +41,14 @@ describe("published WPP agent chat", () => {
     expect(h.cards.map((card) => card.button.clicks)).toEqual([1, 0])
     expect(h.chat.clicks).toBe(0)
     h.state.menuVisible = true
-    expect(h.launch("CM_Sol_High")).toBe("opened")
+    expect(h.launch("CM_Sol_High")).toBe("clicked")
     expect(h.chat.clicks).toBe(1)
   })
 
   test("opens a hover-triggered agent menu before selecting Chat", () => {
     const h = harness(["CM_Sol_High", "CM_Astra"])
     expect(h.launch("CM_Astra")).toBe("waiting")
-    expect(h.launch("CM_Astra")).toBe("opened")
+    expect(h.launch("CM_Astra")).toBe("clicked")
     expect(h.cards.map((card) => card.button.clicks)).toEqual([0, 1])
     expect(h.chat.clicks).toBe(1)
   })
@@ -49,6 +69,103 @@ describe("published WPP agent chat", () => {
 })
 
 describe("dedicated chat startup lifecycle", () => {
+  test("waits for full roster load and asynchronous card/action readiness", async () => {
+    const h = harness(["CM_Astra"])
+    h.state.readyState = "loading"
+    h.state.hoverOpensMenu = false
+    h.cards[0].button.disabled = true
+    h.chat.disabled = true
+    let time = 0
+    const roster = {
+      url: "https://open-web-agent-builder-cs.wpp.ai/project/agents",
+      executeJavaScript: async (source: string) => h.execute(source),
+    }
+    await openAgentChat({ mainFrame: { framesInSubtree: [roster] } }, "CM_Astra", {
+      now: () => time,
+      sleep: async (ms) => {
+        time += ms
+        if (time <= 1000) expect(h.cards[0].button.clicks).toBe(0)
+        if (time <= 1500) expect(h.chat.clicks).toBe(0)
+        if (time >= 500) h.state.readyState = "complete"
+        if (time >= 1000) h.cards[0].button.disabled = false
+        if (time >= 1250) h.state.menuVisible = true
+        if (time >= 1500) h.chat.disabled = false
+        if (h.chat.clicks) {
+          roster.url = "https://open-web-agent-builder-cs.wpp.ai/chat/project/foundational"
+          h.state.selected = "CM_Astra"
+        }
+      },
+      timeoutMs: 3000,
+    })
+    expect(h.cards[0].button.clicks).toBe(1)
+    expect(h.chat.clicks).toBe(1)
+  })
+
+  test("waits for accepted navigation delayed beyond six seconds without another Chat click", async () => {
+    const h = harness(["CM_Astra"])
+    let time = 0
+    const roster = {
+      url: "https://open-web-agent-builder-cs.wpp.ai/project/agents",
+      executeJavaScript: async (source: string) => {
+        const before = h.chat.clicks
+        const result = h.execute(source)
+        if (h.chat.clicks !== before) h.state.menuVisible = false
+        return result
+      },
+    }
+    await openAgentChat({ mainFrame: { framesInSubtree: [roster] } }, "CM_Astra", {
+      now: () => time,
+      sleep: async (ms) => {
+        time += ms
+        if (time >= 6500) {
+          roster.url = "https://open-web-agent-builder-cs.wpp.ai/chat/project/foundational"
+          h.state.selected = time >= 7000 ? "CM_Astra" : "CM_Other"
+        }
+      },
+      timeoutMs: 10000,
+    })
+    expect(h.chat.clicks).toBe(1)
+    expect(h.cards[0].button.clicks).toBe(1)
+    expect(time).toBe(7000)
+  })
+
+  test.each(["unchanged", "temporary-disabled", "unrelated-menu"])(
+    "dispatches a dropped Chat click once and waits the full deadline with %s controls",
+    async (controls) => {
+      const h = harness(["CM_Astra"])
+      let time = 0
+      const roster = {
+        url: "https://open-web-agent-builder-cs.wpp.ai/project/agents?token=secret",
+        executeJavaScript: async (source: string) => {
+          const before = h.chat.clicks
+          const result = h.execute(source)
+          if (h.chat.clicks !== before) h.state.menuVisible = false
+          return result
+        },
+      }
+      const error = await openAgentChat({ mainFrame: { framesInSubtree: [roster] } }, "CM_Astra", {
+        now: () => time,
+        sleep: async (ms) => {
+          time += ms
+          if (controls === "temporary-disabled") h.cards[0].button.disabled = time >= 500 && time < 1000
+          if (controls === "unrelated-menu" && time >= 500) h.state.otherMenuVisible = true
+        },
+        timeoutMs: 12000,
+      }).catch((error: unknown) => error)
+      expect(error).toMatchObject({
+        type: "o1_code_agent_chat_timeout",
+        statusCode: 502,
+        diagnostics: { phase: "chat-navigation", chatClicks: 1 },
+      })
+      expect(h.chat.clicks).toBe(1)
+      expect(h.cards[0].button.clicks).toBe(1)
+      expect(h.otherChat.clicks).toBe(0)
+      expect(time).toBe(12000)
+      expect(JSON.stringify(error)).not.toContain("secret")
+      expect(JSON.stringify(error)).not.toContain("https://")
+    },
+  )
+
   test("launches from the roster and waits for the exact published agent without touching the side panel", async () => {
     const h = harness(["CM_Astra"])
     let time = 0
@@ -71,9 +188,9 @@ describe("dedicated chat startup lifecycle", () => {
     }
     const roster = {
       url: "https://open-web-agent-builder-cs.wpp.ai/project/agents",
-      executeJavaScript: async (_source: string) => {
+      executeJavaScript: async (source: string) => {
         launches += 1
-        const result = h.launch("CM_Astra")
+        const result = h.execute(source)
         h.state.menuVisible = true
         return result
       },
@@ -84,13 +201,13 @@ describe("dedicated chat startup lifecycle", () => {
       sleep: async (ms) => {
         time += ms
         if (h.chat.clicks) contents.mainFrame.framesInSubtree = [sidePanel, chat]
-        if (time >= 1000) selected = true
+        if (time >= 3000) selected = true
       },
-      timeoutMs: 2000,
+      timeoutMs: 4000,
     })
     expect(launches).toBe(2)
     expect(h.chat.clicks).toBe(1)
-    expect(time).toBe(1000)
+    expect(time).toBe(3000)
     expect(agentChatFrame(contents)).toBe(chat)
   })
 
@@ -110,13 +227,15 @@ describe("dedicated chat startup lifecycle", () => {
   })
 
   test.each(["missing", "wrong-agent"])("times out without submitting when %s", async (mode) => {
+    const h = harness(["CM_Astra"])
+    h.state.selected = "CM_Other"
     let time = 0
     const frame = {
       url:
         mode === "missing"
           ? "https://open-web-assistant-cs.wpp.ai/chat"
           : "https://open-web-agent-builder-cs.wpp.ai/chat/project/foundational",
-      executeJavaScript: async () => false,
+      executeJavaScript: async (source: string) => h.execute(source),
     }
     await expect(
       openAgentChat({ mainFrame: { framesInSubtree: [frame] } }, "CM_Astra", {
@@ -126,8 +245,14 @@ describe("dedicated chat startup lifecycle", () => {
         },
         timeoutMs: 1000,
       }),
-    ).rejects.toMatchObject({ type: "o1_code_agent_chat_timeout", statusCode: 502 })
+    ).rejects.toMatchObject({
+      type: "o1_code_agent_chat_timeout",
+      statusCode: 502,
+      diagnostics: { phase: mode === "missing" ? "waiting-roster" : "verifying-agent", chatClicks: 0 },
+    })
     expect(time).toBe(1000)
+    expect(h.chat.clicks).toBe(0)
+    expect(h.cards[0].button.clicks).toBe(0)
   })
 
   test.each(["/chat/project/foundational", "/project/agents"])("rejects ambiguous frames at %s", async (path) => {
@@ -172,7 +297,13 @@ describe("dedicated chat startup lifecycle", () => {
 })
 
 function harness(names: string[]) {
-  const state = { menuVisible: false }
+  const state = {
+    menuVisible: false,
+    otherMenuVisible: false,
+    hoverOpensMenu: true,
+    readyState: "complete",
+    selected: "",
+  }
   const control = (textContent = "") => ({
     textContent,
     clicks: 0,
@@ -183,7 +314,7 @@ function harness(names: string[]) {
       this.clicks += 1
     },
     dispatchEvent(event: { type: string }) {
-      if (event.type === "mouseover") state.menuVisible = true
+      if (event.type === "mouseover" && state.hoverOpensMenu) state.menuVisible = true
       return true
     },
     getBoundingClientRect: () => ({ width: 100, height: 40 }),
@@ -196,14 +327,31 @@ function harness(names: string[]) {
     },
   }))
   const chat = control("Chat")
+  const otherChat = control("Chat")
   const context = vm.createContext({
     document: {
-      querySelectorAll: (selector: string) => (selector === ".agent-card" ? cards : state.menuVisible ? [chat] : []),
+      get readyState() {
+        return state.readyState
+      },
+      querySelectorAll: (selector: string) => {
+        if (selector === ".agent-card") return cards
+        if (selector === "[data-testid='chat-model-button']") {
+          return state.selected ? [{ textContent: state.selected }] : []
+        }
+        return state.otherMenuVisible ? [otherChat] : state.menuVisible ? [chat] : []
+      },
     },
     getComputedStyle: () => ({ display: "block", visibility: "visible" }),
     MouseEvent: class {
       constructor(readonly type: string) {}
     },
   })
-  return { state, cards, chat, launch: (agent: string) => vm.runInContext(agentChatLaunchExpression(agent), context) }
+  return {
+    state,
+    cards,
+    chat,
+    otherChat,
+    execute: (source: string) => vm.runInContext(source, context),
+    launch: (agent: string) => vm.runInContext(agentChatLaunchExpression(agent), context),
+  }
 }

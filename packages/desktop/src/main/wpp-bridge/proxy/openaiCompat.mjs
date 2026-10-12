@@ -363,6 +363,7 @@ export async function handleChatCompletions(request, response, body, { bridge = 
             statusCode: failure.statusCode || 500,
             kind: failure.kind || undefined,
             capture: failure.capture || failure.diagnostics?.capture || undefined,
+            diagnostics: agentChatTimeoutDiagnostics(failure),
             retryCount
           },
           bridgeResult: failure.bridgeResult ? redact(failure.bridgeResult) : undefined
@@ -412,6 +413,7 @@ export async function handleChatCompletions(request, response, body, { bridge = 
             statusCode: failure.statusCode || 500,
             kind: failure.kind || undefined,
             capture: failure.capture || failure.diagnostics?.capture || undefined,
+            diagnostics: agentChatTimeoutDiagnostics(failure),
             retryCount
           },
           bridgeResult: failure.bridgeResult ? redact(failure.bridgeResult) : undefined
@@ -709,6 +711,20 @@ function taskIncompleteError() {
   error.statusCode = 502;
   error.type = "o1_code_task_incomplete";
   return error;
+}
+
+function agentChatTimeoutDiagnostics(failure) {
+  if (failure?.type !== "o1_code_agent_chat_timeout") return undefined;
+  const diagnostics = failure.diagnostics;
+  // Diagnostic objects can contain page payloads. Persist only bounded startup evidence.
+  return {
+    phase: ["waiting-roster", "roster-loading", "roster-ui", "chat-navigation", "verifying-agent"].includes(diagnostics?.phase)
+      ? diagnostics.phase
+      : undefined,
+    chatClicks: Number.isSafeInteger(diagnostics?.chatClicks) && diagnostics.chatClicks >= 0
+      ? diagnostics.chatClicks
+      : undefined,
+  };
 }
 
 // After a turn (and its one fresh replay) has failed, probe whether the real cause is a logged-out
