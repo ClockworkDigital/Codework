@@ -11,16 +11,13 @@ import { MODEL_IDS, RENAMED_MODEL_IDS, resolveModelProfile } from "./modelProfil
 export const O1_CODE_CONTEXT_LIMIT = 250000
 export const O1_CODE_OUTPUT_LIMIT = 128000
 
-// Browser control for OpenCode is delivered as an MCP server, not proxy/extension logic:
-// OpenCode owns the MCP process and its tools, keeping this repo transport-only. The model
-// reaches these tools through OpenCode's normal tool surface — no proxy/extension changes
-// required. Chrome DevTools MCP (vs Playwright) so the agent can debug the live desktop/web
-// surfaces — console, network, real session — rather than drive a clean sandbox.
+// CM Browser is the desktop's normal browser. Chrome DevTools remains an opt-in
+// debugging integration, disabled in both the persistent seed and bundled defaults.
 export const O1_CODE_MCP = {
   "chrome-devtools": {
     type: "local",
     command: ["npx", "-y", "chrome-devtools-mcp@latest"],
-    enabled: true,
+    enabled: false,
   },
   figma: {
     type: "remote",
@@ -137,23 +134,26 @@ export function o1CodeConfigFile() {
 // Self-contained config blob injected into the bundled OpenCode sidecar. A clean install must see
 // the project roster on its very first start even if the persistent opencode.json seed has not
 // completed yet. The disk seed remains useful for external OpenCode sessions and later launches.
-export function o1CodeConfigContent(browserPlugin, aePlugin) {
+export function o1CodeConfigContent(browserPlugin, aePlugin, chromeDevTools = process.env.CM_CHROME_DEVTOOLS === "1") {
   const plugins = [browserPlugin, aePlugin].filter(Boolean)
   return JSON.stringify({
     disabled_providers: ["opencode", "opencode-go"],
     provider: {
       cookiemonster: COOKIE_MONSTER_PROVIDER,
     },
-    mcp: O1_CODE_MCP,
+    // Chrome's persistent setting is user-controlled, rather than overridden by
+    // this high-precedence blob. Fresh installs are off.
+    mcp: {
+      figma: O1_CODE_MCP.figma,
+      ...(chromeDevTools ? { "chrome-devtools": { ...O1_CODE_MCP["chrome-devtools"], enabled: true } } : {}),
+    },
     ...(plugins.length ? { plugin: plugins } : {}),
     // AE defaults belong to its config hook, below user policy, not this high-precedence blob.
     permission: {
       browser_read_state: "allow",
       browser_search_history: "allow",
       browser_open_history: "ask",
-      browser_create_tab: "ask",
-      browser_select_tab: "ask",
-      browser_close_tab: "ask",
+      // Lifecycle defaults come from the plugin config hook, below user policy.
       browser_navigate: "allow",
       browser_click: "allow",
       browser_hover: "allow",
@@ -273,6 +273,8 @@ export async function ensureO1CodeProvider(file = o1CodeConfigFile()) {
     changed = true
   }
   for (const [key, value] of Object.entries(SEED_MCP)) {
+    // An enabled legacy Chrome seed is indistinguishable from a developer opt-in.
+    // Preserve existing definitions and apply defaults only to missing entries.
     if (config.mcp?.[key]) continue
     config.mcp = { ...config.mcp, [key]: value }
     changed = true

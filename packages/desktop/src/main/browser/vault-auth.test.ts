@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, mock, spyOn, test } from "bun:test"
 import childProcess from "node:child_process"
 import fs from "node:fs"
 import { join } from "node:path"
-import { app, BrowserWindow, systemPreferences } from "electron"
+import { app, BrowserWindow, safeStorage, systemPreferences } from "electron"
 import { nativeT } from "../native-translations"
 import { createVaultAccess } from "./vault-access"
 
@@ -133,37 +133,97 @@ if (process.env.CM_VAULT_AUTH_TEST_CHILD !== "1") {
     expect(() => access.require()).toThrow()
   })
 
-  test("unavailable/rejected Touch ID and unsupported platforms fail closed", async () => {
+  test("missing macOS helper and unsupported platforms fail closed", async () => {
     Object.defineProperty(process, "platform", { value: "darwin" })
-    const available = spyOn(systemPreferences, "canPromptTouchID").mockReturnValue(false)
+    spyOn(systemPreferences, "canPromptTouchID").mockReturnValue(false)
     const prompt = spyOn(systemPreferences, "promptTouchID").mockRejectedValue(new Error("cancelled"))
     const access = createVaultAccess(vaultAuthentication.verify)
     const win = new BrowserWindow()
+    exists.mockReturnValue(false)
+    await expect(access.unlock(win)).rejects.toThrow("OS authentication helper unavailable")
+    expect(prompt).not.toHaveBeenCalled()
+    expect(access.status()).toBe("locked")
+    Object.defineProperty(process, "platform", { value: "freebsd" })
     await expect(access.unlock(win)).rejects.toThrow("OS authentication unavailable")
     expect(prompt).not.toHaveBeenCalled()
-    available.mockReturnValue(true)
-    await expect(access.unlock(win)).rejects.toThrow("cancelled")
-    expect(prompt).toHaveBeenCalledWith(nativeT("desktop.browser.unlockReason"))
-    expect(access.status()).toBe("locked")
-    Object.defineProperty(process, "platform", { value: "linux" })
-    await expect(access.unlock(win)).rejects.toThrow("OS authentication unavailable")
-    expect(prompt).toHaveBeenCalledTimes(1)
     expect(spawn).not.toHaveBeenCalled()
     expect(() => access.require()).toThrow()
   })
 
-  test("successful Touch ID unlocks through the production adapter", async () => {
+  test.each([false, true])(
+    "macOS uses device-owner authentication without a biometric-only prompt (packaged: %s)",
+    async (isPackaged) => {
+      Object.defineProperty(process, "platform", { value: "darwin" })
+      spyOn(systemPreferences, "canPromptTouchID").mockReturnValue(true)
+      const prompt = spyOn(systemPreferences, "promptTouchID").mockResolvedValue(undefined)
+      app.isPackaged = isPackaged
+      const access = createVaultAccess(vaultAuthentication.verify)
+      try {
+        await access.unlock(new BrowserWindow())
+        expect(access.status()).toBe("unlocked")
+        expect(() => access.require()).not.toThrow()
+        expect(spawn).toHaveBeenCalledWith(
+          join(
+            isPackaged ? "packaged resources" : join("development app", "resources"),
+            "vault-auth",
+            `macos-auth-${process.arch}`,
+          ),
+          [nativeT("desktop.browser.unlockReason")],
+          { windowsHide: true, timeout: 120_000, maxBuffer: 1024 },
+          expect.any(Function),
+        )
+        expect(prompt).not.toHaveBeenCalled()
+      } finally {
+        access.lock()
+      }
+    },
+  )
+
+  test("macOS cancellation stays locked without trying another authentication method", async () => {
     Object.defineProperty(process, "platform", { value: "darwin" })
-    spyOn(systemPreferences, "canPromptTouchID").mockReturnValue(true)
-    spyOn(systemPreferences, "promptTouchID").mockResolvedValue(undefined)
+    const prompt = spyOn(systemPreferences, "promptTouchID").mockResolvedValue(undefined)
+    spawn.mockImplementation((_file, _args, _options, callback) => {
+      callback(new Error("cancelled"), "", "")
+      return new childProcess.ChildProcess()
+    })
     const access = createVaultAccess(vaultAuthentication.verify)
-    try {
-      await access.unlock(new BrowserWindow())
-      expect(access.status()).toBe("unlocked")
-      expect(() => access.require()).not.toThrow()
-      expect(spawn).not.toHaveBeenCalled()
-    } finally {
-      access.lock()
-    }
+    await expect(access.unlock(new BrowserWindow())).rejects.toThrow("OS authentication was cancelled or unavailable")
+    expect(access.status()).toBe("locked")
+    expect(spawn).toHaveBeenCalledTimes(1)
+    expect(prompt).not.toHaveBeenCalled()
+  })
+
+  test.each(["basic_text", "unknown"])("Linux rejects insecure keyring backend %s", async (backend) => {
+    Object.defineProperty(process, "platform", { value: "linux" })
+    spyOn(safeStorage, "isEncryptionAvailable").mockReturnValue(true)
+    spyOn(safeStorage, "getSelectedStorageBackend").mockReturnValue(backend)
+    await expect(vaultAuthentication.verify(new BrowserWindow())).rejects.toThrow("Secure desktop keyring unavailable")
+    expect(spawn).not.toHaveBeenCalled()
+  })
+
+  test("Linux unlock uses its secure desktop keyring and clears the encrypted challenge", async () => {
+    Object.defineProperty(process, "platform", { value: "linux" })
+    spyOn(safeStorage, "isEncryptionAvailable").mockReturnValue(true)
+    spyOn(safeStorage, "getSelectedStorageBackend").mockReturnValue("gnome_libsecret")
+    const encrypt = mock((value: string) => Buffer.from(value))
+    safeStorage.encryptString = encrypt
+    safeStorage.decryptString = mock((value: Buffer) => value.toString())
+    const access = createVaultAccess(vaultAuthentication.verify)
+    await access.unlock(new BrowserWindow())
+    expect(access.status()).toBe("unlocked")
+    expect(encrypt.mock.results[0].value.every((byte: number) => byte === 0)).toBe(true)
+    expect(spawn).not.toHaveBeenCalled()
+    access.lock()
+  })
+
+  test("a failed Linux keyring round trip leaves the vault locked", async () => {
+    Object.defineProperty(process, "platform", { value: "linux" })
+    spyOn(safeStorage, "isEncryptionAvailable").mockReturnValue(true)
+    spyOn(safeStorage, "getSelectedStorageBackend").mockReturnValue("gnome_libsecret")
+    safeStorage.encryptString = mock(() => Buffer.from("fixture"))
+    safeStorage.decryptString = mock(() => "wrong")
+    const access = createVaultAccess(vaultAuthentication.verify)
+    await expect(access.unlock(new BrowserWindow())).rejects.toThrow("Desktop keyring unlock failed")
+    expect(access.status()).toBe("locked")
   })
 }

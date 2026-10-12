@@ -4,13 +4,11 @@ import { createEffect, createMemo, For, on, onCleanup, Show } from "solid-js"
 import { useLocation, useNavigate } from "@solidjs/router"
 import { useLanguage } from "@/context/language"
 import { useSettings } from "@/context/settings"
-import { useLayout } from "@/context/layout"
-import { useCommand } from "@/context/command"
 import { ServerConnection, useServer } from "@/context/server"
 import { base64Encode } from "@opencode-ai/core/util/encode"
 import { decode64 } from "@/utils/base64"
-import { tabKey, useTabs } from "@/context/tabs"
 import { pathKey } from "@/utils/path-key"
+import { tabKey, useTabs } from "@/context/tabs"
 import { legacySessionHref } from "@/utils/session-route"
 import { Persist, persisted } from "@/utils/persist"
 import { createHomeController } from "@/pages/home/home-controller"
@@ -23,17 +21,22 @@ import { useDirectoryPicker } from "./directory-picker"
 import { useSettingsDialog } from "./settings-dialog"
 import { Cm3Icon } from "./cm3-icon"
 import { WppAuthControl } from "./wpp-auth-control"
+import { Icon } from "@opencode-ai/ui/v2/icon"
+import { useTheme } from "@opencode-ai/ui/theme"
+import cookieMonsterBannerLight from "@/assets/cookie-monster-banner-light.svg"
+import cookieMonsterBannerDark from "@/assets/cookie-monster-banner-dark.svg"
+import { useScheduling } from "./scheduling-panel"
 
 export function Cm3Shell() {
+  const scheduling = useScheduling()
   const home = createHomeController()
   const sessions = createHomeSessionsController(home, { registerPalette: false, allProjects: true })
   const language = useLanguage()
+  const theme = useTheme()
   const settings = useSettings()
   const server = useServer()
   const location = useLocation()
   const tabs = useTabs()
-  const layout = useLayout()
-  const command = useCommand()
   const navigate = useNavigate()
   const pickDirectory = useDirectoryPicker()
   const openSettings = useSettingsDialog()
@@ -97,6 +100,18 @@ export function Cm3Shell() {
       .filter((record) => `${record.session.title} ${record.projectName}`.toLowerCase().includes(value))
   })
   const records = createMemo(() => (state.search.trim() ? searchRecords() : sessions.data.records()))
+  const pinnedRecords = createMemo(() => searchRecords().filter((record) => sessions.session.isPinned(record.session)))
+  const recentRecords = createMemo(() => records().filter((record) => !sessions.session.isPinned(record.session)))
+  const projectSessions = createMemo(() => {
+    const grouped = new Map<string, HomeSessionRecord[]>()
+    searchRecords().forEach((record) => {
+      const key = pathKey(record.project.worktree)
+      const group = grouped.get(key)
+      if (group) group.push(record)
+      if (!group) grouped.set(key, [record])
+    })
+    return grouped
+  })
   const openSession = (record: HomeSessionRecord, background = false) => {
     if (settings.general.newLayoutDesigns()) {
       if (!background) closeNavigation()
@@ -167,39 +182,82 @@ export function Cm3Shell() {
     }
     openTask(conn, project.worktree)
   }
-
-  const task = (record: HomeSessionRecord) => (
-    <button
-      class="cm3-sidebar-task"
-      type="button"
-      data-active={location.pathname.endsWith(`/session/${record.session.id}`)}
-      onKeyDown={navigateSearch}
-      onMouseDown={(event) => {
-        if (event.button === 1) event.preventDefault()
-      }}
-      onClick={(event) => openSession(record, backgroundOpen(event))}
-      onAuxClick={(event) => {
-        if (!backgroundOpen(event)) return
-        event.preventDefault()
-        openSession(record, true)
-      }}
-    >
-      <div class="size-4 shrink-0" aria-hidden="true">
-        <SessionTabAvatar
-          project={record.project}
-          directory={record.session.directory}
-          sessionId={record.session.id}
-          server={sessions.session.server()}
-          revealProjectOnHover={false}
+  const renderSession = (record: HomeSessionRecord, recent = false) => (
+    <div class="cm3-sidebar-session" data-session-id={record.session.id} role="group" aria-label={record.session.title}>
+      <button
+        class="cm3-sidebar-task"
+        data-action={recent ? "recent-session" : "project-session"}
+        type="button"
+        data-active={location.pathname.endsWith(`/session/${record.session.id}`)}
+        onKeyDown={navigateSearch}
+        onMouseDown={(event) => {
+          if (event.button === 1) event.preventDefault()
+        }}
+        onClick={(event) => openSession(record, backgroundOpen(event))}
+        onAuxClick={(event) => {
+          if (!backgroundOpen(event)) return
+          event.preventDefault()
+          openSession(record, true)
+        }}
+      >
+        <div class="size-4 shrink-0" aria-hidden="true">
+          <SessionTabAvatar
+            project={record.project}
+            directory={record.session.directory}
+            sessionId={record.session.id}
+            server={sessions.session.server()}
+            revealProjectOnHover={false}
+          />
+        </div>
+        <span class="cm3-sidebar-task-copy">
+          <span dir="auto">{record.session.title}</span>
+          <Show when={recent}>
+            <span class="cm3-sidebar-task-project" dir="auto">
+              {record.projectName}
+            </span>
+          </Show>
+        </span>
+      </button>
+      <button
+        class="cm3-sidebar-session-pin"
+        type="button"
+        disabled={!sessions.session.pinsReady()}
+        aria-pressed={sessions.session.isPinned(record.session)}
+        aria-label={language.t(
+          sessions.session.isPinned(record.session) ? "sidebar.session.unpin" : "sidebar.session.pin",
+        )}
+        title={language.t(sessions.session.isPinned(record.session) ? "sidebar.session.unpin" : "sidebar.session.pin")}
+        onClick={(event) => {
+          const selector = event.currentTarget.closest(".cm3-sidebar-project-sessions")
+            ? ".cm3-sidebar-project-sessions"
+            : "section >"
+          sessions.session.pin(record.session, !sessions.session.isPinned(record.session))
+          queueMicrotask(() =>
+            refs.nav
+              ?.querySelector<HTMLButtonElement>(
+                `${selector} [data-session-id="${CSS.escape(record.session.id)}"] .cm3-sidebar-session-pin`,
+              )
+              ?.focus({ preventScroll: true }),
+          )
+        }}
+      >
+        <Icon
+          name={sessions.session.isPinned(record.session) ? "push-pin-fill" : "push-pin"}
+          style={{ width: "12.8px", height: "12.8px" }}
         />
-      </div>
-      <span class="cm3-sidebar-task-copy">
-        <span>{record.session.title}</span>
-        <Show when={sessions.session.showProjectName()}>
-          <span class="cm3-sidebar-task-project">{record.projectName}</span>
-        </Show>
-      </span>
-    </button>
+      </button>
+      <Show when={settings.general.newLayoutDesigns()}>
+        <button
+          class="cm3-sidebar-session-archive"
+          type="button"
+          aria-label={language.t("common.archive")}
+          title={language.t("common.archive")}
+          onClick={() => void sessions.session.archive(record.session)}
+        >
+          <Icon name="archive" size="small" />
+        </button>
+      </Show>
+    </div>
   )
 
   return (
@@ -236,7 +294,6 @@ export function Cm3Shell() {
         data-open={state.navigation}
         data-collapsed={sidebar.collapsed}
         aria-label={language.t("sidebar.nav.projectsAndSessions")}
-        // The tab strip is portaled here, so delegated events follow the titlebar's owner instead of this aside.
         on:keydown={(event) => {
           if (event.defaultPrevented || event.isComposing) return
           if (event.key === "Escape") {
@@ -265,9 +322,13 @@ export function Cm3Shell() {
         }}
       >
         <div class="cm3-sidebar-brand">
-          <span role="img" aria-label={language.t("quietCompanion.title")}>
-            <Cm3Icon name="cookie" size={24} />
-          </span>
+          <img
+            class="cm3-sidebar-logo"
+            src={theme.mode() === "dark" ? cookieMonsterBannerDark : cookieMonsterBannerLight}
+            alt={language.t("quietCompanion.brand")}
+            width={720}
+            height={180}
+          />
           <button
             class="cm3-sidebar-collapse"
             type="button"
@@ -299,9 +360,12 @@ export function Cm3Shell() {
         <button
           class="cm3-sidebar-action"
           type="button"
-          data-active={location.pathname === "/scheduled"}
-          aria-current={location.pathname === "/scheduled" ? "page" : undefined}
-          onClick={() => navigate("/scheduled")}
+          aria-pressed={scheduling.isOpen()}
+          data-action="scheduling"
+          onClick={() => {
+            scheduling.open()
+            setState("navigation", false)
+          }}
         >
           <Cm3Icon name="clock" />
           {language.t("schedules.title")}
@@ -319,50 +383,23 @@ export function Cm3Shell() {
           />
         </label>
         <div class="cm3-sidebar-scroll">
-          <Show when={settings.general.newLayoutDesigns()}>
-            <p class="cm3-sidebar-section">{language.t("quietCompanion.openTabs")}</p>
-            <div
-              class="cm3-sidebar-tabs"
-              ref={(element) => {
-                layout.tabStrip.setMount(element)
-                onCleanup(() => layout.tabStrip.setMount(undefined))
-              }}
-            />
-            <button class="cm3-sidebar-action" type="button" onClick={() => command.trigger("tab.reopenClosed")}>
-              <Cm3Icon name="chats" />
-              {language.t("command.tab.reopenClosed")}
-            </button>
-          </Show>
-          <p class="cm3-sidebar-section">{language.t("sidebar.project.recentSessions")}</p>
-          <Show when={!sessions.data.loading()} fallback={<p role="status">{language.t("quietCompanion.loading")}</p>}>
-            <For each={records()}>{task}</For>
-            <Show when={sessions.data.error()}>
-              <p role="alert">{language.t("common.requestFailed")}</p>
-              <button type="button" onClick={() => void sessions.data.retry()}>
-                {language.t("browser.action.reload")}
-              </button>
-            </Show>
-            <Show when={!records().length && !sessions.data.error()}>
-              <p role="status">{language.t("quietCompanion.noThreads")}</p>
-            </Show>
-          </Show>
-          <p class="cm3-sidebar-section">{language.t("quietCompanion.projects")}</p>
           <HomeProjects
             projects={projects}
             sidebar
-            renderProjectSessions={(project) => (
-              <div class="cm3-sidebar-project-sessions pl-6">
-                <For
-                  each={searchRecords().filter(
-                    (record) => pathKey(record.project.worktree) === pathKey(project.worktree),
-                  )}
-                >
-                  {task}
-                </For>
-              </div>
-            )}
             onOpenProjectNewSession={openTask}
-            onSelectProject={home.project.select}
+            onSelectProject={(conn, directory) => {
+              home.project.select(conn, directory)
+              closeNavigation()
+            }}
+            renderProjectSessions={(conn, project) => (
+              <Show when={ServerConnection.key(conn) === sessions.session.server()}>
+                <div class="cm3-sidebar-project-sessions">
+                  <For each={projectSessions().get(pathKey(project.worktree)) ?? []}>
+                    {(record) => renderSession(record)}
+                  </For>
+                </div>
+              </Show>
+            )}
           />
           <button
             class="cm3-sidebar-action"
@@ -384,6 +421,30 @@ export function Cm3Shell() {
             <Cm3Icon name="plus" />
             {language.t("command.project.open")}
           </button>
+          <Show when={pinnedRecords().length > 0}>
+            <section aria-label={language.t("sidebar.session.pinned")}>
+              <p class="cm3-sidebar-section">{language.t("sidebar.session.pinned")}</p>
+              <For each={pinnedRecords()}>{(record) => renderSession(record, true)}</For>
+            </section>
+          </Show>
+          <section aria-label={language.t("sidebar.project.recentSessions")}>
+            <p class="cm3-sidebar-section">{language.t("sidebar.project.recentSessions")}</p>
+            <For each={recentRecords()}>{(record) => renderSession(record, true)}</For>
+            <Show
+              when={!sessions.data.loading()}
+              fallback={<p role="status">{language.t("quietCompanion.loading")}</p>}
+            >
+              <Show when={sessions.data.error()}>
+                <p role="alert">{language.t("common.requestFailed")}</p>
+                <button type="button" onClick={() => void sessions.data.retry()}>
+                  {language.t("browser.action.reload")}
+                </button>
+              </Show>
+              <Show when={!records().length && !pinnedRecords().length && !sessions.data.error()}>
+                <p role="status">{language.t("quietCompanion.noThreads")}</p>
+              </Show>
+            </Show>
+          </section>
         </div>
         <div class="cm3-sidebar-footer">
           <WppAuthControl />

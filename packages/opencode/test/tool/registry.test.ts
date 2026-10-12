@@ -100,6 +100,19 @@ afterEach(async () => {
 })
 
 describe("tool.registry", () => {
+  it.instance("search descriptions preserve direct work for workers and unavailable Task", () =>
+    Effect.gen(function* () {
+      const registry = yield* ToolRegistry.Service
+      const tools = yield* registry.all()
+      for (const id of ["glob", "grep"]) {
+        const description = tools.find((tool) => tool.id === id)?.description ?? ""
+        expect(description).toMatch(/default to Task when available with a suitable permitted agent/)
+        expect(description).toContain("unless the user opts out")
+        expect(description).toMatch(/delegated worker or Task is unavailable or unsuitable, search directly/)
+      }
+    }),
+  )
+
   it.instance("does not expose task_status", () =>
     Effect.gen(function* () {
       const registry = yield* ToolRegistry.Service
@@ -117,23 +130,51 @@ describe("tool.registry", () => {
       expect(ids).not.toContain("execute")
     }),
   )
+  ;["CM_GPT-5.6 Sol - High", "CM_GPT-5.6-Sol_High", "CM_GPT6_Sol_High", "CM_GPT6_Astra_Max", "CM_GPT6.1_Sol"].forEach(
+    (modelID) => {
+      it.instance(`uses apply_patch for CookieMonster ${modelID}`, () =>
+        Effect.gen(function* () {
+          const registry = yield* ToolRegistry.Service
+          const agents = yield* Agent.Service
+          const tools = yield* registry.tools({
+            providerID: ProviderV2.ID.make("cookiemonster"),
+            modelID: ModelV2.ID.make(modelID),
+            agent: yield* agents.defaultInfo(),
+          })
+          const ids = tools.map((tool) => tool.id)
 
-  it.instance("uses apply_patch for CookieMonster GPT aliases", () =>
-    Effect.gen(function* () {
-      const registry = yield* ToolRegistry.Service
-      const agents = yield* Agent.Service
-      const tools = yield* registry.tools({
-        providerID: ProviderV2.ID.make("cookiemonster"),
-        modelID: ModelV2.ID.make("CM_GPT-5.6 Sol - High"),
-        agent: yield* agents.defaultInfo(),
-      })
-      const ids = tools.map((tool) => tool.id)
-
-      expect(ids).toContain("apply_patch")
-      expect(ids).not.toContain("edit")
-      expect(ids).not.toContain("write")
-    }),
+          expect(ids).toContain("apply_patch")
+          expect(ids).not.toContain("edit")
+          expect(ids).not.toContain("write")
+        }),
+      )
+    },
   )
+  ;[
+    { providerID: "opencode", modelID: "gpt-5.6", patch: true },
+    { providerID: "opencode", modelID: "gpt6", patch: false },
+    { providerID: "cookiemonster", modelID: "CM_Opus5.5-High", patch: false },
+    { providerID: "cookiemonster", modelID: "CM_Gemini-3.7-Flash_High", patch: false },
+    { providerID: "cookiemonster", modelID: "CM_GPT-4", patch: false },
+    { providerID: "cookiemonster", modelID: "CM_GPT-oss", patch: false },
+  ].forEach((model) => {
+    it.instance(`preserves editing tools for ${model.providerID}/${model.modelID}`, () =>
+      Effect.gen(function* () {
+        const registry = yield* ToolRegistry.Service
+        const agents = yield* Agent.Service
+        const tools = yield* registry.tools({
+          providerID: ProviderV2.ID.make(model.providerID),
+          modelID: ModelV2.ID.make(model.modelID),
+          agent: yield* agents.defaultInfo(),
+        })
+        const ids = tools.map((tool) => tool.id)
+
+        expect(ids.includes("apply_patch")).toBe(model.patch)
+        expect(ids.includes("edit")).toBe(!model.patch)
+        expect(ids.includes("write")).toBe(!model.patch)
+      }),
+    )
+  })
 
   withCodeMode.instance("exposes execute when code mode is enabled", () =>
     Effect.gen(function* () {

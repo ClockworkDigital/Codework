@@ -4,6 +4,7 @@ import {
   ACCEPTED_FILE_EXTENSIONS,
   AppBaseProviders,
   AppInterface,
+  cmLoading,
   loadLocaleDict,
   normalizeLocale,
   type Locale,
@@ -24,6 +25,7 @@ import { createEffect, createMemo, createResource, createSignal, onCleanup, Show
 import { render } from "solid-js/web"
 import { createStore } from "solid-js/store"
 import pkg from "../../package.json"
+import cookieMonsterIcon from "../../icons/prod/icon.png?inline"
 import { t } from "./i18n"
 import { initializationData } from "./initialization"
 import { DesktopFirstLaunchOnboarding } from "./onboarding"
@@ -33,6 +35,7 @@ import { availableStartupServer, readyWslConnections } from "./wsl/connections"
 import "./styles.css"
 import { CookieLoader } from "@opencode-ai/ui/cookie-loader"
 import { useTheme } from "@opencode-ai/ui/theme/context"
+import { LoadingAnimationProvider } from "@opencode-ai/ui/loading"
 
 const root = document.getElementById("root")
 if (import.meta.env.DEV && !(root instanceof HTMLElement)) {
@@ -271,7 +274,7 @@ const createPlatform = (windowState: DesktopWindowState): Platform => {
 
       const notification = new Notification(title, {
         body: description ?? "",
-        icon: "https://opencode.ai/favicon-96x96-v3.png",
+        icon: cookieMonsterIcon,
       })
       notification.onclick = () => {
         void window.api.showWindow()
@@ -340,7 +343,12 @@ listenForDeepLinks()
 function LoadingSplash() {
   return (
     <div class="h-dvh w-screen flex flex-col items-center justify-center bg-background-base">
-      <CookieLoader class="text-icon-base" />
+      <Show
+        when={import.meta.env.VITE_CM_BRAND}
+        fallback={<img src={cookieMonsterIcon} alt="" class="w-20 h-20 animate-pulse" />}
+      >
+        <CookieLoader class="text-icon-base" />
+      </Show>
     </div>
   )
 }
@@ -459,8 +467,10 @@ render(() => {
   })
 
   return (
-    <Show when={windowState.latest} fallback={<LoadingSplash />} keyed>
-      {(state) => <DesktopRoot windowState={state} />}
-    </Show>
+    <LoadingAnimationProvider value={import.meta.env.VITE_CM_BRAND ? cmLoading : undefined}>
+      <Show when={windowState.latest} fallback={<LoadingSplash />} keyed>
+        {(state) => <DesktopRoot windowState={state} />}
+      </Show>
+    </LoadingAnimationProvider>
   )
 }, root!)

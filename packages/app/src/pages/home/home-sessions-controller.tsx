@@ -13,7 +13,7 @@ import {
 } from "@/context/global-sync/home-session-index"
 import type { LocalProject } from "@/context/layout"
 import { useLanguage } from "@/context/language"
-import { ServerConnection } from "@/context/server"
+import { ServerConnection, useServer } from "@/context/server"
 import { sessionHasOpenTab, useTabs } from "@/context/tabs"
 import { compareSessionTime, displayName, errorMessage, projectForSession } from "@/pages/layout/helpers"
 import { useSessionTabAvatarState } from "@/pages/layout/project-avatar-state"
@@ -46,47 +46,60 @@ export function createHomeSessionsController(
   const command = useCommand()
   const dialog = useDialog()
   const language = useLanguage()
+  const server = useServer()
+  const pinnedIDs = createMemo(() => {
+    const conn = home.server.focused()
+    return new Set(conn ? server.sessionPins.list(ServerConnection.key(conn)) : [])
+  })
   const projectDirectories = createMemo(() => {
-    const project = home.project.selected()
-    if (!project || options?.allProjects) return home.project.list().flatMap(directories)
+    const project = options?.allProjects ? undefined : home.project.selected()
+    if (!project) return home.project.list().flatMap(directories)
     return directories(project)
   })
   const projectByID = createMemo(
     () => new Map(home.project.list().flatMap((project) => (project.id ? [[project.id, project] as const] : []))),
   )
   const homeSessions = () => home.server.focusedSync().homeSessions
-  const sessionEventLoad = useQuery(() => ({
-    queryKey: homeSessions().eventsKey,
-    queryFn: async (): Promise<HomeSessionEvents> => ({ sequence: 0, entries: [] }),
-    initialData: { sequence: 0, entries: [] } satisfies HomeSessionEvents,
-    enabled: false,
-  }))
-  const sessionLoad = useQuery(() => ({
-    queryKey: homeSessions().indexKey,
-    enabled: !!home.server.focusedContext(),
-    queryFn: async ({ signal }) => {
-      const ctx = home.server.focusedContext()
-      if (!ctx) return { sessions: [], eventSequence: 0 }
-      const cache = homeSessions()
-      const eventSequence = cache.eventSequence()
-      const index = await loadHomeSessionIndex(
-        (input, options) => ctx.sdk.client.v2.session.list(input, options),
-        eventSequence,
-        signal,
-      )
-      cache.complete(eventSequence)
-      return index
-    },
-    retry: false,
-    staleTime: 30_000,
-    refetchOnMount: true,
-    refetchOnReconnect: true,
-  }))
+  // The visual shell has its own query provider; live events belong to the server sync cache.
+  const sessionEventLoad = useQuery(
+    () => ({
+      queryKey: homeSessions().eventsKey,
+      queryFn: async (): Promise<HomeSessionEvents> => ({ sequence: 0, entries: [] }),
+      initialData: { sequence: 0, entries: [] } satisfies HomeSessionEvents,
+      enabled: false,
+    }),
+    () => homeSessions().queryClient,
+  )
+  const sessionLoad = useQuery(
+    () => ({
+      queryKey: homeSessions().indexKey,
+      enabled: !!home.server.focusedContext(),
+      queryFn: async ({ signal }) => {
+        const ctx = home.server.focusedContext()
+        if (!ctx) return { sessions: [], eventSequence: 0 }
+        const cache = homeSessions()
+        const eventSequence = cache.eventSequence()
+        const index = await loadHomeSessionIndex(
+          (input, options) => ctx.sdk.client.v2.session.list(input, options),
+          eventSequence,
+          signal,
+        )
+        cache.complete(eventSequence)
+        return index
+      },
+      retry: false,
+      staleTime: 30_000,
+      refetchOnMount: true,
+      refetchOnReconnect: true,
+    }),
+    () => homeSessions().queryClient,
+  )
   const indexedSessions = createMemo(() =>
     retainHomeSessions(
       homeSessions().sessions(sessionLoad.data, sessionEventLoad.data),
       HOME_SESSION_LIMIT,
       Date.now(),
+      pinnedIDs(),
     ),
   )
   const allRecords = createMemo(() =>
@@ -180,6 +193,13 @@ export function createHomeSessionsController(
       searchRecords: allRecords,
     },
     session: {
+      pinsReady: server.ready,
+      isPinned: (session: Session) => pinnedIDs().has(session.id),
+      pin: (session: Session, pinned: boolean) => {
+        const conn = home.server.focused()
+        if (!conn) return
+        server.sessionPins.set(ServerConnection.key(conn), session.id, pinned)
+      },
       showProjectName: () => !home.project.selected(),
       server: () => home.selection.value().server,
       canCreate: () => !!home.project.newSession(),
@@ -226,6 +246,7 @@ export function createHomeSessionsController(
               time: { archived: Date.now() },
             }),
           remove: () => {
+            server.sessionPins.set(ServerConnection.key(conn), session.id, false)
             setStore(
               produce((draft) => {
                 const match = Binary.search(draft.session, session.id, (item) => item.id)

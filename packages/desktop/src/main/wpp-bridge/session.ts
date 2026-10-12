@@ -9,6 +9,7 @@ import { BrowserWindow, session, type Session } from "electron"
 import { WPP_COOKIE_MONSTER_PROJECT_URL } from "./proxy/wppProject.mjs"
 import { createWppAuthState, wppAuthProbeScript } from "./auth-state"
 import { classifyWppAuthState } from "./worker-startup"
+import { attachWppLoginControls } from "./login-controls"
 
 export const WPP_PARTITION = "persist:wpp"
 
@@ -96,6 +97,10 @@ export function createWorkerWindow({ show = false } = {}): BrowserWindow {
     webPreferences: {
       session: current,
       backgroundThrottling: false,
+      // Hidden native windows can lose their compositor frame clock despite disabling
+      // background throttling. Give worker renderers a synthetic clock without changing
+      // the app's display/GPU frame limits or briefly showing the worker window.
+      additionalArguments: show ? [] : ["--disable-frame-rate-limit"],
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
@@ -112,6 +117,7 @@ export function openWppLogin(url = WPP_COOKIE_MONSTER_PROJECT_URL) {
     return loginWindow
   }
   const win = createWorkerWindow({ show: true })
+  attachWppLoginControls(win)
   win.webContents.setWindowOpenHandler(() => ({
     action: "allow",
     overrideBrowserWindowOptions: { webPreferences: { partition: WPP_PARTITION } },

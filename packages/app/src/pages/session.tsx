@@ -55,12 +55,15 @@ import { SDKProvider, useSDK } from "@/context/sdk"
 import { useServerSDK } from "@/context/server-sdk"
 import { ServerConnection, serverName, useServer } from "@/context/server"
 import { useSettings } from "@/context/settings"
+import { useOptionalScheduling } from "@/components/scheduling-panel"
 import { useSync } from "@/context/sync"
 import { useTabs } from "@/context/tabs"
 import { TerminalProvider, useTerminal } from "@/context/terminal"
 import { PromptInput } from "@/components/prompt-input"
+import { SessionContextUsage } from "@/components/session-context-usage"
 import { Cm3Icon } from "@/components/cm3-icon"
 import { Cm3Starters } from "@/components/cm3-starters"
+import { SessionSidePanelToggle } from "@/components/session/session-header"
 import { PromptInputV2Composer, usePromptInputV2Controller } from "@/components/prompt-input-v2"
 import { useSettingsCommand } from "@/components/settings-dialog"
 import { setCursorPosition } from "@/components/prompt-input/editor-dom"
@@ -370,6 +373,8 @@ export default function Page() {
   const sdk = useSDK()
   const serverSDK = useServerSDK()
   const settings = useSettings()
+  const scheduling = useOptionalScheduling()
+  const schedulingOpen = () => settings.general.newLayoutDesigns() && !!scheduling?.isOpen()
   const platform = usePlatform()
   const prompt = usePrompt()
   const comments = useComments()
@@ -396,6 +401,7 @@ export default function Page() {
   })
 
   const [ui, setUi] = createStore({
+    panelTabsMount: undefined as HTMLDivElement | undefined,
     pendingMessage: undefined as string | undefined,
     reviewSnap: false,
     scrollGesture: 0,
@@ -505,6 +511,7 @@ export default function Page() {
     }),
   )
   const sessionPanelWidth = createMemo(() => {
+    if (schedulingOpen()) return "100%"
     if (!desktopSidePanelOpen()) return "100%"
     if (desktopSessionResizeOpen()) return `${sessionPanelResizedWidth()}px`
     return `calc(100% - ${layout.fileTree.width()}px)`
@@ -2193,6 +2200,12 @@ export default function Page() {
                   fallback={
                     <PromptInput
                       controls={inputController()}
+                      beforeModel={
+                        <SessionContextUsage
+                          placement="top"
+                          buttonAppearance={settings.general.newLayoutDesigns() ? "v2" : "default"}
+                        />
+                      }
                       ref={(el) => {
                         inputRef = el
                       }}
@@ -2242,7 +2255,13 @@ export default function Page() {
                         setFollowup("paused", id, true)
                       },
                     })
-                    return <PromptInputV2Composer controller={controller} borderUnderlay />
+                    return (
+                      <PromptInputV2Composer
+                        controller={controller}
+                        borderUnderlay
+                        beforeModel={<SessionContextUsage placement="top" buttonAppearance="v2" />}
+                      />
+                    )
                   }}
                 </Show>
               }
@@ -2261,11 +2280,28 @@ export default function Page() {
     <SessionRouteFrame thread={!!params.id}>
       <SessionHeader />
       <Show when={settings.general.quietCompanion() && params.id}>
-        <header data-cm3-region="header" class="cm3-thread-header">
+        <header data-cm3-region="header" class="cm3-thread-header" data-panel-tabs={desktopReviewOpen()}>
           <span class="cm3-thread-project" dir="auto">
             {sync().project?.name || getFilename(sdk().directory)}
           </span>
-          <div class="cm3-thread-actions">
+          <Show when={desktopReviewOpen()}>
+            <div
+              data-cm3-region="panel-tabs"
+              hidden={schedulingOpen()}
+              inert={schedulingOpen()}
+              style={{ display: schedulingOpen() ? "none" : undefined }}
+              class="cm3-thread-panel-tabs"
+              ref={(mount) => {
+                setUi("panelTabsMount", mount)
+                onCleanup(() => setUi("panelTabsMount", undefined))
+              }}
+            />
+          </Show>
+          <div
+            class="cm3-thread-actions"
+            inert={schedulingOpen()}
+            style={{ visibility: schedulingOpen() ? "hidden" : undefined }}
+          >
             <button
               type="button"
               aria-label={language.t("command.review.toggle")}
@@ -2307,9 +2343,12 @@ export default function Page() {
                   })
                 }}
               >
-                <Cm3Icon name="browser" />
+                <Cm3Icon name="globe" />
                 <span>{language.t("session.tab.browser")}</span>
               </button>
+            </Show>
+            <Show when={isDesktop()}>
+              <SessionSidePanelToggle label={language.t("session.header.toggleSidePanel")} />
             </Show>
           </div>
         </header>
@@ -2347,7 +2386,7 @@ export default function Page() {
             </SessionPanelFrame>
           )}
 
-          <Show when={desktopSessionResizeOpen()}>
+          <Show when={desktopSessionResizeOpen() && !schedulingOpen()}>
             <div onPointerDown={() => size.start()}>
               <ResizeHandle
                 classList={{
@@ -2369,6 +2408,7 @@ export default function Page() {
         <Show when={!newSessionDesign() && desktopSidePanelOpen()}>
           <Suspense>
             <SessionSidePanel
+              tabsMount={ui.panelTabsMount}
               canReview={canReview}
               diffs={reviewDiffs}
               diffsReady={reviewReady}
@@ -2391,6 +2431,7 @@ export default function Page() {
                 <div class="min-h-0 flex-1">
                   <Suspense>
                     <SessionSidePanel
+                      tabsMount={ui.panelTabsMount}
                       canReview={canReview}
                       diffs={reviewDiffs}
                       diffsReady={reviewReady}

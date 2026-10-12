@@ -22,6 +22,7 @@ import type {
   BrowserClearRange,
   BrowserSiteData,
   BrowserSiteStorage,
+  DesktopPanelRequest,
 } from "@opencode-ai/app/browser-panel"
 import { browserShortcut, browserDeviceSize, BROWSER_DEVICE_DEFAULT } from "@opencode-ai/app/browser-panel"
 import { nativeT } from "../native-translations"
@@ -39,10 +40,15 @@ import {
   invalidateBrowserDocument,
   setBrowserAgentEnabled,
   browserAgentEnabled,
+  browserAgentEpoch,
+  browserTaskPaused,
+  browserTaskEpoch,
+  setBrowserTaskPaused,
   browserOperationBusy,
   browserTabReserved,
   browserRegistration,
   watchBrowserAccess,
+  watchBrowserAuthority,
   setBrowserHistoryHandler,
   type BrowserRegistration,
 } from "./registry"
@@ -98,25 +104,16 @@ import {
   forgetLogin,
   editLogin,
   importBrowserData,
-  pageLogin,
   rememberPage,
-  saveLogins,
 } from "./profile"
 
-import { watchLoginOffers, allowLoginOffers, loginOfferExclusions } from "./login-offers"
-import { loginOrigin } from "./import-data"
-import { readLogins } from "./vault"
-import {
-  passwordOptions,
-  generatePassword,
-  prepareGenerationScript,
-  completeGenerationScript,
-  clearGenerationScript,
-} from "./password-generation"
+import { runBrowserLogin } from "./login-command"
+import { watchLoginOffers, allowLoginOffers } from "./login-offers"
+import { generateBrowserPassword } from "./password-generation-command"
 import { agentHistory } from "./agent-history"
-import { createTabHandler, TabRecoveryRequired, type NativeTabAction } from "./agent-tabs"
-import { setBrowserTabHandler } from "./registry"
-import { failure, hasFrameTarget, type TabRequest } from "@cookiemonster/cm-browser/protocol"
+import { createTabHandler, type NativeTabAction } from "./agent-tabs"
+import { setBrowserTabHandler, setBrowserPanelHandler } from "./registry"
+import { failure, success, hasFrameTarget, parsePanelRequest, type TabRequest, type PanelRequest, type PanelResult } from "@cookiemonster/cm-browser/protocol"
 import { allowDownload, guardUploads, saveTransferRule } from "./transfer-permissions"
 import { transferVaultBackup } from "./vault-backup"
 import { createLeaveConfirmation } from "./leave-confirmation"
@@ -184,6 +181,12 @@ type Group = {
   restoring?: boolean
 }
 type Owner = {
+  panelRequest?: {
+    request: DesktopPanelRequest
+    check(): void
+    acknowledge(value: unknown): boolean
+    cancel(): void
+  }
   authorityID: string
   linkContext?: { sessionID: string; lease: string }
   win: BrowserWindow
@@ -236,6 +239,32 @@ setBrowserHistoryHandler(async (sessionID, request, signal) => {
   ).catch(() => failure("unavailable", "Browser history operation unavailable."))
 })
 setBrowserTabHandler(createTabHandler(resolveNativeTabAction))
+setBrowserPanelHandler(async (sessionID, request, signal, deadline) => {
+  const matches = [...owners.values()].filter((owner) => owner.linkContext?.sessionID === sessionID)
+  if (matches.length !== 1) return failure("no_target", nativeT("desktop.browser.tabs.noTarget"))
+  const owner = matches[0]
+  const group = owner.groups.get(sessionID)
+  const target = request.view === "browser" ? group?.tabs.find((tab) => tab.id === request.tabID) : undefined
+  if (request.view === "browser" && (!target?.agentAccess || browserTabReserved(target)))
+    return failure("access_denied", nativeT("desktop.browser.operationUnavailable"))
+  if (owner.panelRequest || owner.suspended || [...(group?.tabs ?? [])].some((tab) => browserOperationBusy.has(tab.id) || tab.leavePending))
+    return failure("unavailable", nativeT("desktop.browser.tabs.busy"))
+  try {
+    if (signal.aborted || Date.now() >= deadline || owner.shutting || owner.win.isDestroyed() ||
+      owner.win.webContents.isDestroyed() || !owner.win.isVisible() || owner.win.isMinimized() ||
+      (owner.viewport && owner.viewport.sessionID !== sessionID)) throw new Error()
+    if (target && group) {
+      group.activeID = target.id
+      persistGroup(owner, group)
+      publish(owner, group)
+      layout(owner)
+    }
+    const panelResult = await requestDesktopPanel(owner, sessionID, request, signal, deadline)
+    return success({ tabID: "", url: "", title: "", visibleText: "", elements: [], panelResult })
+  } catch {
+    return failure("unavailable", nativeT("desktop.browser.operationUnavailable"))
+  }
+})
 let profileReady = false
 vaultAccess.subscribe(() => owners.forEach((owner) => owner.groups.forEach((group) => publish(owner, group))))
 
@@ -328,11 +357,119 @@ export function browserLinkContext(owner: Owner, sessionID: string | null, lease
     (sessionID !== null && (owner.linkContext?.sessionID !== sessionID || owner.linkContext?.lease !== lease)) ||
     (sessionID === null && owner.linkContext?.lease === lease)
   ) {
+    owner.panelRequest?.cancel()
     advanceOwnerTask(owner)
+    if (sessionID !== null) owner.linkContext = { sessionID, lease }
+    if (sessionID === null) owner.linkContext = undefined
   }
-  if (sessionID !== null) owner.linkContext = { sessionID, lease }
-  if (sessionID === null && owner.linkContext?.lease === lease) owner.linkContext = undefined
   owner.captureChecks?.forEach((check) => check())
+}
+
+function requestDesktopPanel(owner: Owner, sessionID: string, request: PanelRequest, signal: AbortSignal, deadline: number) {
+  if (owner.panelRequest) return Promise.reject(new Error("Panel request busy"))
+  const link = owner.linkContext
+  const lifecycle = owner.screenshotEpoch
+  const globalEpoch = browserAgentEpoch()
+  const taskEpoch = browserTaskEpoch(sessionID)
+  const group = owner.groups.get(sessionID)
+  const target = request.view === "browser" ? group?.tabs.find((tab) => tab.id === request.tabID) : undefined
+  const contents = target?.contents
+  const revision = target?.revision
+  const accessRevision = target?.accessRevision
+  const granted = target?.agentAccess
+  // Viewport mount/clear changes owner.taskEpoch as part of this operation.
+  // Link identity and the independent task/global epochs still fence authority.
+  const event: DesktopPanelRequest = { id: randomUUID(), sessionID, deadline, ...request }
+  const check = () => {
+    signal.throwIfAborted()
+    if (
+      Date.now() >= deadline || owner.shutting || owner.win.isDestroyed() || owner.win.webContents.isDestroyed() ||
+      owners.get(owner.win.webContents.id) !== owner || !owner.win.isVisible() || owner.win.isMinimized() ||
+      [...owners.values()].filter((entry) => entry.linkContext?.sessionID === sessionID).length !== 1 ||
+      owner.suspended || owner.linkContext !== link || link?.sessionID !== sessionID ||
+      owner.screenshotEpoch !== lifecycle || !browserAgentEnabled() || browserAgentEpoch() !== globalEpoch ||
+      browserTaskPaused(sessionID) || browserTaskEpoch(sessionID) !== taskEpoch ||
+      (owner.viewport && owner.viewport.sessionID !== sessionID) ||
+      (target && (owner.groups.get(sessionID) !== group || !group?.tabs.includes(target) ||
+        group.activeID !== target.id || target.contents !== contents || target.contents.isDestroyed() ||
+        target.revision !== revision || target.accessRevision !== accessRevision || target.agentAccess !== granted))
+    ) throw new Error("Panel authority changed")
+  }
+  return new Promise<PanelResult>((resolve, reject) => {
+    const finish = (result?: PanelResult) => {
+      if (owner.panelRequest !== pending) return
+      owner.panelRequest = undefined
+      clearTimeout(timer)
+      signal.removeEventListener("abort", cancel)
+      checks.delete(validate)
+      unwatch?.()
+      unwatchAuthority()
+      listeners.forEach(([emitter, name]) => emitter.removeListener(name, cancel))
+      if (!owner.win.isDestroyed() && !owner.win.webContents.isDestroyed())
+        owner.win.webContents.send("desktop-panel-cancel", event.id)
+      if (result) resolve(result)
+      else reject(new Error("Panel operation unavailable"))
+    }
+    const cancel = () => finish()
+    const validate = () => { try { check() } catch { cancel() } }
+    const checks = (owner.captureChecks ??= new Set())
+    const listeners: [EventEmitter, string][] = [
+      ...["close", "closed", "hide", "minimize"].map((name): [EventEmitter, string] => [owner.win, name]),
+      ...["destroyed", "render-process-gone", "did-start-navigation"].map(
+        (name): [EventEmitter, string] => [owner.win.webContents, name],
+      ),
+    ]
+    const pending: NonNullable<Owner["panelRequest"]> = {
+      request: event, check, cancel,
+      acknowledge(value) {
+        if (!record(value) || value.id !== event.id || value.sessionID !== sessionID) return false
+        const { id, sessionID: acknowledgedSession, ...state } = value
+        if ("op" in state) return false
+        const observed = parsePanelRequest({ ...state, op: "set_panel" })
+        if (!observed || observed.view !== request.view ||
+          (request.view === "browser" && (observed.view !== "browser" || observed.tabID !== request.tabID))) return false
+        check()
+        if (request.view === "browser") {
+          if (!target) return false
+          const native = target.view.getBounds()
+          // Private blank tabs display the renderer's landing page without a native page.
+          const landing = !target.agentCreated && target.contents.getURL() === "about:blank"
+          if (!landing && (owner.attached !== target || !owner.viewport || !native.width || !native.height ||
+            !owner.win.contentView.children.includes(target.view))) return false
+          finish({ view: "browser", tabID: target.id, browserReady: true })
+          return true
+        }
+        if (owner.attached) return false
+        finish({ view: request.view, browserReady: false })
+        return true
+      },
+    }
+    const timer = setTimeout(cancel, Math.max(0, deadline - Date.now()))
+    const unwatch = target ? watchBrowserAccess(target, cancel) : undefined
+    const unwatchAuthority = watchBrowserAuthority(sessionID, cancel)
+    owner.panelRequest = pending
+    checks.add(validate)
+    signal.addEventListener("abort", cancel, { once: true })
+    listeners.forEach(([emitter, name]) => emitter.on(name, cancel))
+    try {
+      check()
+      owner.win.webContents.send("desktop-panel-request", event)
+    } catch { cancel() }
+  }).then((result) => {
+    check()
+    return result
+  })
+}
+
+export function browserPanelRequestCurrent(owner: Owner, id: unknown, sessionID: unknown) {
+  const pending = owner.panelRequest
+  if (!pending || id !== pending.request.id || sessionID !== pending.request.sessionID) return false
+  try { pending.check(); return true } catch { pending.cancel(); return false }
+}
+
+export function browserPanelAcknowledgement(owner: Owner, input: unknown) {
+  if (!record(input) || !browserPanelRequestCurrent(owner, input.id, input.sessionID)) return false
+  return owner.panelRequest?.acknowledge(input) ?? false
 }
 
 export async function openBrowserLink(win: BrowserWindow, value: string, destination?: "browser" | "external") {
@@ -476,6 +613,7 @@ function state(group: Group): BrowserTabs {
   return {
     revision: group.revision,
     sessionID: group.sessionID,
+    agentPaused: browserTaskPaused(group.sessionID),
     activeID: group.activeID,
     recentlyClosed: group.closed,
     downloads: [
@@ -496,6 +634,7 @@ function state(group: Group): BrowserTabs {
           revision: tab.revision,
           openerID: tab.openerID,
           agentAccess: tab.agentAccess,
+          agentCreated: tab.agentCreated,
           operation: tab.operation ? { ...tab.operation } : undefined,
           notice: tab.notice,
           failure: tab.failure,
@@ -984,6 +1123,7 @@ function createTab(
   position?: number,
   deferredRestore = false,
   activate = true,
+  agentCreated = false,
 ) {
   if (group.tabs.length >= 32) throw new Error("Browser tab limit reached")
   if (!profileReady) {
@@ -1201,7 +1341,8 @@ function createTab(
     contents,
     view,
     agentAccess: false,
-    transferGuarded: group.tabs.some((tab) => tab.id === popup?.openerID && tab.transferGuarded),
+    agentCreated,
+    transferGuarded: agentCreated || group.tabs.some((tab) => tab.id === popup?.openerID && tab.transferGuarded),
     revision: 0,
     openerID: popup?.openerID,
     loadFailed: false,
@@ -1586,6 +1727,16 @@ export async function browserCommand(owner: Owner, sessionID: string, value: unk
     return state(group)
   }
   if (command.op === "state") return state(group)
+  if (command.op === "agent-pause") {
+    if (typeof command.paused !== "boolean") throw new Error(nativeT("desktop.browser.operationUnavailable"))
+    if (!command.paused && group.tabs.some((tab) => tab.loginBusy)) throw new Error(nativeT("desktop.browser.tabs.busy"))
+    setBrowserTaskPaused(sessionID, command.paused)
+    owners.forEach((entry) => {
+      const current = entry.groups.get(sessionID)
+      if (current) publish(entry, current)
+    })
+    return state(group)
+  }
   if (command.op === "new") {
     createTab(owner, group)
     return state(group)
@@ -2227,202 +2378,76 @@ export async function browserCommand(owner: Owner, sessionID: string, value: unk
   } else if (command.op === "generate-password") {
     if (tab.loginBusy || owner.suspended || owner.generationCheck)
       throw new Error(nativeT("desktop.browser.generation.failed"))
-    // Recovery copy is selected in main, never derived from execution errors.
-    let detail = nativeT("desktop.browser.generation.settings")
-    try {
-      const options = passwordOptions(command)
-      detail = nativeT("desktop.browser.generation.failed")
-      if (
-        !browserPreferencesState().offerSaveLogins ||
-        loginOfferExclusions().includes(new URL(contents.getURL()).origin)
-      ) {
-        detail = nativeT("desktop.browser.generation.offers")
-        throw new Error()
-      }
-      const ticket = vaultAccess.require()
-      const origin = loginOrigin(contents.getURL())
-      const revision = tab.revision
-      const viewport = owner.viewport
-      const consent = new AbortController()
-      const expires = Date.now() + Math.min(120_000, vaultAccess.remaining())
-      const accessRevision = (tab.accessRevision ?? 0) + 1
-      tab.accessRevision = accessRevision
-      const check = (attached = false) => {
-        vaultAccess.require(ticket)
-        if (
-          consent.signal.aborted ||
-          Date.now() >= expires ||
-          contents.isDestroyed() ||
-          contents.isLoadingMainFrame() ||
-          tab.revision !== revision ||
-          tab.accessRevision !== accessRevision ||
-          group.activeID !== tab.id ||
-          !group.tabs.includes(tab) ||
-          owner.groups.get(group.sessionID) !== group ||
-          owner.viewport?.sessionID !== group.sessionID ||
-          owner.viewport?.lease !== viewport?.lease ||
-          owner.win.isDestroyed() ||
-          owner.shutting ||
-          !owner.win.isVisible() ||
-          owner.win.isMinimized() ||
-          tab.agentAccess ||
-          loginOrigin(contents.getURL()) !== origin ||
-          !browserPreferencesState().offerSaveLogins ||
-          loginOfferExclusions().includes(origin) ||
-          (attached &&
-            (owner.attached !== tab || owner.suspended !== 0 || !owner.win.contentView.children.includes(tab.view)))
-        )
-          throw new Error("Generation revoked")
-      }
-      check(true)
-      tab.loginBusy = true
-      const token = randomUUID()
-      const revoke = () => consent.abort()
-      const unsubscribe = vaultAccess.subscribe(revoke)
-      const timer = setTimeout(revoke, Math.max(0, expires - Date.now()))
-      contents.on("did-start-navigation", revoke)
-      owner.generationCheck = () => {
-        try {
-          check()
-        } catch {
-          revoke()
-        }
-      }
-      try {
-        const constraints = await contents.executeJavaScriptInIsolatedWorld(999, [
-          { code: prepareGenerationScript(origin, token, expires) },
-        ])
-        check(true)
-        if (
-          !constraints ||
-          typeof constraints !== "object" ||
-          typeof constraints.min !== "number" ||
-          typeof constraints.max !== "number" ||
-          !Number.isInteger(constraints.min) ||
-          !Number.isInteger(constraints.max) ||
-          constraints.min < 16 ||
-          constraints.max > 64 ||
-          constraints.min > constraints.max ||
-          typeof constraints.hasUsername !== "boolean"
-        )
-          throw new Error("Invalid constraints")
-        if (options.length < constraints.min || options.length > constraints.max) {
-          detail = nativeT("desktop.browser.generation.length", {
-            length: options.length,
-            min: constraints.min,
-            max: constraints.max,
-          })
-          throw new Error()
-        }
-        passwordOptions(options, constraints.min, constraints.max)
-        if (!constraints.hasUsername) {
-          const accounts = readLogins().filter((row) => row.origin === origin)
+    await generateBrowserPassword(command, {
+      contents,
+      begin(validate, revoke) {
+        const revision = tab.revision
+        const viewport = owner.viewport
+        const accessRevision = (tab.accessRevision ?? 0) + 1
+        tab.accessRevision = accessRevision
+        const check = (attached = false) => {
+          validate()
           if (
-            !accounts.length ||
-            accounts.length > 5 ||
-            new Set(accounts.map((row) => row.username)).size !== accounts.length ||
-            accounts.some(
-              (row) => !row.username.trim() || row.username.length > 80 || /[\p{Cc}\p{Cf}]/u.test(row.username),
-            )
+            contents.isDestroyed() ||
+            contents.isLoadingMainFrame() ||
+            tab.revision !== revision ||
+            tab.accessRevision !== accessRevision ||
+            group.activeID !== tab.id ||
+            !group.tabs.includes(tab) ||
+            owner.groups.get(group.sessionID) !== group ||
+            owner.viewport?.sessionID !== group.sessionID ||
+            owner.viewport?.lease !== viewport?.lease ||
+            owner.win.isDestroyed() ||
+            owner.shutting ||
+            !owner.win.isVisible() ||
+            owner.win.isMinimized() ||
+            tab.agentAccess ||
+            (attached &&
+              (owner.attached !== tab || owner.suspended !== 0 || !owner.win.contentView.children.includes(tab.view)))
           )
-            throw new Error("No usable saved account")
+            throw new Error("Generation revoked")
         }
+        check(true)
+        tab.loginBusy = true
+        owner.generationCheck = () => {
+          try {
+            check()
+          } catch {
+            revoke()
+          }
+        }
+        return {
+          check,
+          readyLoginOffers: (check) => tab.readyLoginOffers!(check),
+          unwatch: () => {
+            owner.generationCheck = undefined
+          },
+          release: () => {
+            tab.loginBusy = false
+            tab.revision++
+            invalidateSnapshots(contents)
+          },
+        }
+      },
+      async showDialog(options, check) {
         owner.suspended++
         layout(owner)
         try {
-          const answer = await dialog.showMessageBox(owner.win, {
-            type: "question",
-            message: nativeT("desktop.browser.generation.title"),
-            detail: nativeT("desktop.browser.generation.detail", {
-              origin,
-              length: options.length,
-              min: constraints.min,
-              max: constraints.max,
-              characters: nativeT(
-                options.symbols ? "desktop.browser.generation.symbols" : "desktop.browser.generation.alphanumeric",
-              ),
-            }),
-            buttons: [nativeT("desktop.browser.cancel"), nativeT("desktop.browser.generation.fill")],
-            defaultId: 0,
-            cancelId: 0,
-            signal: consent.signal,
-          })
-          check()
-          if (answer.response === 1) {
-            owner.suspended--
-            layout(owner)
-            try {
-              check(true)
-              const captureUntil = await tab.readyLoginOffers!(() => check(true))
-              check(true)
-              // Arm before fields become submittable; never outlive the acknowledged capture grant.
-              // Dispatched code still cannot be recalled. No generated-secret cache is retained.
-              await contents.executeJavaScriptInIsolatedWorld(999, [
-                {
-                  code: completeGenerationScript(
-                    origin,
-                    token,
-                    generatePassword(options),
-                    Math.min(expires, captureUntil, Date.now() + Math.min(5000, vaultAccess.remaining())),
-                  ),
-                },
-              ])
-              check(true)
-            } finally {
-              owner.suspended++
-            }
-          }
+          const answer = await dialog.showMessageBox(owner.win, options)
+          check?.()
+          return answer
         } finally {
           owner.suspended--
           layout(owner)
         }
-      } finally {
-        clearTimeout(timer)
-        unsubscribe()
-        contents.removeListener("did-start-navigation", revoke)
-        owner.generationCheck = undefined
-        try {
-          if (!contents.isDestroyed())
-            await contents.executeJavaScriptInIsolatedWorld(999, [{ code: clearGenerationScript(token) }])
-        } catch {
-          // A departed document already discarded its ticket.
-        } finally {
-          tab.loginBusy = false
-          tab.revision++
-          invalidateSnapshots(contents)
-        }
-      }
-    } catch {
-      // Cleanup has finished. A handled failure returns state, avoiding a second generic app toast.
-      try {
-        if (
-          owner.suspended ||
-          owner.shutting ||
-          owner.win.isDestroyed() ||
-          !owner.win.isVisible() ||
-          owner.win.isMinimized()
-        )
-          throw new Error()
-        owner.suspended++
-        try {
-          layout(owner)
-          await dialog.showMessageBox(owner.win, {
-            type: "warning",
-            message: nativeT("desktop.browser.operationUnavailable"),
-            detail,
-            buttons: [nativeT("desktop.browser.cancel")],
-            defaultId: 0,
-            cancelId: 0,
-          })
-        } finally {
-          owner.suspended--
-          layout(owner)
-        }
-      } catch {
-        // Never forward page exceptions, secrets or native dialog errors through IPC.
-        throw new Error(nativeT("desktop.browser.generation.failed"))
-      }
-    }
+      },
+      canShowFeedback: () =>
+        !owner.suspended &&
+        !owner.shutting &&
+        !owner.win.isDestroyed() &&
+        owner.win.isVisible() &&
+        !owner.win.isMinimized(),
+    })
   } else if (command.op === "save-login" || command.op === "fill-login") {
     if (
       command.op === "fill-login" &&
@@ -2432,102 +2457,76 @@ export async function browserCommand(owner: Owner, sessionID: string, value: unk
       throw new Error("Login selection expired")
     if (tab.loginBusy || owner.suspended || owner.loginCheck)
       throw new Error("A browser dialog or login operation is already pending")
-    const ticket = vaultAccess.require()
-    const revision = tab.revision
-    const viewport = owner.viewport
-    // A linked-task switch advances the epoch before any viewport update arrives, so the viewport lease alone cannot
-    // bind consent to the task that requested it.
-    const epoch = owner.taskEpoch
-    let revoked = false
-    const check = (attached = false) => {
-      vaultAccess.require(ticket)
-      if (
-        revoked ||
-        owner.taskEpoch !== epoch ||
-        contents.isDestroyed() ||
-        contents.isLoadingMainFrame() ||
-        tab.revision !== revision ||
-        group.activeID !== tab.id ||
-        !group.tabs.includes(tab) ||
-        owner.groups.get(group.sessionID) !== group ||
-        owner.viewport?.sessionID !== group.sessionID ||
-        owner.viewport?.lease !== viewport?.lease ||
-        owner.win.isDestroyed() ||
-        owner.shutting ||
-        !owner.win.isVisible() ||
-        owner.win.isMinimized() ||
-        tab.agentAccess ||
-        (attached &&
-          (owner.attached !== tab || owner.suspended !== 0 || !owner.win.contentView.children.includes(tab.view)))
-      )
-        throw new Error("Login requires an unchanged active tab with agent access off")
-    }
-    check(true)
-    tab.loginBusy = true
-    // Invalidate any agent-access confirmation already awaiting a response.
-    tab.accessRevision = (tab.accessRevision ?? 0) + 1
-    owner.loginCheck = () => {
-      try {
-        check()
-      } catch {
-        revoked = true
-      }
-    }
-    try {
-      const login =
-        command.op === "save-login"
-          ? await pageLogin(contents, undefined, check)
-          : browserProfile().credentials.find(
-              (row) => "id" in command && row.id === command.id && row.origin === new URL(contents.getURL()).origin,
+    await runBrowserLogin(
+      { ...command, op: command.op },
+      {
+        contents,
+        begin(validate) {
+          const revision = tab.revision
+          const viewport = owner.viewport
+          // A linked-task switch advances the epoch before any viewport update arrives, so the viewport lease alone cannot
+          // bind consent to the task that requested it.
+          const epoch = owner.taskEpoch
+          let revoked = false
+          const check = (attached = false) => {
+            validate()
+            if (
+              revoked ||
+              owner.taskEpoch !== epoch ||
+              contents.isDestroyed() ||
+              contents.isLoadingMainFrame() ||
+              tab.revision !== revision ||
+              group.activeID !== tab.id ||
+              !group.tabs.includes(tab) ||
+              owner.groups.get(group.sessionID) !== group ||
+              owner.viewport?.sessionID !== group.sessionID ||
+              owner.viewport?.lease !== viewport?.lease ||
+              owner.win.isDestroyed() ||
+              owner.shutting ||
+              !owner.win.isVisible() ||
+              owner.win.isMinimized() ||
+              tab.agentAccess ||
+              (attached &&
+                (owner.attached !== tab || owner.suspended !== 0 || !owner.win.contentView.children.includes(tab.view)))
             )
-      if (!login) throw new Error("No matching login")
-      check(true)
-      const confirm = async () => {
-        check(true)
-        owner.suspended++
-        layout(owner)
-        try {
-          const answer = await dialog.showMessageBox(owner.win, {
-            type: "question",
-            message: nativeT(
-              command.op === "save-login"
-                ? "desktop.browser.saveLogin"
-                : "field" in command && command.field === "username"
-                  ? "desktop.browser.fillUsername"
-                  : "field" in command && command.field === "password"
-                    ? "desktop.browser.fillPassword"
-                    : "desktop.browser.fillLogin",
-            ),
-            detail: nativeT(
-              command.op === "save-login" ? "desktop.browser.saveLoginDetail" : "desktop.browser.fillLoginDetail",
-              { origin: login.origin, username: login.username },
-            ),
-            buttons: [
-              nativeT("desktop.browser.cancel"),
-              nativeT(command.op === "save-login" ? "desktop.browser.save" : "desktop.browser.fill"),
-            ],
-            defaultId: 0,
-            cancelId: 0,
-          })
-          check()
-          return answer.response === 1
-        } finally {
-          owner.suspended--
+              throw new Error("Login requires an unchanged active tab with agent access off")
+          }
+          check(true)
+          tab.loginBusy = true
+          // Invalidate any agent-access confirmation already awaiting a response.
+          tab.accessRevision = (tab.accessRevision ?? 0) + 1
+          owner.loginCheck = () => {
+            try {
+              check()
+            } catch {
+              revoked = true
+            }
+          }
+          return {
+            check,
+            release: () => {
+              owner.loginCheck = undefined
+              tab.loginBusy = false
+              tab.revision++
+              invalidateSnapshots(contents)
+              publish(owner, group)
+            },
+          }
+        },
+        async confirm(options, check) {
+          owner.suspended++
           layout(owner)
-        }
-      }
-      if (command.op === "fill-login") await pageLogin(contents, command.id, () => check(true), command.field, confirm)
-      else if (await confirm()) {
-        check(true)
-        if ("password" in login) saveLogins([login])
-      }
-    } finally {
-      owner.loginCheck = undefined
-      tab.loginBusy = false
-      tab.revision++
-      invalidateSnapshots(contents)
-      publish(owner, group)
-    }
+          try {
+            const answer = await dialog.showMessageBox(owner.win, options())
+            check()
+            return answer.response === 1
+          } finally {
+            owner.suspended--
+            layout(owner)
+          }
+        },
+      },
+    )
   } else if (command.op === "select") {
     group.activeID = tab.id
     void tab.restore?.()
@@ -2560,6 +2559,7 @@ export async function browserCommand(owner: Owner, sessionID: string, value: unk
     tab.leaveIntent?.controller.abort()
     cancelBrowserNavigation(contents)
   } else if (command.op === "access") {
+    if (command.enabled && browserTaskPaused(sessionID)) throw new Error(nativeT("desktop.browser.taskPaused"))
     if (command.enabled && tab.loginBusy) throw new Error("Login operation pending")
     if (command.enabled && !browserAgentEnabled()) throw new Error("Browser agent access is disabled")
     if (typeof command.enabled !== "boolean") throw new Error("Invalid browser access")
@@ -2688,6 +2688,7 @@ export function browserViewport(
       })
     )
       throw new Error("Invalid browser bounds")
+    if (owner.panelRequest && owner.panelRequest.request.sessionID !== input.sessionID) owner.panelRequest.cancel()
     if (owner.viewport?.sessionID !== input.sessionID || owner.viewport?.lease !== input.lease) {
       advanceOwnerTask(owner)
     }
@@ -2770,6 +2771,7 @@ function resolveNativeTabAction(sessionID: string, request: TabRequest): NativeT
   const matches = current()
   if (matches.length !== 1) return undefined
   const owner = matches[0]
+  if (owner.panelRequest) return undefined
   const ownerID = owner.win.webContents.id
   const epoch = owner.taskEpoch
   const lifecycle = owner.screenshotEpoch
@@ -2782,6 +2784,7 @@ function resolveNativeTabAction(sessionID: string, request: TabRequest): NativeT
     if (
       matches.length !== 1 ||
       matches[0] !== owner ||
+      owner.panelRequest ||
       owners.get(ownerID) !== owner ||
       owner.taskEpoch !== epoch ||
       owner.screenshotEpoch !== lifecycle ||
@@ -2798,11 +2801,8 @@ function resolveNativeTabAction(sessionID: string, request: TabRequest): NativeT
       (request.op === "create_tab" && (group?.tabs.length ?? 0) >= 32)
     )
       throw new Error("Tab owner changed")
-    if (request.op === "create_tab" && !group) {
-      // ponytail: require manual restoration rather than merging unloaded recovery into a live group.
-      const recovery = savedTabs(sessionID)
-      if (recovery && (recovery.tabs.length || recovery.closed.length)) throw new TabRecoveryRequired()
-    }
+    if (request.op === "create_tab" && !group && (savedTabs(sessionID)?.tabs.length ?? 0) >= 32)
+      throw new Error("Browser tab limit reached")
   }
   return {
     owner,
@@ -2811,6 +2811,9 @@ function resolveNativeTabAction(sessionID: string, request: TabRequest): NativeT
     check,
     async confirm(signal) {
       check()
+      // Ordinary agent lifecycle uses the task's standing authority. Private targets
+      // retain native confirmation and gain no page access from that confirmation.
+      if (request.op === "create_tab" || target?.agentAccess) return true
       if (owner.suspended || owner.tabConsent) return false
       const consent = new AbortController()
       owner.tabConsent = consent
@@ -2843,10 +2846,7 @@ function resolveNativeTabAction(sessionID: string, request: TabRequest): NativeT
         const options = {
           type: "warning" as const,
           message: nativeT(`desktop.browser.tabs.${request.op}`),
-          detail:
-            request.op === "create_tab"
-              ? nativeT("desktop.browser.tabs.createDetail", { task: sessionID })
-              : nativeT("desktop.browser.tabs.targetDetail", { task: sessionID, tab: request.tabID }),
+          detail: nativeT("desktop.browser.tabs.targetDetail", { task: sessionID, tab: request.tabID }),
           buttons: [nativeT("desktop.browser.cancel"), nativeT("desktop.browser.allow")],
           defaultId: 0,
           cancelId: 0,
@@ -2871,15 +2871,46 @@ function resolveNativeTabAction(sessionID: string, request: TabRequest): NativeT
         layout(owner)
       }
     },
-    run(authority, signal, deadline) {
+    async run(authority, signal, deadline) {
       authority()
       if (owner.suspended) throw new Error("Browser dialog pending")
       if (request.op === "create_tab") {
-        // Do not restore saved tabs as a side effect of an agent's single-tab creation.
-        const destination = group ?? { sessionID, tabs: [], closed: [] }
-        if (!group) owner.groups.set(sessionID, destination)
-        const created = createTab(owner, destination)
-        owner.win.webContents.send("browser-opened", sessionID)
+        // Adopt URL/history recovery through the normal path. Restored tabs stay
+        // private; only the new agent tab gets standing task authority.
+        const destination = group ?? groupFor(owner, sessionID)
+        const accessEpoch = browserAgentEpoch()
+        const taskEpoch = browserTaskEpoch(sessionID)
+        const created = createTab(owner, destination, undefined, undefined, undefined, false, true, true)
+        try {
+          // Blank-tab access is initialized in main, never by page content. Await
+          // upload interception before exposing the tab or returning its ID.
+          await Promise.all([created.uploadGuard, created.restore?.()])
+          signal.throwIfAborted()
+          if (
+            Date.now() >= deadline ||
+            !browserAgentEnabled() ||
+            browserAgentEpoch() !== accessEpoch ||
+            browserTaskPaused(sessionID) ||
+            browserTaskEpoch(sessionID) !== taskEpoch ||
+            owner.taskEpoch !== epoch ||
+            owner.screenshotEpoch !== lifecycle ||
+            owner.shutting ||
+            !owner.win.isVisible() ||
+            owner.win.isMinimized() ||
+            owner.groups.get(sessionID) !== destination ||
+            !destination.tabs.includes(created) ||
+            created.contents.isDestroyed() ||
+            created.contents.getURL() !== "about:blank"
+          )
+            throw new Error("Browser creation authority changed")
+          created.agentAccess = true
+          created.accessRevision = (created.accessRevision ?? 0) + 1
+        } catch (error) {
+          if (!created.contents.isDestroyed()) created.view.webContents.close()
+          throw error
+        }
+        publish(owner, destination)
+        await requestDesktopPanel(owner, sessionID, { op: "set_panel", view: "browser", tabID: created.id }, signal, deadline)
         return created.id
       }
       if (!target || !group) throw new Error("Missing tab")
@@ -2888,6 +2919,7 @@ function resolveNativeTabAction(sessionID: string, request: TabRequest): NativeT
         persistGroup(owner, group)
         layout(owner)
         publish(owner, group)
+        await requestDesktopPanel(owner, sessionID, { op: "set_panel", view: "browser", tabID: target.id }, signal, deadline)
         return target.id
       }
       const contents = target.view.webContents

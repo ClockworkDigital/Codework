@@ -398,6 +398,18 @@ async function run() {
     stage("PASS tab lifecycle")
     return
   }
+  if (process.argv.includes("--desktop-panel")) {
+    const { desktopPanelSmoke } = await import("./desktop-panel.fixture")
+    await desktopPanelSmoke()
+    stage("PASS desktop panel")
+    return
+  }
+  if (process.argv.includes("--autonomous-browser")) {
+    const { autonomousBrowserSmoke } = await import("./autonomous.fixture")
+    await autonomousBrowserSmoke()
+    stage("PASS autonomous browser")
+    return
+  }
   if (process.argv.includes("--delegation")) {
     const { delegationSmoke } = await import("./delegation.fixture")
     await delegationSmoke()
