@@ -4,6 +4,20 @@ import { SpawnGate } from "./spawn-gate"
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0))
 
 describe("SpawnGate", () => {
+  test("cancels a queued acquisition without consuming the next permit", async () => {
+    const gate = new SpawnGate(1)
+    await gate.acquire()
+    const controller = new AbortController()
+    const cancelled = gate.acquire(controller.signal).then(
+      () => "acquired",
+      (error) => error.name,
+    )
+    controller.abort()
+    expect(await Promise.race([cancelled, tick().then(() => "pending")])).toBe("AbortError")
+    gate.release()
+    expect(await Promise.race([gate.acquire().then(() => "acquired"), tick().then(() => "pending")])).toBe("acquired")
+    gate.release()
+  })
   test("never lets more than `max` tasks run concurrently", async () => {
     const gate = new SpawnGate(3)
     let running = 0

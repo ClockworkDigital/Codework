@@ -244,14 +244,19 @@ export class ExtensionBridge {
     this.jobs.set(job.id, job);
     this.counters.enqueued += 1;
     this.leaseJob(job, "worker-pool");
+    const cancellation = new AbortController();
+    const abort = () => cancellation.abort(options.signal?.reason);
+    if (options.signal?.aborted) abort();
+    else options.signal?.addEventListener("abort", abort, { once: true });
 
     try {
       const result = await withTimeout(
         this.poolFor(job.payload.url).run(job, (frame) => {
           this.pushProgress(job.id, frame);
           options.onProgress?.(frame);
-        }, options.signal),
+        }, cancellation.signal),
         timeoutMs,
+        () => cancellation.abort(),
       );
       if (result?.ok === false) {
         const error = new Error(result.error || "O1-Code worker job failed.");
@@ -283,6 +288,8 @@ export class ExtensionBridge {
         diagnostics: error.diagnostics || null
       });
       throw error;
+    } finally {
+      options.signal?.removeEventListener("abort", abort);
     }
   }
 
@@ -529,7 +536,7 @@ function buildRunEnvelope(prompt, options, result, startedAt, transport = "exten
   };
 }
 
-function withTimeout(promise, timeoutMs) {
+function withTimeout(promise, timeoutMs, onTimeout) {
   let timeout;
   const timeoutPromise = new Promise((_resolve, reject) => {
     timeout = setTimeout(() => {
@@ -537,6 +544,7 @@ function withTimeout(promise, timeoutMs) {
       error.statusCode = 504;
       error.type = "o1_code_extension_timeout";
       reject(error);
+      onTimeout?.();
     }, timeoutMs);
   });
 

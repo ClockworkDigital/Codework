@@ -3,6 +3,75 @@ import vm from "node:vm"
 import { join } from "node:path"
 
 describe("WPP dedicated chat navigation", () => {
+  test("retypes a replaced composer and dispatches exactly once on fresh controls", async () => {
+    const h = await harness()
+    h.state.users = []
+    const oldInput = h.state.composer
+    const replacement = { ...oldInput, value: "", isConnected: true }
+    const send = element("Send")
+    h.state.buttons = [send]
+    h.state.onTick = () => {
+      if (h.state.time >= 500) {
+        oldInput.isConnected = false
+        h.state.composer = replacement
+      }
+    }
+    let admittedInput
+    await h.hooks.submitPrompt(oldInput, "offline exact input", 3000, (input: unknown) => {
+      admittedInput = input
+    })
+    expect(admittedInput).toBe(replacement)
+    expect(replacement.value).toBe("offline exact input")
+    expect(send.clicks).toBe(1)
+  })
+
+  test("fails closed without a labelled Send rather than dispatching through an unrelated icon", async () => {
+    const h = await harness()
+    h.state.users = []
+    const unrelated = { ...element(""), querySelector: () => ({}) }
+    h.state.buttons = [unrelated]
+    await expect(h.hooks.submitPrompt(h.state.composer, "offline input", 2000)).rejects.toMatchObject({
+      type: "o1_code_submission_unverified",
+    })
+    expect(unrelated.clicks).toBe(0)
+  })
+  test("uses the fresh connected Send control after greeting settlement", async () => {
+    const h = await harness()
+    h.state.users = []
+    const oldSend = element("Send")
+    const freshSend = element("Send")
+    h.state.buttons = [oldSend]
+    h.state.onTick = () => {
+      if (h.state.time >= 500) {
+        oldSend.isConnected = false
+        h.state.buttons = [freshSend]
+      }
+    }
+    await h.hooks.submitPrompt(h.state.composer, "offline test input", 2000)
+    expect(oldSend.clicks).toBe(0)
+    expect(freshSend.clicks).toBe(1)
+  })
+
+  test("does not reset a chat whose selected agent differs from the requested agent", async () => {
+    const h = await harness()
+    h.state.agent = "CM_Other"
+    await expect(h.hooks.startFreshChat({ expectedAgent: "CM_Astra" })).rejects.toMatchObject({
+      type: "o1_code_wrong_agent",
+    })
+    expect(h.trigger.clicks).toBe(0)
+    expect(h.item.clicks).toBe(0)
+  })
+
+  test("accepts verified history clearing when the connected composer is reused", async () => {
+    const h = await harness()
+    const before = h.state.composer
+    h.state.reuseComposer = true
+    expect(await h.hooks.startFreshChat({ timeoutMs: 2000 })).toEqual({ ok: true, clicked: true })
+    expect(h.state.composer).toBe(before)
+    expect(h.state.users).toEqual([])
+    expect(h.state.time).toBeGreaterThanOrEqual(1000)
+  })
+
   test("accepts a proven reset with no greeting and reacquires the composer", async () => {
     const h = await harness()
     const before = h.state.composer
@@ -106,6 +175,7 @@ async function harness() {
     reset: true,
     greeting: false,
     reuseGreeting: false,
+    reuseComposer: false,
     pending: 0,
     failure: null as string | null,
     changedAt: 0,
@@ -113,6 +183,7 @@ async function harness() {
     armed: false,
     users: [element("old prompt")],
     assistants: [element("old answer")],
+    buttons: [] as ReturnType<typeof element>[],
     composer: element(""),
     onTick: () => {},
   }
@@ -124,6 +195,7 @@ async function harness() {
     querySelectorAll(selector: string) {
       if (selector.includes("chat-message--user")) return state.users
       if (selector.includes("chat-message--assistant")) return state.assistants
+      if (selector === "button, [role='button']") return state.buttons
       return []
     },
   }
@@ -136,7 +208,7 @@ async function harness() {
   }
   item.onClick = () => {
     if (!state.reset) return
-    state.composer = composer()
+    if (!state.reuseComposer) state.composer = composer()
     state.users = []
     state.assistants = state.reuseGreeting ? state.assistants : state.greeting ? [element("Hello")] : []
     state.pending = state.greeting ? 1 : 0
@@ -155,6 +227,7 @@ async function harness() {
   const window = {
     addEventListener() {},
     postMessage() {},
+    HTMLTextAreaElement: { prototype: {} },
     __o1CodeRecorderState: () => ({
       pending: state.pending,
       failure: state.failure,
@@ -175,6 +248,16 @@ async function harness() {
     crypto,
     Date: { now: () => state.time },
     getComputedStyle: () => ({ visibility: "visible", display: "block" }),
+    InputEvent: class extends Event {
+      data: unknown
+      constructor(type: string, options: object) {
+        super(type, options)
+        this.data = Reflect.get(options, "data")
+      }
+    },
+    Event: class {
+      constructor(readonly type: string) {}
+    },
     setTimeout: (callback: () => void, ms: number) => {
       state.time += ms
       state.onTick()
@@ -192,10 +275,14 @@ function element(textContent: string) {
     textContent,
     disabled: false,
     readOnly: false,
+    isConnected: true,
     clicks: 0,
     getAttribute: () => null,
     getBoundingClientRect: () => ({ width: 24, height: 24 }),
     onClick: () => {},
+    focus: () => {},
+    dispatchEvent: () => {},
+    querySelector: () => null,
     click() {
       this.clicks += 1
       this.onClick()

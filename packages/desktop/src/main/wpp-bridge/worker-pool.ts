@@ -9,7 +9,7 @@
 
 import type { BrowserWindow } from "electron"
 import { createWorkerWindow } from "./session"
-import { openAgentChat } from "./agent-chat"
+import { agentChatProjectId, openAgentChat } from "./agent-chat"
 import { installController, type Controller, type ProgressFrame } from "./controller-injection"
 import { installRecorder } from "./recorder-injection"
 import { installNetworkWitness, type NetworkWitness } from "./cdp-network-recorder"
@@ -81,6 +81,7 @@ type Worker = {
   agent: string
   // Agent for which this worker most recently passed the CM_REQUEST_V1 capability handshake.
   protocolAgent: string
+  protocolEndpoint?: string
   // The OpenCode session this worker's WPP tab is pinned to ("" = unpinned). Set on claim so later
   // turns of the same session reuse the same authenticated thread.
   sessionKey: string
@@ -146,8 +147,13 @@ export class WorkerPool {
         this.discard(worker.id)
         throw error
       }
+      throwIfClientAborted(signal)
       const startedAt = Date.now()
-      const result = await withClientAbort(worker.controller.runJob(job, onProgress, remainingJobTimeout(job)), signal)
+      const admittedJob = { ...job, payload: { ...job.payload, expectedEndpoint: worker.protocolEndpoint } }
+      const result = await withClientAbort(
+        worker.controller.runJob(admittedJob, onProgress, remainingJobTimeout(job)),
+        signal,
+      )
       // content.js reported its OWN failure (agent selection, missing composer, chat busy, …). Surface
       // it verbatim so extensionBridge converts it to the real typed error (e.g. o1_code_wrong_agent)
       // with content.js's diagnostics. Running the capture verdict here instead would relabel every
@@ -233,7 +239,10 @@ export class WorkerPool {
       await withClientAbort(wait(SESSION_WAIT_POLL_MS), signal)
     }
 
-    await this.spawnGate.acquire()
+    await this.spawnGate.acquire(signal).catch((error) => {
+      throwIfClientAborted(signal)
+      throw error
+    })
     try {
       throwIfClientAborted(signal)
       // A worker may have freed (or been spawned for this agent) while we waited for a spawn slot.
@@ -243,7 +252,7 @@ export class WorkerPool {
       const slot = selectWorkerSlot(this.view(), agent, sessionKey)
       if (slot.action === "reuse") return this.claim(slot.id, agent, sessionKey, subagent)
 
-      const worker = await this.spawn(agent, sessionKey, subagent)
+      const worker = await this.spawn(agent, sessionKey, subagent, signal)
       if (signal?.aborted) {
         this.discard(worker.id)
         throw clientAbortedError()
@@ -258,7 +267,10 @@ export class WorkerPool {
   private claim(id: number, agent: string, sessionKey: string, subagent: boolean): Worker {
     const worker = this.workers.get(id)!
     worker.busy = true
-    if (worker.agent !== agent) worker.protocolAgent = ""
+    if (worker.agent !== agent) {
+      worker.protocolAgent = ""
+      worker.protocolEndpoint = undefined
+    }
     worker.agent = agent
     if (sessionKey) worker.sessionKey = sessionKey
     // Classification follows the turn that claimed the worker: an adopted unpinned worker takes the
@@ -320,6 +332,10 @@ export class WorkerPool {
     }
     assertCapabilityResponse(result, agent)
     worker.protocolAgent = agent
+    const request = result && typeof result === "object" ? Reflect.get(result, "request") : undefined
+    const endpoint = request && typeof request === "object" ? Reflect.get(request, "endpoint") : undefined
+    const url = typeof endpoint === "string" ? URL.parse(endpoint) : null
+    worker.protocolEndpoint = url ? url.origin + url.pathname : undefined
   }
 
   destroy() {
@@ -339,7 +355,8 @@ export class WorkerPool {
   // Recorder + controller must be installed BEFORE the first navigation: both register
   // Page.addScriptToEvaluateOnNewDocument, the document-start hook that arms the fetch/XHR recorder
   // and the relay before any page script runs. Navigating after install is what makes that hold.
-  private async spawn(agent: string, sessionKey: string, subagent: boolean): Promise<Worker> {
+  private async spawn(agent: string, sessionKey: string, subagent: boolean, signal?: AbortSignal): Promise<Worker> {
+    throwIfClientAborted(signal)
     const window = createWorkerWindow()
     const id = window.webContents.id
     this.startingWorkers.set(id, { window, agent, sessionKey, subagent })
@@ -348,16 +365,33 @@ export class WorkerPool {
       window.setTitle(workerTitle(agent, sessionKey, subagent))
     }
     return cleanupWindowOnFailure(window, async () => {
-      await installRecorder(window.webContents)
-      const controller = await installController(window.webContents)
-      const netWitness = await installNetworkWitness(window.webContents)
-      await window.webContents.loadURL(this.chatUrl)
-      await throwIfAuthRequired(window.webContents)
-      await openAgentChat(window.webContents, agent).catch(async (error) => {
-        await throwIfAuthRequired(window.webContents)
+      await withClientAbort(installRecorder(window.webContents), signal)
+      const controller = await withClientAbort(installController(window.webContents), signal)
+      const netWitness = await withClientAbort(installNetworkWitness(window.webContents), signal)
+      await withClientAbort(window.webContents.loadURL(this.chatUrl), signal)
+      await withClientAbort(throwIfAuthRequired(window.webContents), signal)
+      const target = URL.parse(this.chatUrl)
+      const loaded = URL.parse(window.webContents.getURL())
+      if (
+        !target ||
+        loaded?.origin !== target.origin ||
+        loaded.pathname.replace(/\/$/, "") !== target.pathname.replace(/\/$/, "")
+      ) {
+        const error = new Error("o1_code_wrong_project")
+        Reflect.set(error, "type", "o1_code_wrong_project")
+        Reflect.set(error, "statusCode", 400)
+        throw error
+      }
+      // The orchestration project UUID and the embedded builder project ID differ.
+      // Outer placement was verified above; roster navigation pins the builder ID.
+      const projectId = agentChatProjectId(this.chatUrl)
+      await openAgentChat(window.webContents, agent, { signal, projectId }).catch(async (error) => {
+        throwIfClientAborted(signal)
+        await withClientAbort(throwIfAuthRequired(window.webContents), signal)
         throw error
       })
-      await waitForAssistantBridge(window.webContents, controller)
+      await waitForAssistantBridge(window.webContents, controller, signal)
+      throwIfClientAborted(signal)
 
       const worker: Worker = {
         id: window.webContents.id,
@@ -510,7 +544,11 @@ export function submissionStartedAt(result: unknown, earliest: number) {
   return typeof at === "number" && Number.isFinite(at) && at >= earliest && at <= Date.now() ? at : Infinity
 }
 
-async function waitForAssistantBridge(contents: BrowserWindow["webContents"], controller: Controller) {
+async function waitForAssistantBridge(
+  contents: BrowserWindow["webContents"],
+  controller: Controller,
+  signal?: AbortSignal,
+) {
   const deadline = Date.now() + 30000
   // Require the composer to report ready for two CONSECUTIVE polls before declaring the bridge
   // usable. inspectChat runs inside the assistant iframe, so its readiness reflects the real chat
@@ -519,15 +557,20 @@ async function waitForAssistantBridge(contents: BrowserWindow["webContents"], co
   // wipes the composer we then fill → post-login submit_or_ui_failure. Stability debounces that.
   let stable = 0
   while (Date.now() < deadline) {
-    const state = (await controller.inspectChat(2000).catch(() => null)) as { ok?: boolean; ready?: boolean } | null
+    throwIfClientAborted(signal)
+    const state = (await withClientAbort(
+      controller.inspectChat(2000).catch(() => null),
+      signal,
+    )) as { ok?: boolean; ready?: boolean } | null
     if (state?.ok && state.ready) {
       stable += 1
       if (stable >= 2) return
     } else {
       stable = 0
     }
-    await wait(500)
+    await withClientAbort(wait(500), signal)
   }
+  throwIfClientAborted(signal)
   await throwIfAuthRequired(contents)
   throw new Error("Timed out waiting for WPP AI Assistant bridge readiness.")
 }

@@ -50,7 +50,8 @@ describe("client cancellation", () => {
     controller.abort();
 
     await expect(run).rejects.toMatchObject({ type: "o1_code_client_aborted" });
-    expect(receivedSignal).toBe(controller.signal);
+    expect(receivedSignal.aborted).toBe(true);
+    expect(controller.signal.aborted).toBe(true);
     expect(bridge.health().inFlightJobs).toBe(0);
     expect(bridge.health().counters.failed).toBe(1);
   });

@@ -174,7 +174,18 @@ describe("Family effort routing", () => {
 });
 
 describe("handleChatCompletions capture retry", () => {
-  test("retries a capture failure once as a fresh replay", async () => {
+  test("does not replay a possibly submitted request after a capture failure", async () => {
+    const response = fakeResponse();
+    let calls = 0;
+    const bridge = {
+      hasSession: () => false,
+      run: async () => { calls += 1; throw captureError("recorder_parser_miss"); },
+    };
+    await withNoRunLogs(() => handleChatCompletions({ headers: {} }, response, body(user("hello")), { bridge }));
+    expect(calls).toBe(1);
+    expect(response.statusCode).toBe(502);
+  });
+  test("retries a verified pre-submit failure once as a fresh replay", async () => {
     commitThread(KEY, body(user("hello")), assistant("previous"));
     const calls = [];
     const response = fakeResponse();
@@ -182,7 +193,7 @@ describe("handleChatCompletions capture retry", () => {
       hasSession: () => true,
       run: async (_prompt, options) => {
         calls.push(options);
-        if (calls.length === 1) throw captureError("recorder_parser_miss");
+        if (calls.length === 1) throw typedError("o1_code_recorder_not_armed");
         return bridgeRun("done");
       },
     };
@@ -209,7 +220,7 @@ describe("handleChatCompletions capture retry", () => {
       hasSession: () => false,
       run: async (_prompt, options) => {
         calls.push(options);
-        if (calls.length === 1) throw captureError("recorder_parser_miss");
+        if (calls.length === 1) throw typedError("o1_code_recorder_not_armed");
         if (calls.length === 2) return bridgeRun("The workspace looks fine.");
         return bridgeRun(
           '<function_calls><invoke id="call-1" name="bash"><parameter name="command">git status</parameter></invoke></function_calls>',
@@ -230,7 +241,7 @@ describe("handleChatCompletions capture retry", () => {
     expect(JSON.parse(response.body).choices[0].finish_reason).toBe("tool_calls");
   });
 
-  test("surfaces a typed capture failure after one failed retry", async () => {
+  test("surfaces a typed capture failure without repeating an uncertain submission", async () => {
     commitThread(KEY, body(user("hello")), assistant("previous"));
     const response = fakeResponse();
     const bridge = {
@@ -251,7 +262,7 @@ describe("handleChatCompletions capture retry", () => {
     expect(JSON.parse(response.body).error).toMatchObject({
       type: "o1_code_capture_failure",
       kind: "submit_or_ui_failure",
-      retryCount: 1,
+      retryCount: 0,
     });
   });
 
@@ -284,7 +295,7 @@ describe("handleChatCompletions capture retry", () => {
     expect(response.statusCode).toBe(401);
     expect(JSON.parse(response.body).error).toMatchObject({
       type: "wpp_auth_required",
-      retryCount: 1,
+      retryCount: 0,
     });
   });
 
@@ -453,11 +464,9 @@ describe("shouldRetryFreshReplay", () => {
   test("retries every fresh-replay-healable failure type", () => {
     for (const type of [
       "o1_code_agent_chat_timeout", "o1_code_greeting_not_settled", "o1_code_fresh_chat_failed",
-      "o1_code_capture_failure",
       "o1_code_recorder_not_armed",
       "o1_code_thread_desync",
       "o1_code_image_attachment_desync",
-      "o1_code_incomplete_tool_call",
     ]) {
       expect(shouldRetryFreshReplay({ type }, opts)).toBe(true);
     }
@@ -479,7 +488,7 @@ describe("shouldRetryFreshReplay", () => {
 
   test("retries an empty failed attempt even when an earlier attempt streamed prose", () => {
     const streamSession = { hasStreamed: () => true };
-    const error = { type: "o1_code_capture_failure", attemptStreamed: false };
+    const error = { type: "o1_code_recorder_not_armed", attemptStreamed: false };
     expect(shouldRetryFreshReplay(error, { streamSession, isCompaction: false })).toBe(true);
   });
 });
@@ -679,7 +688,7 @@ describe("incomplete task recovery", () => {
     expect(shouldRecoverIncompleteTask(toolBody(user("Prepare the handoff.")), response)).toBe(false);
   });
 
-  test("fresh-replays an incomplete XML call instead of returning it as prose", async () => {
+  test("surfaces an incomplete XML call without repeating the submitted prompt", async () => {
     const response = fakeResponse();
     let calls = 0;
     const bridge = {
@@ -702,8 +711,8 @@ describe("incomplete task recovery", () => {
       { bridge },
     ));
 
-    expect(calls).toBe(2);
-    expect(JSON.parse(response.body).choices[0].finish_reason).toBe("tool_calls");
+    expect(calls).toBe(1);
+    expect(JSON.parse(response.body).error.type).toBe("o1_code_incomplete_tool_call");
   });
 
   test("does not reopen handoff language or optional follow-up", () => {
@@ -948,7 +957,7 @@ describe("handleChatCompletions token usage", () => {
       hasSession: () => true,
       run: async () => {
         calls++
-        if (calls === 1) throw captureError("recorder_parser_miss")
+        if (calls === 1) throw typedError("o1_code_recorder_not_armed")
         return bridgeRun("done")
       },
     }
@@ -989,7 +998,7 @@ describe("handleChatCompletions token usage", () => {
           hasSession: () => mode !== "fresh" || calls.length > 0,
           run: async (prompt, options) => {
             calls.push({ prompt, continued: options.continueThread })
-            if (replay && calls.length === 1) throw captureError("recorder_parser_miss")
+            if (replay && calls.length === 1) throw typedError("o1_code_recorder_not_armed")
             if (JSON.parse(prompt).resumeIncomplete) return bridgeRun(`${final}\nCM_TASK_COMPLETE_V1`)
             return bridgeRun(incomplete, mode === "measured-replay" ? {
               usage: { scope: "context", source: "dom-pill", fidelity: "confirmed", totalTokens: 4000 },
