@@ -537,6 +537,8 @@ for (const width of [1280, 390]) {
           await toggle.click()
         }
         await expect(group.row).toHaveAttribute("data-active", "true")
+        await assertGroup(group, group.expanded)
+        await group.button.click()
         await assertGroup(group, !group.expanded)
         await group.button.focus()
         await group.button.press("Tab")
@@ -1300,6 +1302,137 @@ for (const width of [1280, 390]) {
     })
   }
 }
+
+test("CM3 reveals project sessions five at a time and retains independent limits", async ({ page }) => {
+  const groups = [
+    { directory: fixture.directory, projectID: fixture.project.id, name: "Primary", count: 12 },
+    { directory: "C:/OpenCode/OtherProject", projectID: "proj_cm3_OtherProject", name: "Secondary", count: 7 },
+    { directory: "C:/OpenCode/ThirdProject", projectID: "proj_cm3_ThirdProject", name: "Small", count: 5 },
+  ]
+  await mockOpenCodeServer(page, {
+    sessions: groups.flatMap((group) =>
+      Array.from({ length: group.count }, (_, index) => ({
+        ...fixture.sessions[0],
+        id: `ses_paging_${group.name}_${index + 1}`,
+        projectID: group.projectID,
+        directory: group.directory,
+        title: `${group.name} session ${index + 1}`,
+        time: { created: 1700000004000 + index, updated: 1700000004000 + index },
+      })),
+    ),
+    provider: fixture.provider,
+    directory: fixture.directory,
+    project: fixture.project,
+    pageMessages,
+  })
+  await mockCm3Projects(page)
+  await page.addInitScript(
+    (directories) => {
+      localStorage.setItem("settings.v3", JSON.stringify({ general: { newLayoutDesigns: true, quietCompanion: true } }))
+      localStorage.setItem(
+        "opencode.global.dat:server",
+        JSON.stringify({
+          projects: { local: directories.map((worktree) => ({ worktree, expanded: true })) },
+        }),
+      )
+    },
+    groups.map((group) => group.directory),
+  )
+  await page.goto("/")
+  const projects = page.getByRole("complementary", { name: "Projects", exact: true })
+  const primary = projects.getByTitle(fixture.directory, { exact: true })
+  const secondary = projects.getByTitle("C:/OpenCode/OtherProject", { exact: true })
+  const small = projects.getByTitle("C:/OpenCode/ThirdProject", { exact: true })
+  await expect(primary).toHaveAttribute("aria-expanded", "true")
+  await expect(primary).toHaveAttribute("aria-controls", /\S+/)
+  const primarySessions = projects.locator(`[id=${JSON.stringify(await primary.getAttribute("aria-controls"))}]`)
+  const secondarySessions = projects.locator(`[id=${JSON.stringify(await secondary.getAttribute("aria-controls"))}]`)
+  const smallSessions = projects.locator(`[id=${JSON.stringify(await small.getAttribute("aria-controls"))}]`)
+  const titles = ".cm3-sidebar-session .cm3-sidebar-task-copy > span:first-child"
+  const more = primarySessions.getByRole("button", { name: "Show more", exact: true })
+  const secondaryMore = secondarySessions.getByRole("button", { name: "Show more", exact: true })
+  const recent = page.getByRole("region", { name: "Recent sessions", exact: true }).locator(titles)
+  await expect(recent).toHaveCount(24)
+  const recentTitles = await recent.allTextContents()
+  await expect(primarySessions.locator(titles)).toHaveText([
+    "Primary session 12",
+    "Primary session 11",
+    "Primary session 10",
+    "Primary session 9",
+    "Primary session 8",
+  ])
+  await expect(secondarySessions.locator(titles)).toHaveText([
+    "Secondary session 7",
+    "Secondary session 6",
+    "Secondary session 5",
+    "Secondary session 4",
+    "Secondary session 3",
+  ])
+  await expect(smallSessions.locator(titles)).toHaveText([
+    "Small session 5",
+    "Small session 4",
+    "Small session 3",
+    "Small session 2",
+    "Small session 1",
+  ])
+  await expect(smallSessions.getByRole("button", { name: "Show more", exact: true })).toHaveCount(0)
+  await more.click()
+  await expect(primarySessions.locator(titles)).toHaveText([
+    "Primary session 12",
+    "Primary session 11",
+    "Primary session 10",
+    "Primary session 9",
+    "Primary session 8",
+    "Primary session 7",
+    "Primary session 6",
+    "Primary session 5",
+    "Primary session 4",
+    "Primary session 3",
+  ])
+  await expect(secondarySessions.locator(titles)).toHaveCount(5)
+  await more.press("Enter")
+  await expect(primarySessions.locator(titles)).toHaveText([
+    "Primary session 12",
+    "Primary session 11",
+    "Primary session 10",
+    "Primary session 9",
+    "Primary session 8",
+    "Primary session 7",
+    "Primary session 6",
+    "Primary session 5",
+    "Primary session 4",
+    "Primary session 3",
+    "Primary session 2",
+    "Primary session 1",
+  ])
+  await expect(more).toHaveCount(0)
+  await secondaryMore.click()
+  await expect(secondarySessions.locator(titles)).toHaveCount(7)
+  await expect(secondaryMore).toHaveCount(0)
+  await expect(primarySessions.locator(titles)).toHaveCount(12)
+  await primary.click()
+  await expect(primary).toHaveAttribute("aria-expanded", "false")
+  await expect(primarySessions).toBeHidden()
+  await primary.press("Enter")
+  await expect(primary).toHaveAttribute("aria-expanded", "true")
+  await expect(primarySessions.locator(titles)).toHaveCount(12)
+  await primary.press("Space")
+  await expect(primary).toHaveAttribute("aria-expanded", "false")
+  await primary.locator("..").locator('[data-action="home-project-expand"]').click()
+  await expect(primarySessions.locator(titles)).toHaveCount(12)
+  await expect(recent).toHaveText(recentTitles)
+  const search = page.getByRole("searchbox", { name: "Search threads", exact: true })
+  await search.fill("Primary session")
+  await expect(primarySessions.locator(titles)).toHaveCount(5)
+  await expect(secondarySessions.locator(titles)).toHaveCount(0)
+  await expect(more).toBeVisible()
+  await more.click()
+  await expect(primarySessions.locator(titles)).toHaveCount(10)
+  await search.fill("")
+  await expect(primarySessions.locator(titles)).toHaveCount(5)
+  await expect(secondarySessions.locator(titles)).toHaveCount(5)
+  await expect(recent).toHaveText(recentTitles)
+})
 
 test("CM3 keeps saved old session pins beyond the recent-session limit", async ({ page }) => {
   const sessions = [

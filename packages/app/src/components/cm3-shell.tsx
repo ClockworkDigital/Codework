@@ -1,4 +1,4 @@
-import { createStore } from "solid-js/store"
+import { createStore, reconcile } from "solid-js/store"
 import { createEffect, createMemo, For, on, Show } from "solid-js"
 import { useLocation, useNavigate } from "@solidjs/router"
 import { useLanguage } from "@/context/language"
@@ -25,6 +25,8 @@ import cookieMonsterBannerLight from "@/assets/cookie-monster-banner-light.svg"
 import cookieMonsterBannerDark from "@/assets/cookie-monster-banner-dark.svg"
 import { useScheduling } from "./scheduling-panel"
 
+const PROJECT_SESSIONS_PAGE = 5
+
 export function Cm3Shell() {
   const scheduling = useScheduling()
   const home = createHomeController()
@@ -40,6 +42,14 @@ export function Cm3Shell() {
   const openSettings = useSettingsDialog()
   const projects = createHomeProjectsController(home, { openSettings })
   const [state, setState] = createStore({ search: "", navigation: false })
+  const [sessionLimits, setSessionLimits] = createStore<Record<string, number>>({})
+  createEffect(
+    on(
+      () => state.search,
+      () => setSessionLimits(reconcile({})),
+      { defer: true },
+    ),
+  )
   const refs: { toggle?: HTMLButtonElement; nav?: HTMLElement; search?: HTMLInputElement } = {}
   const closeNavigation = () => {
     setState("navigation", false)
@@ -365,19 +375,30 @@ export function Cm3Shell() {
             projects={projects}
             sidebar
             onOpenProjectNewSession={openTask}
-            onSelectProject={(conn, directory) => {
-              home.project.select(conn, directory)
-              closeNavigation()
+            onSelectProject={home.project.select}
+            onActivateProject={closeNavigation}
+            renderProjectSessions={(conn, project) => {
+              const limitKey = () => JSON.stringify([ServerConnection.key(conn), pathKey(project.worktree)])
+              const group = () => projectSessions().get(pathKey(project.worktree)) ?? []
+              const limit = () => sessionLimits[limitKey()] ?? PROJECT_SESSIONS_PAGE
+              return (
+                <Show when={ServerConnection.key(conn) === sessions.session.server()}>
+                  <div class="cm3-sidebar-project-sessions">
+                    <For each={group().slice(0, limit())}>{(record) => renderSession(record)}</For>
+                    <Show when={group().length > limit()}>
+                      <button
+                        class="cm3-sidebar-action"
+                        type="button"
+                        data-action="project-sessions-show-more"
+                        onClick={() => setSessionLimits(limitKey(), limit() + PROJECT_SESSIONS_PAGE)}
+                      >
+                        {language.t("common.showMore")}
+                      </button>
+                    </Show>
+                  </div>
+                </Show>
+              )
             }}
-            renderProjectSessions={(conn, project) => (
-              <Show when={ServerConnection.key(conn) === sessions.session.server()}>
-                <div class="cm3-sidebar-project-sessions">
-                  <For each={projectSessions().get(pathKey(project.worktree)) ?? []}>
-                    {(record) => renderSession(record)}
-                  </For>
-                </div>
-              </Show>
-            )}
           />
           <button
             class="cm3-sidebar-action"
