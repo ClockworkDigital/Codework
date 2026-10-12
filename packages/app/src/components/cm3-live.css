@@ -131,7 +131,7 @@ html[data-color-scheme="dark"] [data-component="session-tab-popover"][data-cm3] 
   inset-block: 0;
   inset-inline-start: 0;
   z-index: 31;
-  width: clamp(220px, 21vw, 300px);
+  width: var(--cm3-sidebar-width, 260px);
 }
 
 .cm3-live [data-cm3-legacy-layout] > :not(.cm3-sidebar):not(:has(> main)) {
@@ -139,7 +139,7 @@ html[data-color-scheme="dark"] [data-component="session-tab-popover"][data-cm3] 
 }
 
 .cm3-live [data-cm3-legacy-layout] > :has(> main) {
-  inset-inline-start: clamp(220px, 21vw, 300px);
+  inset-inline-start: var(--cm3-sidebar-width, 260px);
 }
 
 .cm3-live .cm3-live-route {
@@ -175,9 +175,10 @@ html[data-color-scheme="dark"] [data-component="session-tab-popover"][data-cm3] 
 }
 
 .cm3-sidebar {
+  position: relative;
   display: flex;
   flex-direction: column;
-  flex: 0 0 clamp(220px, 21vw, 300px);
+  flex: 0 0 var(--cm3-sidebar-width, 260px);
   min-width: 0;
   min-height: 0;
   padding: 0 10px 10px;
@@ -198,6 +199,30 @@ html[data-color-scheme="dark"] .cm3-sidebar {
   padding: 6px 8px;
   font-size: 11px;
   color: var(--cm3-muted);
+}
+
+.cm3-sidebar-collapse {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.cm3-sidebar-resize::after {
+  background: var(--cm3-border);
+}
+
+@media (min-width: 641px) {
+  .cm3-sidebar[data-collapsed="true"] > :not(.cm3-sidebar-brand) {
+    display: none;
+  }
+  .cm3-sidebar[data-collapsed="true"] .cm3-sidebar-brand {
+    padding-inline: 0;
+    gap: 4px;
+  }
 }
 
 .cm3-sidebar-logo {
@@ -732,21 +757,16 @@ html[data-color-scheme="dark"] .cm3-sidebar {
 }
 
 @media (max-width: 900px) {
-  .cm3-sidebar {
-    flex-basis: 210px;
-  }
-  .cm3-live [data-cm3-legacy-layout] > .cm3-sidebar {
-    width: 210px;
-  }
-  .cm3-live [data-cm3-legacy-layout] > :has(> main) {
-    inset-inline-start: 210px;
-  }
   .cm3-live [data-slot="session-turn-message-container"] {
     padding-inline: 16px;
   }
 }
 
 @media (max-width: 640px) {
+  .cm3-sidebar-collapse,
+  .cm3-sidebar-resize {
+    display: none;
+  }
   .cm3-live .cm3-live-workspace {
     position: relative;
   }

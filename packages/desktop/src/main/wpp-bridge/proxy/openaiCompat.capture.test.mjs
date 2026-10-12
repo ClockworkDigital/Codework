@@ -1,4 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { MODEL_PROFILES } from "./modelProfiles.mjs";
 
 // openaiCompat -> extensionBridge -> worker-pool -> session.ts imports electron; the shared stub in
@@ -376,6 +379,71 @@ describe("handleChatCompletions capture retry", () => {
       expect(response.statusCode).toBe(200);
       expect(JSON.parse(response.body).choices[0].message.content).toBe("done");
     });
+  }
+});
+
+describe("persisted agent-chat timeout diagnostics", () => {
+  for (const stream of [false, true]) {
+    for (const scenario of [
+      {
+        name: "valid startup evidence",
+        type: "o1_code_agent_chat_timeout",
+        diagnostics: { phase: "chat-navigation", chatClicks: 1 },
+        expected: { phase: "chat-navigation", chatClicks: 1 },
+      },
+      {
+        name: "invalid diagnostic values",
+        type: "o1_code_agent_chat_timeout",
+        diagnostics: { phase: "https://private-diagnostic.test/?token=private-diagnostic", chatClicks: 1.5 },
+        expected: {},
+      },
+      {
+        name: "an unrelated failure",
+        type: "o1_code_wrong_agent",
+        diagnostics: { phase: "chat-navigation", chatClicks: 1 },
+        expected: undefined,
+      },
+    ]) {
+      test(`${stream ? "streaming" : "nonstreaming"} log allowlists ${scenario.name}`, async () => {
+        const directory = await mkdtemp(join(tmpdir(), "wpp-chat-timeout-log-"));
+        const previous = Object.fromEntries(
+          ["O1_CODE_PROXY_LOGS", "O1_CODE_PROXY_LOG_DIR", "O1_CODE_PROXY_LOG_PAYLOADS"].map((key) => [key, process.env[key]]),
+        );
+        process.env.O1_CODE_PROXY_LOGS = "1";
+        process.env.O1_CODE_PROXY_LOG_DIR = directory;
+        process.env.O1_CODE_PROXY_LOG_PAYLOADS = "0";
+        try {
+          const response = fakeResponse();
+          const bridge = {
+            hasSession: () => false,
+            run: async () => {
+              const error = typedError(scenario.type);
+              error.diagnostics = {
+                ...scenario.diagnostics,
+                tabUrl: "https://private-diagnostic.test/?token=private-diagnostic",
+                rawText: "private-diagnostic payload",
+                nested: { data: "private-diagnostic payload" },
+              };
+              throw error;
+            },
+          };
+          await handleChatCompletions({ headers: {} }, response, { ...body(user("hello")), stream }, { bridge });
+          const files = await readdir(directory);
+          expect(files).toHaveLength(1);
+          const log = await Bun.file(join(directory, files[0])).json();
+          expect(log.error.type).toBe(scenario.type);
+          expect(log.error.diagnostics).toEqual(scenario.expected);
+          expect(JSON.stringify(log)).not.toContain("private-diagnostic");
+          if (!stream) expect(response.headers["x-o1-code-proxy-log"]).toBe(join(directory, files[0]));
+        } finally {
+          for (const [key, value] of Object.entries(previous)) {
+            if (value === undefined) delete process.env[key];
+            else process.env[key] = value;
+          }
+          await rm(directory, { recursive: true, force: true });
+        }
+      });
+    }
   }
 });
 

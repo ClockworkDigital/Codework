@@ -19,6 +19,7 @@ export function agentChatLaunchExpression(agent: string) {
 }
 
 function agentChatLaunchPage(agent: string) {
+  if (document.readyState !== "complete") return "loading"
   const visible = (element: Element) => {
     const style = getComputedStyle(element)
     const rect = element.getBoundingClientRect()
@@ -30,7 +31,7 @@ function agentChatLaunchPage(agent: string) {
   if (cards.length > 1) return "ambiguous"
   if (cards.length !== 1) return "waiting"
   const button = cards[0].querySelector<HTMLButtonElement>("button.agent-card-more-button")
-  if (!button || button.disabled || !visible(button)) return "waiting"
+  if (!button || button.disabled || !visible(cards[0]) || !visible(button)) return "waiting"
   if (button.dataset.cmChatLaunch !== agent) {
     if (Array.from(document.querySelectorAll("[role='menuitem']")).some(visible)) return "blocked"
     button.dataset.cmChatLaunch = agent
@@ -43,10 +44,12 @@ function agentChatLaunchPage(agent: string) {
     (item) => visible(item) && item.textContent?.trim() === "Chat",
   )
   if (items.length > 1) return "ambiguous"
-  if (items.length !== 1 || items[0].getAttribute("aria-disabled") === "true") return "waiting"
+  if (items.length !== 1 || items[0].getAttribute("aria-disabled") === "true" || Reflect.get(items[0], "disabled")) {
+    return "waiting"
+  }
   delete button.dataset.cmChatLaunch
   items[0].click()
-  return "opened"
+  return "clicked"
 }
 
 type ChatFrame = { url: string; executeJavaScript(code: string, userGesture?: boolean): Promise<unknown> }
@@ -68,15 +71,18 @@ export async function openAgentChat(
   } = {},
 ) {
   const deadline = now() + timeoutMs
-  let opened = false
+  let chatClicks = 0
+  let phase = "waiting-roster"
   while (now() < deadline) {
     const frames = contents.mainFrame.framesInSubtree
     const chats = frames.filter((frame) => isAgentChatUrl(frame.url))
     if (chats.length > 1) throw agentChatError("o1_code_wrong_agent")
     if (chats.length === 1) {
+      phase = "verifying-agent"
       if (await chats[0].executeJavaScript(agentChatSelectedExpression(agent), true)) return
     }
-    if (!opened && chats.length === 0) {
+    if (chats.length === 0) phase = chatClicks ? "chat-navigation" : "waiting-roster"
+    if (!chatClicks && chats.length === 0) {
       const rosters = frames.filter(
         (frame) => URL.parse(frame.url)?.origin === "https://open-web-agent-builder-cs.wpp.ai",
       )
@@ -84,12 +90,19 @@ export async function openAgentChat(
       if (rosters.length === 1) {
         const state = await rosters[0].executeJavaScript(agentChatLaunchExpression(agent), true)
         if (state === "ambiguous" || state === "blocked") throw agentChatError("o1_code_wrong_agent")
-        opened = state === "opened"
+        phase = state === "loading" ? "roster-loading" : "roster-ui"
+        if (state === "clicked") {
+          // Dispatch is not navigation success. Never click again while awaiting the actual chat.
+          chatClicks = 1
+          phase = "chat-navigation"
+        }
       }
     }
     await sleep(250)
   }
-  throw agentChatError("o1_code_agent_chat_timeout")
+  const error = agentChatError("o1_code_agent_chat_timeout")
+  Reflect.set(error, "diagnostics", { phase, chatClicks })
+  throw error
 }
 
 function agentChatError(type: string) {

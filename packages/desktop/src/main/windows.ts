@@ -17,6 +17,7 @@ import { registerBrowserOwner, openBrowserLink } from "./browser/tabs"
 import { createWindowRegistry } from "./window-registry"
 import { safeWindowURL } from "./window-state"
 import { resolveExternalURL, resolveLocalFilePath } from "./external-url"
+import { APP_IDENTITY } from "./constants"
 
 const root = dirname(fileURLToPath(import.meta.url))
 const rendererRoot = join(root, "../renderer")
@@ -181,7 +182,7 @@ export function createMainWindow(id: string = randomUUID()) {
     height: state.height,
     show: false,
     autoHideMenuBar: true,
-    title: "OpenCode",
+    title: APP_IDENTITY.name,
     icon: iconPath(),
     backgroundColor: backgroundColor ?? defaultBackgroundColor(),
     ...(process.platform === "darwin"
@@ -210,6 +211,7 @@ export function createMainWindow(id: string = randomUUID()) {
   allowRendererPermissions(win)
   wireWindowRecovery(win, id)
   wireNavigationPolicy(win)
+  win.webContents.on("page-title-updated", (event) => event.preventDefault())
 
   win.webContents.session.webRequest.onBeforeSendHeaders((details, callback) => {
     const { requestHeaders } = details

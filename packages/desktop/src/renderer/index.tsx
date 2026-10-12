@@ -33,9 +33,9 @@ import { resetZoom, setPinchZoomEnabled, webviewZoom, zoomIn, zoomOut } from "./
 import { windowFullscreen } from "./window-fullscreen"
 import { availableStartupServer, readyWslConnections } from "./wsl/connections"
 import "./styles.css"
+import { CookieLoader } from "@opencode-ai/ui/cookie-loader"
 import { useTheme } from "@opencode-ai/ui/theme/context"
 import { LoadingAnimationProvider } from "@opencode-ai/ui/loading"
-import { Spinner } from "@opencode-ai/ui/spinner"
 
 const root = document.getElementById("root")
 if (import.meta.env.DEV && !(root instanceof HTMLElement)) {
@@ -347,7 +347,7 @@ function LoadingSplash() {
         when={import.meta.env.VITE_CM_BRAND}
         fallback={<img src={cookieMonsterIcon} alt="" class="w-20 h-20 animate-pulse" />}
       >
-        <Spinner class="size-20 text-icon-base" />
+        <CookieLoader class="text-icon-base" />
       </Show>
     </div>
   )
