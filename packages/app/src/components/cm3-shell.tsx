@@ -1,4 +1,5 @@
 import { createStore } from "solid-js/store"
+import { ResizeHandle } from "@opencode-ai/ui/resize-handle"
 import { createEffect, createMemo, For, on, onCleanup, Show } from "solid-js"
 import { useLocation, useNavigate } from "@solidjs/router"
 import { useLanguage } from "@/context/language"
@@ -11,6 +12,7 @@ import { decode64 } from "@/utils/base64"
 import { tabKey, useTabs } from "@/context/tabs"
 import { pathKey } from "@/utils/path-key"
 import { legacySessionHref } from "@/utils/session-route"
+import { Persist, persisted } from "@/utils/persist"
 import { createHomeController } from "@/pages/home/home-controller"
 import { createHomeSessionsController, type HomeSessionRecord } from "@/pages/home/home-sessions-controller"
 import { createHomeProjectsController } from "@/pages/home/home-projects-controller"
@@ -37,7 +39,12 @@ export function Cm3Shell() {
   const openSettings = useSettingsDialog()
   const projects = createHomeProjectsController(home, { openSettings })
   const [state, setState] = createStore({ search: "", navigation: false })
+  const [sidebar, setSidebar] = persisted(Persist.global("cm3.sidebar"), createStore({ collapsed: false, width: 260 }))
   const refs: { toggle?: HTMLButtonElement; nav?: HTMLElement; search?: HTMLInputElement } = {}
+  createEffect(() => {
+    refs.nav?.parentElement?.style.setProperty("--cm3-sidebar-width", `${sidebar.collapsed ? 76 : sidebar.width}px`)
+  })
+  onCleanup(() => refs.nav?.parentElement?.style.removeProperty("--cm3-sidebar-width"))
   const closeNavigation = () => {
     setState("navigation", false)
     refs.toggle?.focus({ preventScroll: true })
@@ -205,7 +212,11 @@ export function Cm3Shell() {
         aria-expanded={state.navigation}
         onClick={() => {
           setState("navigation", true)
-          queueMicrotask(() => refs.nav?.querySelector<HTMLButtonElement>("button")?.focus())
+          queueMicrotask(() =>
+            Array.from(refs.nav?.querySelectorAll<HTMLButtonElement>("button") ?? [])
+              .find((element) => element.getClientRects().length > 0)
+              ?.focus(),
+          )
         }}
       >
         <Cm3Icon name="sidebar-simple" />
@@ -223,6 +234,7 @@ export function Cm3Shell() {
         ref={(element) => (refs.nav = element)}
         class="cm3-sidebar"
         data-open={state.navigation}
+        data-collapsed={sidebar.collapsed}
         aria-label={language.t("sidebar.nav.projectsAndSessions")}
         // The tab strip is portaled here, so delegated events follow the titlebar's owner instead of this aside.
         on:keydown={(event) => {
@@ -256,6 +268,16 @@ export function Cm3Shell() {
           <span role="img" aria-label={language.t("quietCompanion.title")}>
             <Cm3Icon name="cookie" size={24} />
           </span>
+          <button
+            class="cm3-sidebar-collapse"
+            type="button"
+            aria-label={language.t("command.sidebar.toggle")}
+            title={language.t("command.sidebar.toggle")}
+            aria-expanded={!sidebar.collapsed}
+            onClick={() => setSidebar("collapsed", (value) => !value)}
+          >
+            <Cm3Icon name="sidebar-simple" />
+          </button>
           <button
             class="cm3-navigation-close"
             type="button"
@@ -374,6 +396,28 @@ export function Cm3Shell() {
             {language.t("quietCompanion.settings")}
           </button>
         </div>
+        <ResizeHandle
+          class="cm3-sidebar-resize"
+          direction="horizontal"
+          size={sidebar.width}
+          min={220}
+          max={480}
+          onResize={(width) => setSidebar("width", width)}
+          role="separator"
+          aria-label={language.t("sidebar.resize")}
+          aria-orientation="vertical"
+          aria-valuemin={220}
+          aria-valuemax={480}
+          aria-valuenow={sidebar.width}
+          tabIndex={sidebar.collapsed ? -1 : 0}
+          onKeyDown={(event) => {
+            if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return
+            event.preventDefault()
+            const rtl = getComputedStyle(event.currentTarget).direction === "rtl"
+            const delta = (event.key === "ArrowRight") !== rtl ? 10 : -10
+            setSidebar("width", (width) => Math.min(480, Math.max(220, width + delta)))
+          }}
+        />
       </aside>
     </>
   )
