@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, wri
 import { ZipWriter, BlobWriter, BlobReader } from "@zip.js/zip.js"
 import { dirname, join } from "node:path"
 import { homedir } from "node:os"
+import { isLoggedWorker, setWorkerLogWriter } from "./wpp-bridge/worker-logging"
 
 const MAX_LOG_AGE_DAYS = 7
 const TAIL_LINES = 1000
@@ -27,7 +28,20 @@ export function initLogging() {
       run,
       `${safeLogName(message?.scope ?? (message?.variables?.processType === "renderer" ? "renderer" : "main"))}.log`,
     )
-  log.initialize({ preload: false, spyRendererConsole: true })
+  log.initialize({ preload: false })
+  setWorkerLogWriter((id, event, details, level) => write(`wpp-worker-${id}`, event, details, level))
+  app.on("web-contents-created", (_event, contents) => {
+    contents.on("console-message", (event) => {
+      if (isLoggedWorker(contents)) return
+      const severity = event.level
+      write(
+        "renderer",
+        "console",
+        { webContentsId: contents.id, message: event.message },
+        severity === "error" ? "error" : severity === "warning" ? "warn" : "info",
+      )
+    })
+  })
   initConsoleTransport()
   cleanup()
   return (logger = log)
@@ -60,6 +74,7 @@ export async function exportDebugLogs() {
     await writeZip(output, [
       { name: "manifest.json", data: Buffer.from(JSON.stringify(manifest(), null, 2)) },
       ...collect(root, "desktop"),
+      ...collect(process.env.O1_CODE_PROXY_LOG_DIR || join(process.cwd(), "logs"), "bridge"),
       ...serverLogRoots().flatMap((dir, i) => collect(dir, `server-${i + 1}`)),
       ...collect(app.getPath("crashDumps"), "crashpad"),
     ])

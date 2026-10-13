@@ -13,10 +13,62 @@ import { WorkerPool, submissionStartedAt, toggleWorkerWindows } from "./worker-p
 import { createCdpNetworkReducer } from "./cdp-network-recorder"
 import { WPP_COOKIE_MONSTER_PROJECT_URL } from "./proxy/wppProject.mjs"
 import { commitThread, resetThread, threadContextUsage } from "./proxy/sessionThreads.mjs"
+import type { WorkerLogWriter } from "./worker-logging"
 
 const DESKTOP_KEY = JSON.stringify(["desktop", "runtime-D", "sess-A", "CM_Opus5.5-High"])
 const CLI_KEY = JSON.stringify(["cli", "runtime-A", "sess-A", "CM_Opus5.5-High"])
 const OTHER_CLI_KEY = JSON.stringify(["cli", "runtime-B", "sess-A", "CM_Opus5.5-High"])
+
+test("concurrent jobs retain their own worker correlation and log retirement reasons", async () => {
+  const records: { id: number; event: string; details: Record<string, unknown> }[] = []
+  const log: WorkerLogWriter = (id, event, details) => records.push({ id, event, details })
+  const pool = new WorkerPool({ chatUrl: "https://example.test/chat", log })
+  const completions = new Map<number, (value: unknown) => void>()
+  const workers = [1, 2].map((id) => ({
+    id,
+    window: { isDestroyed: () => false, destroy: () => {} },
+    agent: "test-agent",
+    protocolAgent: "test-agent",
+    sessionKey: `private-owner-${id}`,
+    subagent: false,
+    busy: false,
+    lastUsed: Date.now(),
+    controller: { runJob: () => new Promise((resolve) => completions.set(id, resolve)) },
+    netWitness: { summarizeWindow: () => ({ cdpRequestSeen: true, cdpStatus: 200, cdpFinished: true }) },
+  }))
+  workers.forEach((worker) => Reflect.get(pool, "workers").set(worker.id, worker))
+  try {
+    const runs = workers.map((worker) =>
+      pool.run({
+        id: `job-${worker.id}`,
+        runId: `run-${worker.id}`,
+        payload: { model: worker.agent, sessionKey: worker.sessionKey, continueThread: true },
+      }),
+    )
+    await Promise.resolve()
+    await Promise.resolve()
+    completions.get(2)!({ ok: false, type: "o1_code_thread_desync", error: "private error" })
+    completions.get(1)!({ ok: true, responseSource: "network", finalText: "private response" })
+    const results = await Promise.allSettled(runs)
+    expect(results[0].status).toBe("fulfilled")
+    if (results[0].status === "fulfilled") {
+      expect(results[0].value).toMatchObject({ worker: { workerId: 1, runId: "run-1", jobId: "job-1" } })
+    }
+    expect(results[1].status).toBe("rejected")
+    if (results[1].status === "rejected") {
+      expect(results[1].reason.worker).toEqual({ workerId: 2, runId: "run-2", jobId: "job-2" })
+    }
+    expect(records.filter((record) => record.event === "job-started").map((record) => record.details.runId)).toEqual([
+      "run-1",
+      "run-2",
+    ])
+    expect(records.find((record) => record.event === "worker-discarded")?.details.reason).toBe("o1_code_thread_desync")
+    expect(records.find((record) => record.event === "worker-released")?.details.jobId).toBe("job-1")
+    expect(JSON.stringify(records)).not.toContain("private")
+  } finally {
+    pool.destroy()
+  }
+})
 
 const worker = (
   id: number,

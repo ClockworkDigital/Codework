@@ -8,6 +8,8 @@
 // affinity is in-memory only — durable affinity + last-good chat URL persistence is handoff item 3.
 
 import type { BrowserWindow } from "electron"
+import { createHash } from "node:crypto"
+import { diagnosticUrl, observeWorkerWindow, writeWorkerLog, type WorkerLogWriter } from "./worker-logging"
 import { createWorkerWindow } from "./session"
 import { openAgentChat } from "./agent-chat"
 import { installController, type Controller, type ProgressFrame } from "./controller-injection"
@@ -90,17 +92,20 @@ type Worker = {
   lastUsed: number
 }
 
-export type WorkerPoolOptions = { chatUrl: string }
+export type WorkerPoolOptions = { chatUrl: string; log?: WorkerLogWriter }
 
 export class WorkerPool {
   private readonly workers = new Map<number, Worker>()
   private readonly startingWorkers = new Map<number, Pick<Worker, "window" | "agent" | "sessionKey" | "subagent">>()
   private readonly chatUrl: string
+  private readonly log?: WorkerLogWriter
+  private readonly jobs = new Map<number, { runId?: string; jobId?: string }>()
   private readonly reapTimer: NodeJS.Timeout
   private readonly spawnGate = new SpawnGate(MAX_CONCURRENT_SPAWNS)
 
   constructor(options: WorkerPoolOptions) {
     this.chatUrl = options.chatUrl
+    this.log = options.log
     this.reapTimer = setInterval(() => this.prune(), REAP_INTERVAL_MS)
     this.reapTimer.unref()
     livePools.add(this)
@@ -126,6 +131,7 @@ export class WorkerPool {
   async run(
     job: {
       id?: string
+      runId?: string
       createdAtMs?: number
       timeoutMs?: number
       payload?: { model?: string; sessionKey?: string; subagent?: boolean; continueThread?: boolean }
@@ -133,21 +139,35 @@ export class WorkerPool {
     onProgress?: (frame: ProgressFrame) => void,
     signal?: AbortSignal,
   ): Promise<unknown> {
+    const queuedAt = Date.now()
     const worker = await this.acquire(
       (job.payload?.model || DEFAULT_MODEL_ID).trim(),
       (job.payload?.sessionKey || "").trim(),
       job.payload?.subagent === true,
       signal,
+      job,
     )
+    this.jobs.set(worker.id, { runId: job.runId, jobId: job.id })
+    this.record(worker.id, "job-started", {
+      queueMs: Date.now() - queuedAt,
+      mode: job.payload?.continueThread ? "continue" : "fresh",
+    })
+    const correlation = { workerId: worker.id, jobId: job.id, runId: job.runId }
     try {
       try {
         await withClientAbort(this.ensureProtocolCapability(worker, job), signal)
       } catch (error) {
-        this.discard(worker.id)
+        this.discard(worker.id, "protocol-failed")
         throw error
       }
       const startedAt = Date.now()
+      this.record(worker.id, "protocol-ready", {})
       const result = await withClientAbort(worker.controller.runJob(job, onProgress, remainingJobTimeout(job)), signal)
+      this.record(worker.id, "job-result", {
+        durationMs: Date.now() - startedAt,
+        ok: result && typeof result === "object" ? Reflect.get(result, "ok") : null,
+        type: result && typeof result === "object" ? Reflect.get(result, "type") : null,
+      })
       // content.js reported its OWN failure (agent selection, missing composer, chat busy, …). Surface
       // it verbatim so extensionBridge converts it to the real typed error (e.g. o1_code_wrong_agent)
       // with content.js's diagnostics. Running the capture verdict here instead would relabel every
@@ -159,7 +179,7 @@ export class WorkerPool {
         // dead tab on the retry and fail identically. openaiCompat.shouldRetryFreshReplay does the replay.
         const failureType = (result as Record<string, unknown>).type
         if (isPreSubmitFailureType(failureType)) {
-          this.discard(worker.id)
+          this.discard(worker.id, failureType)
           const r = result as Record<string, unknown>
           const error = new Error(String(r.error || "O1-Code worker reported a pre-submit failure.")) as Error & {
             statusCode?: number
@@ -174,15 +194,22 @@ export class WorkerPool {
         const diagnostics = Reflect.get(result, "diagnostics")
         const captureTimedOut =
           diagnostics && typeof diagnostics === "object" && Reflect.get(diagnostics, "phase") === "no-network-response"
-        if (!captureTimedOut) return result
+        if (!captureTimedOut) return { ...result, worker: correlation }
       }
       const enriched = attachCaptureVerdict(
         result,
         worker.netWitness.summarizeWindow(submissionStartedAt(result, startedAt)),
       )
-      if (enriched.captureVerdict.accept) return enriched.result
+      this.record(worker.id, "capture-verdict", {
+        accepted: enriched.captureVerdict.accept,
+        capture: {
+          ...enriched.result.capture,
+          cdpUrl: enriched.result.capture.cdpUrl ? diagnosticUrl(enriched.result.capture.cdpUrl) : null,
+        },
+      })
+      if (enriched.captureVerdict.accept) return { ...enriched.result, worker: correlation }
 
-      this.discard(worker.id)
+      this.discard(worker.id, "capture-rejected")
       const error = captureFailureError(enriched.captureVerdict, enriched.result.capture)
       if (error) {
         // Surface content.js's own submit view on the failure so the log distinguishes "prompt never
@@ -205,12 +232,15 @@ export class WorkerPool {
       throw new Error("Unexpected capture verdict failure.")
     } catch (error) {
       const type = error && typeof error === "object" ? Reflect.get(error, "type") : undefined
+      this.record(worker.id, "job-failed", { type: type ?? "unknown", durationMs: Date.now() - queuedAt }, "error")
+      if (error && typeof error === "object") Reflect.set(error, "worker", correlation)
       if (type === "o1_code_client_aborted" || isPreSubmitFailureType(type)) {
-        this.discard(worker.id)
+        this.discard(worker.id, type)
       }
       throw error
     } finally {
       this.release(worker.id)
+      this.jobs.delete(worker.id)
     }
   }
 
@@ -219,16 +249,30 @@ export class WorkerPool {
   // ponytail: select->claim is kept await-free so single-threaded JS serializes it — that, not a
   // mutex, is what prevents two callers double-booking one free worker. Do NOT insert an await
   // between selectWorkerSlot and claim() or the race becomes real.
-  async acquire(agent: string, sessionKey = "", subagent = false, signal?: AbortSignal): Promise<Worker> {
+  async acquire(
+    agent: string,
+    sessionKey = "",
+    subagent = false,
+    signal?: AbortSignal,
+    job?: { id?: string; runId?: string },
+  ): Promise<Worker> {
     // Wait out a busy same-session tab before adopting/growing, so concurrent turns of one session
     // never fork its WPP thread. The loop re-selects each poll (the tab may free, be reaped, or the
     // session may still be busy); a "wait" past the deadline falls through to the spawn path.
     const waitDeadline = Date.now() + SESSION_WAIT_TIMEOUT_MS
+    const queuedAt = Date.now()
     for (;;) {
       throwIfClientAborted(signal)
       this.prune()
       const slot = selectWorkerSlot(this.view(), agent, sessionKey)
-      if (slot.action === "reuse") return this.claim(slot.id, agent, sessionKey, subagent)
+      if (slot.action === "reuse") {
+        const worker = this.claim(slot.id, agent, sessionKey, subagent)
+        this.record(worker.id, "worker-reused", { runId: job?.runId, jobId: job?.id, queueMs: Date.now() - queuedAt })
+        return worker
+      }
+      if (slot.action === "wait" && Date.now() - queuedAt < SESSION_WAIT_POLL_MS) {
+        this.record(slot.id, "waiting-for-worker", { runId: job?.runId, jobId: job?.id })
+      }
       if (slot.action !== "wait" || Date.now() >= waitDeadline) break
       await withClientAbort(wait(SESSION_WAIT_POLL_MS), signal)
     }
@@ -241,11 +285,15 @@ export class WorkerPool {
       // (that would hold a spawn slot idle) — spawn a fresh thread instead, the same timeout fallback.
       this.prune()
       const slot = selectWorkerSlot(this.view(), agent, sessionKey)
-      if (slot.action === "reuse") return this.claim(slot.id, agent, sessionKey, subagent)
+      if (slot.action === "reuse") {
+        const worker = this.claim(slot.id, agent, sessionKey, subagent)
+        this.record(worker.id, "worker-reused", { runId: job?.runId, jobId: job?.id, queueMs: Date.now() - queuedAt })
+        return worker
+      }
 
-      const worker = await this.spawn(agent, sessionKey, subagent)
+      const worker = await this.spawn(agent, sessionKey, subagent, job)
       if (signal?.aborted) {
-        this.discard(worker.id)
+        this.discard(worker.id, "o1_code_client_aborted")
         throw clientAbortedError()
       }
       worker.busy = true
@@ -275,11 +323,13 @@ export class WorkerPool {
     if (!worker) return
     worker.busy = false
     worker.lastUsed = Date.now()
+    this.record(id, "worker-released", {})
   }
 
-  private discard(id: number) {
+  private discard(id: number, reason = "discarded") {
     const worker = this.workers.get(id)
     if (!worker) return
+    this.record(id, "worker-discarded", { reason })
     if (!worker.window.isDestroyed()) worker.window.destroy()
     this.workers.delete(id)
     resetThread(worker.sessionKey)
@@ -325,38 +375,65 @@ export class WorkerPool {
   destroy() {
     clearInterval(this.reapTimer)
     livePools.delete(this)
-    for (const worker of this.startingWorkers.values()) {
+    for (const [id, worker] of this.startingWorkers) {
+      this.record(id, "worker-discarded", { reason: "pool-destroyed-during-startup" })
       if (!worker.window.isDestroyed()) worker.window.destroy()
     }
     this.startingWorkers.clear()
     for (const worker of this.workers.values()) {
+      this.record(worker.id, "worker-discarded", { reason: "pool-destroyed" })
       if (!worker.window.isDestroyed()) worker.window.destroy()
       resetThread(worker.sessionKey)
     }
     this.workers.clear()
+    this.jobs.clear()
   }
 
   // Recorder + controller must be installed BEFORE the first navigation: both register
   // Page.addScriptToEvaluateOnNewDocument, the document-start hook that arms the fetch/XHR recorder
   // and the relay before any page script runs. Navigating after install is what makes that hold.
-  private async spawn(agent: string, sessionKey: string, subagent: boolean): Promise<Worker> {
+  private async spawn(
+    agent: string,
+    sessionKey: string,
+    subagent: boolean,
+    job?: { id?: string; runId?: string },
+  ): Promise<Worker> {
     const window = createWorkerWindow()
     const id = window.webContents.id
     this.startingWorkers.set(id, { window, agent, sessionKey, subagent })
+    this.jobs.set(id, { runId: job?.runId, jobId: job?.id })
+    const startedAt = Date.now()
+    const stage = (phase: string) => this.record(id, "startup-stage", { phase, elapsedMs: Date.now() - startedAt })
+    observeWorkerWindow(window.webContents, (event, details, level) => this.record(id, event, details, level))
+    stage("created")
     if (workersVisible) {
       window.showInactive()
       window.setTitle(workerTitle(agent, sessionKey, subagent))
     }
     return cleanupWindowOnFailure(window, async () => {
-      await installRecorder(window.webContents)
+      stage("installing-recorder")
+      await installRecorder(window.webContents, (event) => {
+        if (
+          event.type === "O1_CODE_BRIDGE_RECORDER_STATUS" &&
+          ["ready", "reset", "request", "observed"].includes(event.status ?? "")
+        ) {
+          this.record(id, "recorder-status", { status: event.status })
+        }
+      })
+      stage("installing-controller")
       const controller = await installController(window.webContents)
+      stage("installing-network-witness")
       const netWitness = await installNetworkWitness(window.webContents)
+      stage("loading-project")
       await window.webContents.loadURL(this.chatUrl)
+      stage("checking-auth")
       await throwIfAuthRequired(window.webContents)
+      stage("opening-agent-chat")
       await openAgentChat(window.webContents, agent).catch(async (error) => {
         await throwIfAuthRequired(window.webContents)
         throw error
       })
+      stage("waiting-for-composer")
       await waitForAssistantBridge(window.webContents, controller)
 
       const worker: Worker = {
@@ -372,8 +449,25 @@ export class WorkerPool {
         lastUsed: Date.now(),
       }
       this.workers.set(worker.id, worker)
+      stage("ready")
       return worker
-    }).finally(() => this.startingWorkers.delete(id))
+    })
+      .catch((error) => {
+        this.record(
+          id,
+          "startup-failed",
+          {
+            type: error && typeof error === "object" ? (Reflect.get(error, "type") ?? "unknown") : "unknown",
+            elapsedMs: Date.now() - startedAt,
+          },
+          "error",
+        )
+        if (error && typeof error === "object")
+          Reflect.set(error, "worker", { workerId: id, runId: job?.runId, jobId: job?.id })
+        this.jobs.delete(id)
+        throw error
+      })
+      .finally(() => this.startingWorkers.delete(id))
   }
 
   // Drop workers whose window was destroyed or sat idle past the TTL so a dead or stale id is never
@@ -387,6 +481,11 @@ export class WorkerPool {
         subagent: SUBAGENT_WORKER_TTL_MS,
       })
       if (!worker.window.isDestroyed() && !shouldReapWorker(worker, now, ttl)) continue
+      this.record(id, "worker-discarded", {
+        reason: worker.window.isDestroyed() ? "window-destroyed" : "idle-timeout",
+        idleMs: now - worker.lastUsed,
+        ttlMs: ttl,
+      })
       if (!worker.window.isDestroyed()) worker.window.destroy()
       this.workers.delete(id)
       // A retired tab's thread is gone; its mirror must not survive to fake a continue.
@@ -428,6 +527,25 @@ export class WorkerPool {
       busy: worker.busy,
       lastUsed: worker.lastUsed,
     }))
+  }
+
+  private record(id: number, event: string, details: Record<string, unknown>, level?: "info" | "warn" | "error") {
+    const worker = this.workers.get(id) ?? this.startingWorkers.get(id)
+    writeWorkerLog(
+      id,
+      event,
+      {
+        workerId: id,
+        agent: worker?.agent,
+        ownerId: worker?.sessionKey ? createHash("sha256").update(worker.sessionKey).digest("hex").slice(0, 16) : null,
+        subagent: worker?.subagent,
+        ...this.jobs.get(id),
+        ...details,
+        ...(typeof details.url === "string" ? { url: diagnosticUrl(details.url) } : {}),
+      },
+      level,
+      this.log,
+    )
   }
 }
 

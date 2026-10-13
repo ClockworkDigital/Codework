@@ -1,7 +1,11 @@
 import assert from "node:assert/strict"
 import { createServer } from "node:http"
+import { readFileSync, readdirSync } from "node:fs"
+import { join } from "node:path"
 import { app, BrowserWindow } from "electron"
 import { createWorkerWindow } from "./session"
+import { observeWorkerWindow, writeWorkerLog } from "./worker-logging"
+import { initLogging } from "../logging"
 
 const directory = process.env.CM_WPP_WORKER_FIXTURE_DIR
 if (!directory) throw new Error("CM_WPP_WORKER_FIXTURE_DIR is required")
@@ -33,12 +37,19 @@ const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, 
 
 async function run() {
   await app.whenReady()
+  initLogging()
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
   const address = server.address()
   if (!address || typeof address === "string") throw new Error("Missing fixture server address")
   // Exercise the production factory, including two workers that remain alive together.
   const workers = [createWorkerWindow(), createWorkerWindow()]
   for (const win of workers) {
+    const workerId = win.webContents.id
+    const records: { event: string; details: Record<string, unknown> }[] = []
+    observeWorkerWindow(win.webContents, (event, details, level) => {
+      records.push({ event, details })
+      writeWorkerLog(workerId, event, { workerId, ...details }, level)
+    })
     for (const url of [`http://127.0.0.1:${address.port}/`, `http://127.0.0.1:${address.port}/next`]) {
       await win.loadURL(url)
       await wait(300)
@@ -57,6 +68,14 @@ async function run() {
       assert.equal(win.isVisible(), false)
       assert.equal(win.isFocused(), false)
     }
+    await win.webContents.executeJavaScript("console.error('private worker console content')")
+    await wait(50)
+    assert.ok(records.some((record) => record.event === "navigation-started"))
+    assert.ok(records.some((record) => record.event === "navigation-finished"))
+    assert.ok(records.some((record) => record.event === "console" && record.details.severity === "error"))
+    if (process.env.O1_CODE_PROXY_LOG_PAYLOADS !== "1") {
+      assert.ok(!JSON.stringify(records).includes("private worker console content"))
+    }
     win.showInactive()
     win.hide()
     const before = await win.webContents.executeJavaScript("window.framesRun")
@@ -69,7 +88,17 @@ async function run() {
     assert.equal(await win.webContents.executeJavaScript("window.clicks"), 1)
     assert.equal(win.isVisible(), false)
   }
-  console.log("PASS hidden WPP workers render, accept clicks and survive navigation and visibility toggles")
+  const logs = join(directory!, "logs")
+  const run = join(logs, readdirSync(logs)[0])
+  for (const win of workers) {
+    const contents = readFileSync(join(run, `wpp-worker-${win.webContents.id}.log`), "utf8")
+    assert.ok(contents.includes("navigation-started"))
+    assert.ok(contents.includes("console"))
+    if (process.env.O1_CODE_PROXY_LOG_PAYLOADS !== "1") assert.ok(!contents.includes("private worker console content"))
+  }
+  console.log(
+    "PASS hidden WPP workers render, accept clicks, log console/navigation metadata and survive navigation and visibility toggles",
+  )
 }
 
 void run()

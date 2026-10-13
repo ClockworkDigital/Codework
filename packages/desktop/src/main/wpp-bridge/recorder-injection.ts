@@ -52,7 +52,9 @@ export async function installRecorder(
   const dbg = contents.debugger
 
   if (onEvent) {
-    contents.on("console-message", (_event, _level, message) => {
+    contents.on("console-message", (event, ...legacy) => {
+      const message = event.message ?? legacy[1]
+      if (typeof message !== "string") return
       if (!message.startsWith(PROBE_PREFIX)) return
       try {
         onEvent(JSON.parse(message.slice(PROBE_PREFIX.length)) as RecorderEvent)

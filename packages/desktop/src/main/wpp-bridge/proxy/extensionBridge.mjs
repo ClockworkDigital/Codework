@@ -258,6 +258,7 @@ export class ExtensionBridge {
         error.statusCode = result.statusCode || 502;
         error.type = result.type || "o1_code_worker_pool_error";
         error.bridgeResult = result;
+        error.worker = result.worker;
         throw error;
       }
       this.clearAuthRequired();
@@ -306,6 +307,7 @@ export class ExtensionBridge {
     const url = options.url || process.env.O1_CODE_TARGET_URL || process.env.WPP_RECORDER_URL || WPP_COOKIE_MONSTER_PROJECT_URL;
     return {
       id: crypto.randomUUID(),
+      runId: options.runId,
       type: "ask",
       createdAt: new Date(createdAtMs).toISOString(),
       createdAtMs,
@@ -483,6 +485,7 @@ function buildRunEnvelope(prompt, options, result, startedAt, transport = "exten
   return {
     ok: true,
     transport,
+    worker: result.worker || null,
     prompt,
     images: (options.images || []).map((image) => ({
       id: image.id,
