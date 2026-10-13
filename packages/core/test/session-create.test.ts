@@ -1,6 +1,6 @@
 import { describe, expect } from "bun:test"
 import path from "path"
-import { Effect, Layer, Stream } from "effect"
+import { DateTime, Effect, Layer, Stream } from "effect"
 import { AgentV2 } from "@opencode-ai/core/agent"
 import { asc, eq } from "drizzle-orm"
 import { Database } from "@opencode-ai/core/database/database"
@@ -21,6 +21,7 @@ import { SessionProjector } from "@opencode-ai/core/session/projector"
 import { SessionExecution } from "@opencode-ai/core/session/execution"
 import { SessionInput } from "@opencode-ai/core/session/input"
 import { SessionEvent } from "@opencode-ai/core/session/event"
+import { SessionMessage } from "@opencode-ai/core/session/message"
 import { SessionTable } from "@opencode-ai/core/session/sql"
 import { SessionStore } from "@opencode-ai/core/session/store"
 import { WorkspaceV2 } from "@opencode-ai/core/workspace"
@@ -46,6 +47,51 @@ const it = testEffect(
 )
 const location = Location.Ref.make({ directory: AbsolutePath.make("/project") })
 const id = SessionV2.ID.create()
+
+describe("SessionV2.archive", () => {
+  it.effect("durably archives without removing messages and preserves the timestamp on retry", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionV2.Service
+      const events = yield* EventV2.Service
+      const db = (yield* Database.Service).db
+      const created = yield* session.create({ location })
+      yield* events.publish(SessionEvent.Prompted, {
+        sessionID: created.id,
+        messageID: SessionMessage.ID.create(),
+        timestamp: DateTime.makeUnsafe(123),
+        prompt: Prompt.make({ text: "Keep this conversation" }),
+        delivery: "steer",
+      })
+      const messages = yield* session.messages({ sessionID: created.id })
+      yield* session.archive(created.id)
+      const archived = yield* session.get(created.id)
+      expect(archived.time.archived).toBeDefined()
+      expect(yield* session.messages({ sessionID: created.id })).toEqual(messages)
+      expect(yield* session.context(created.id)).toEqual(messages)
+      yield* session.archive(created.id)
+      expect(yield* session.get(created.id)).toEqual(archived)
+      expect(
+        yield* db
+          .select({ archived: SessionTable.time_archived })
+          .from(SessionTable)
+          .where(eq(SessionTable.id, created.id))
+          .get(),
+      ).toEqual({ archived: DateTime.toEpochMillis(archived.time.archived!) })
+      const history = yield* session.history({ sessionID: created.id, limit: 100 })
+      expect(history.events.filter((event) => event.type === "session.next.archived")).toHaveLength(1)
+      expect(history.events.at(-1)).toMatchObject({ type: "session.next.archived", durable: { version: 1 } })
+    }),
+  )
+
+  it.effect("rejects a missing Session", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionV2.Service
+      expect(yield* session.archive(SessionV2.ID.make("ses_missing_archive")).pipe(Effect.flip)).toMatchObject({
+        _tag: "Session.NotFoundError",
+      })
+    }),
+  )
+})
 
 describe("SessionV2.create", () => {
   it.effect("creates a fresh projected session when the ID is omitted", () =>
@@ -220,6 +266,8 @@ describe("SessionV2.create", () => {
         resume: false,
       })
       yield* SessionInput.promoteSteers(sourceDb, sourceEvents, created.id, Number.MAX_SAFE_INTEGER)
+      yield* session.archive(created.id)
+      const archived = yield* session.get(created.id)
       const serialized = (yield* sourceDb
         .select()
         .from(EventTable)
@@ -266,6 +314,7 @@ describe("SessionV2.create", () => {
         expect(yield* store.context(created.id)).toEqual([])
 
         expect(yield* events.replayAll(serialized.slice(2))).toBe(created.id)
+        expect((yield* store.get(created.id))?.time.archived).toEqual(archived.time.archived)
         expect(yield* SessionInput.find(db, admitted.id)).toMatchObject({
           id: admitted.id,
           sessionID: created.id,
@@ -289,6 +338,7 @@ describe("SessionV2.create", () => {
           [0, EventV2.versionedType(SessionV1.Event.Created.type, 1)],
           [1, EventV2.versionedType(SessionEvent.PromptAdmitted.type, 1)],
           [2, EventV2.versionedType(SessionEvent.Prompted.type, 1)],
+          [3, EventV2.versionedType(SessionEvent.Archived.type, 1)],
         ])
       }).pipe(Effect.provide(Layer.fresh(targetLayer)))
     }),

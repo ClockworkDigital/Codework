@@ -279,7 +279,7 @@ html[data-color-scheme="dark"] .cm3-sidebar {
   flex: 1;
 }
 
-.cm3-sidebar :is(.cm3-sidebar-session-pin, .cm3-sidebar-session-archive) {
+.cm3-sidebar :is(.cm3-sidebar-session-pin, .cm3-sidebar-session-archive, .cm3-sidebar-session-menu) {
   display: grid;
   place-items: center;
   flex: none;
@@ -292,18 +292,19 @@ html[data-color-scheme="dark"] .cm3-sidebar {
   cursor: pointer;
 }
 
-.cm3-sidebar :is(.cm3-sidebar-session-pin, .cm3-sidebar-session-archive):hover {
+.cm3-sidebar :is(.cm3-sidebar-session-pin, .cm3-sidebar-session-archive, .cm3-sidebar-session-menu):hover {
   background: var(--cm3-selected);
   color: var(--cm3-text);
 }
 
 @media (hover: hover) {
-  .cm3-sidebar :is(.cm3-sidebar-session-pin, .cm3-sidebar-session-archive) {
+  .cm3-sidebar :is(.cm3-sidebar-session-pin, .cm3-sidebar-session-archive, .cm3-sidebar-session-menu) {
     opacity: 0;
     pointer-events: none;
   }
 
-  .cm3-sidebar-session:is(:hover, :focus-within) :is(.cm3-sidebar-session-pin, .cm3-sidebar-session-archive),
+  .cm3-sidebar-session:is(:hover, :focus-within)
+    :is(.cm3-sidebar-session-pin, .cm3-sidebar-session-archive, .cm3-sidebar-session-menu),
   .cm3-sidebar-session-pin[aria-pressed="true"] {
     opacity: 1;
     pointer-events: auto;
@@ -315,6 +316,12 @@ html[data-color-scheme="dark"] .cm3-sidebar {
   flex: 1;
   flex-direction: column;
   min-width: 0;
+}
+
+.cm3-sidebar-draft-label {
+  flex: none;
+  color: var(--cm3-muted);
+  font-size: 10px;
 }
 
 .cm3-sidebar-task-copy > span {

@@ -206,6 +206,8 @@ describe("handleChatCompletions capture retry", () => {
     ));
 
     expect(calls).toHaveLength(2);
+    expect(calls[0].runId).toBe(response.headers["x-o1-code-proxy-run-id"]);
+    expect(calls[1].runId).toBe(calls[0].runId);
     expect(calls[0].continueThread).toBe(true);
     expect(calls[1].continueThread).toBe(false);
     expect(response.statusCode).toBe(200);

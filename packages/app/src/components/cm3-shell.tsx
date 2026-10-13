@@ -1,6 +1,6 @@
-import { createStore } from "solid-js/store"
+import { createStore, reconcile } from "solid-js/store"
 import { ResizeHandle } from "@opencode-ai/ui/resize-handle"
-import { createEffect, createMemo, For, on, onCleanup, Show } from "solid-js"
+import { createEffect, createMemo, For, on, onCleanup, Show, type Accessor } from "solid-js"
 import { useLocation, useNavigate } from "@solidjs/router"
 import { useLanguage } from "@/context/language"
 import { useSettings } from "@/context/settings"
@@ -8,7 +8,10 @@ import { ServerConnection, useServer } from "@/context/server"
 import { base64Encode } from "@opencode-ai/core/util/encode"
 import { decode64 } from "@/utils/base64"
 import { pathKey } from "@/utils/path-key"
-import { tabKey, useTabs } from "@/context/tabs"
+import { tabKey, useTabs, type DraftTab } from "@/context/tabs"
+import { createDraftPromptSession } from "@/context/prompt-state"
+import { useLayout, type LocalProject } from "@/context/layout"
+import { displayName } from "@/pages/layout/helpers"
 import { legacySessionHref } from "@/utils/session-route"
 import { Persist, persisted } from "@/utils/persist"
 import { createHomeController } from "@/pages/home/home-controller"
@@ -16,16 +19,24 @@ import { createHomeSessionsController, type HomeSessionRecord } from "@/pages/ho
 import { createHomeProjectsController } from "@/pages/home/home-projects-controller"
 import { HomeProjects } from "@/pages/home/home-projects"
 import { shouldOpenSessionInBackground } from "@/pages/home-session-open"
-import { SessionTabAvatar } from "@/pages/layout/session-tab-avatar"
+import { SessionTabAvatarView } from "@/pages/layout/session-tab-avatar"
+import { useSessionTabAvatarState } from "@/pages/layout/project-avatar-state"
 import { useDirectoryPicker } from "./directory-picker"
 import { useSettingsDialog } from "./settings-dialog"
 import { Cm3Icon } from "./cm3-icon"
 import { WppAuthControl } from "./wpp-auth-control"
 import { Icon } from "@opencode-ai/ui/v2/icon"
+import { MenuV2 } from "@opencode-ai/ui/v2/menu-v2"
 import { useTheme } from "@opencode-ai/ui/theme"
 import cookieMonsterBannerLight from "@/assets/cookie-monster-banner-light.svg"
 import cookieMonsterBannerDark from "@/assets/cookie-monster-banner-dark.svg"
 import { useScheduling } from "./scheduling-panel"
+
+const PROJECT_SESSIONS_PAGE = 5
+type ProjectChat = { key: string; title: string; updated: number } & (
+  | { type: "session"; record: HomeSessionRecord }
+  | { type: "draft"; tab: DraftTab; project: LocalProject }
+)
 
 export function Cm3Shell() {
   const scheduling = useScheduling()
@@ -34,6 +45,7 @@ export function Cm3Shell() {
   const language = useLanguage()
   const theme = useTheme()
   const settings = useSettings()
+  const layout = useLayout()
   const server = useServer()
   const location = useLocation()
   const tabs = useTabs()
@@ -42,12 +54,23 @@ export function Cm3Shell() {
   const openSettings = useSettingsDialog()
   const projects = createHomeProjectsController(home, { openSettings })
   const [state, setState] = createStore({ search: "", navigation: false })
+  const [sessionLimits, setSessionLimits] = createStore<Record<string, number>>({})
+  createEffect(
+    on(
+      () => state.search,
+      () => setSessionLimits(reconcile({})),
+      { defer: true },
+    ),
+  )
   const [sidebar, setSidebar] = persisted(Persist.global("cm3.sidebar"), createStore({ collapsed: false, width: 260 }))
   const refs: { toggle?: HTMLButtonElement; nav?: HTMLElement; search?: HTMLInputElement } = {}
   createEffect(() => {
     refs.nav?.parentElement?.style.setProperty("--cm3-sidebar-width", `${sidebar.collapsed ? 76 : sidebar.width}px`)
   })
-  onCleanup(() => refs.nav?.parentElement?.style.removeProperty("--cm3-sidebar-width"))
+  onCleanup(() => {
+    refs.nav?.parentElement?.style.removeProperty("--cm3-sidebar-width")
+    layout.tabStrip.setMount(undefined)
+  })
   const closeNavigation = () => {
     setState("navigation", false)
     refs.toggle?.focus({ preventScroll: true })
@@ -89,7 +112,19 @@ export function Cm3Shell() {
   )
   createEffect(
     on(routeProject, (project) => {
-      if (project) home.selection.set({ server: project.server, directory: project.directory })
+      if (!project) return
+      home.selection.set({ server: project.server, directory: project.directory })
+      const conn = home.server.list().find((item) => ServerConnection.key(item) === project.server)
+      if (!conn) return
+      const ctx = home.server.context(conn)
+      const item = ctx.projects
+        .list()
+        .find((item) =>
+          [item.worktree, ...(item.sandboxes ?? [])].some(
+            (directory) => pathKey(directory) === pathKey(project.directory),
+          ),
+        )
+      if (item) ctx.projects.expand(item.worktree)
     }),
   )
   const projectPending = () => /^\/server\/[^/]+\/session\/[^/]+$/.test(location.pathname) && !routeProject()
@@ -102,16 +137,64 @@ export function Cm3Shell() {
   const records = createMemo(() => (state.search.trim() ? searchRecords() : sessions.data.records()))
   const pinnedRecords = createMemo(() => searchRecords().filter((record) => sessions.session.isPinned(record.session)))
   const recentRecords = createMemo(() => records().filter((record) => !sessions.session.isPinned(record.session)))
+  const drafts = createMemo(() =>
+    tabs.store.filter((tab): tab is DraftTab => tab.type === "draft" && tab.server === sessions.session.server()),
+  )
+  const draftID = () => location.pathname === "/new-session" && new URLSearchParams(location.search).get("draftId")
+  const activeSession = (id: string) =>
+    location.pathname.endsWith(`/session/${id}`) && routeProject()?.server === sessions.session.server()
+  const chats = createMemo<ProjectChat[]>(() => {
+    const value = state.search.trim().toLowerCase()
+    return [
+      ...searchRecords().map((record) => ({
+        type: "session" as const,
+        key: record.session.id,
+        title: record.session.title,
+        updated: record.session.time.updated ?? record.session.time.created,
+        record,
+      })),
+      ...drafts().flatMap((tab) => {
+        const project = home.project
+          .list()
+          .find((project) =>
+            [project.worktree, ...(project.sandboxes ?? [])].some(
+              (directory) => pathKey(directory) === pathKey(tab.directory),
+            ),
+          )
+        if (!project) return []
+        const prompt = tabs.state(tab, "prompt", () => createDraftPromptSession(tab.draftID))
+        const title =
+          prompt
+            .current()
+            .map((part) => ("content" in part ? part.content : ""))
+            .join("")
+            .split(/\r?\n/)
+            .find((line) => line.trim())
+            ?.trim()
+            .slice(0, 80) || language.t("quietCompanion.newTask")
+        if (!`${title} ${displayName(project)}`.toLowerCase().includes(value)) return []
+        return [{ type: "draft" as const, key: `draft:${tab.draftID}`, title, updated: tab.updated ?? 0, tab, project }]
+      }),
+    ].sort((a, b) => b.updated - a.updated || a.key.localeCompare(b.key))
+  })
+  const activeChat = (chat: ProjectChat) =>
+    chat.type === "draft" ? draftID() === chat.tab.draftID : activeSession(chat.record.session.id)
   const projectSessions = createMemo(() => {
-    const grouped = new Map<string, HomeSessionRecord[]>()
-    searchRecords().forEach((record) => {
-      const key = pathKey(record.project.worktree)
+    const grouped = new Map<string, ProjectChat[]>()
+    chats().forEach((chat) => {
+      const key = pathKey(chat.type === "draft" ? chat.project.worktree : chat.record.project.worktree)
       const group = grouped.get(key)
-      if (group) group.push(record)
-      if (!group) grouped.set(key, [record])
+      if (group) group.push(chat)
+      if (!group) grouped.set(key, [chat])
     })
     return grouped
   })
+  const openChat = (chat: ProjectChat, background = false) => {
+    if (chat.type === "session") return openSession(chat.record, background)
+    if (background) return
+    closeNavigation()
+    tabs.select(chat.tab)
+  }
   const openSession = (record: HomeSessionRecord, background = false) => {
     if (settings.general.newLayoutDesigns()) {
       if (!background) closeNavigation()
@@ -136,10 +219,10 @@ export function Cm3Shell() {
   const navigateSearch = (event: KeyboardEvent) => {
     if (event.isComposing || event.altKey || event.ctrlKey || event.metaKey) return
     if (event.key === "Enter" && event.target === refs.search && state.search.trim()) {
-      const record = records()[0]
-      if (!record) return
+      const chat = chats()[0]
+      if (!chat) return
       event.preventDefault()
-      openSession(record)
+      openChat(chat)
       return
     }
     if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return
@@ -182,81 +265,148 @@ export function Cm3Shell() {
     }
     openTask(conn, project.worktree)
   }
-  const renderSession = (record: HomeSessionRecord, recent = false) => (
-    <div class="cm3-sidebar-session" data-session-id={record.session.id} role="group" aria-label={record.session.title}>
+  const renderSession = (record: Accessor<HomeSessionRecord>, recent = false) => {
+    const avatar = useSessionTabAvatarState(
+      sessions.session.server,
+      () => record().session.directory,
+      () => record().session.id,
+    )
+    const description = () => {
+      if (avatar.hasQuestions()) return language.t("sidebar.session.status.question")
+      if (avatar.hasPermissions()) return language.t("sidebar.session.status.permission")
+      if (avatar.loading()) return language.t("sidebar.session.status.running")
+      if (avatar.unread()) return language.t("sidebar.session.status.unread")
+      return undefined
+    }
+    return (
+      <div
+        class="cm3-sidebar-session"
+        data-session-id={record().session.id}
+        role="group"
+        aria-label={record().session.title}
+      >
+        <button
+          class="cm3-sidebar-task"
+          data-action={recent ? "recent-session" : "project-session"}
+          type="button"
+          data-active={activeSession(record().session.id)}
+          aria-current={activeSession(record().session.id) ? "page" : undefined}
+          aria-description={description()}
+          onKeyDown={navigateSearch}
+          onMouseDown={(event) => {
+            if (event.button === 1) event.preventDefault()
+          }}
+          onClick={(event) => openSession(record(), backgroundOpen(event))}
+          onAuxClick={(event) => {
+            if (!backgroundOpen(event)) return
+            event.preventDefault()
+            openSession(record(), true)
+          }}
+        >
+          <div class="size-4 shrink-0" aria-hidden="true">
+            <SessionTabAvatarView
+              project={record().project}
+              directory={record().session.directory}
+              unread={avatar.unread()}
+              loading={avatar.loading()}
+              revealProjectOnHover={false}
+            />
+          </div>
+          <span class="cm3-sidebar-task-copy">
+            <span dir="auto">{record().session.title}</span>
+            <Show when={recent}>
+              <span class="cm3-sidebar-task-project" dir="auto">
+                {record().projectName}
+              </span>
+            </Show>
+          </span>
+        </button>
+        <button
+          class="cm3-sidebar-session-pin"
+          type="button"
+          disabled={!sessions.session.pinsReady()}
+          aria-pressed={sessions.session.isPinned(record().session)}
+          aria-label={language.t(
+            sessions.session.isPinned(record().session) ? "sidebar.session.unpin" : "sidebar.session.pin",
+          )}
+          title={language.t(
+            sessions.session.isPinned(record().session) ? "sidebar.session.unpin" : "sidebar.session.pin",
+          )}
+          onClick={(event) => {
+            const selector = event.currentTarget.closest(".cm3-sidebar-project-sessions")
+              ? ".cm3-sidebar-project-sessions"
+              : "section >"
+            sessions.session.pin(record().session, !sessions.session.isPinned(record().session))
+            queueMicrotask(() =>
+              refs.nav
+                ?.querySelector<HTMLButtonElement>(
+                  `${selector} [data-session-id="${CSS.escape(record().session.id)}"] .cm3-sidebar-session-pin`,
+                )
+                ?.focus({ preventScroll: true }),
+            )
+          }}
+        >
+          <Icon
+            name={sessions.session.isPinned(record().session) ? "push-pin-fill" : "push-pin"}
+            style={{ width: "12.8px", height: "12.8px" }}
+          />
+        </button>
+        <Show when={settings.general.newLayoutDesigns()}>
+          <button
+            class="cm3-sidebar-session-archive"
+            type="button"
+            aria-label={language.t("common.archive")}
+            title={language.t("common.archive")}
+            onClick={() => void sessions.session.archive(record().session)}
+          >
+            <Icon name="archive" size="small" />
+          </button>
+        </Show>
+      </div>
+    )
+  }
+  const renderDraft = (chat: Accessor<Extract<ProjectChat, { type: "draft" }>>) => (
+    <div class="cm3-sidebar-session" data-draft-id={chat().tab.draftID} role="group" aria-label={chat().title}>
       <button
         class="cm3-sidebar-task"
-        data-action={recent ? "recent-session" : "project-session"}
+        data-action="project-draft"
         type="button"
-        data-active={location.pathname.endsWith(`/session/${record.session.id}`)}
+        data-active={activeChat(chat())}
+        aria-current={activeChat(chat()) ? "page" : undefined}
         onKeyDown={navigateSearch}
-        onMouseDown={(event) => {
-          if (event.button === 1) event.preventDefault()
-        }}
-        onClick={(event) => openSession(record, backgroundOpen(event))}
-        onAuxClick={(event) => {
-          if (!backgroundOpen(event)) return
-          event.preventDefault()
-          openSession(record, true)
-        }}
+        onClick={() => openChat(chat())}
       >
         <div class="size-4 shrink-0" aria-hidden="true">
-          <SessionTabAvatar
-            project={record.project}
-            directory={record.session.directory}
-            sessionId={record.session.id}
-            server={sessions.session.server()}
-            revealProjectOnHover={false}
-          />
+          <Cm3Icon name="note-pencil" size={16} />
         </div>
         <span class="cm3-sidebar-task-copy">
-          <span dir="auto">{record.session.title}</span>
-          <Show when={recent}>
-            <span class="cm3-sidebar-task-project" dir="auto">
-              {record.projectName}
-            </span>
-          </Show>
+          <span dir="auto">{chat().title}</span>
         </span>
+        <span class="cm3-sidebar-draft-label">{language.t("sidebar.session.draft")}</span>
       </button>
-      <button
-        class="cm3-sidebar-session-pin"
-        type="button"
-        disabled={!sessions.session.pinsReady()}
-        aria-pressed={sessions.session.isPinned(record.session)}
-        aria-label={language.t(
-          sessions.session.isPinned(record.session) ? "sidebar.session.unpin" : "sidebar.session.pin",
-        )}
-        title={language.t(sessions.session.isPinned(record.session) ? "sidebar.session.unpin" : "sidebar.session.pin")}
-        onClick={(event) => {
-          const selector = event.currentTarget.closest(".cm3-sidebar-project-sessions")
-            ? ".cm3-sidebar-project-sessions"
-            : "section >"
-          sessions.session.pin(record.session, !sessions.session.isPinned(record.session))
-          queueMicrotask(() =>
-            refs.nav
-              ?.querySelector<HTMLButtonElement>(
-                `${selector} [data-session-id="${CSS.escape(record.session.id)}"] .cm3-sidebar-session-pin`,
-              )
-              ?.focus({ preventScroll: true }),
-          )
-        }}
-      >
-        <Icon
-          name={sessions.session.isPinned(record.session) ? "push-pin-fill" : "push-pin"}
-          style={{ width: "12.8px", height: "12.8px" }}
-        />
-      </button>
-      <Show when={settings.general.newLayoutDesigns()}>
-        <button
-          class="cm3-sidebar-session-archive"
+      <MenuV2 modal={false} placement="bottom-end">
+        <MenuV2.Trigger
+          class="cm3-sidebar-session-menu"
           type="button"
-          aria-label={language.t("common.archive")}
-          title={language.t("common.archive")}
-          onClick={() => void sessions.session.archive(record.session)}
+          aria-label={language.t("common.moreOptions")}
+          title={language.t("common.moreOptions")}
         >
-          <Icon name="archive" size="small" />
-        </button>
-      </Show>
+          <Icon name="outline-dots" size="small" />
+        </MenuV2.Trigger>
+        <MenuV2.Portal>
+          <MenuV2.Content>
+            <MenuV2.Item
+              onSelect={() => {
+                const index = tabs.store.findIndex((tab) => tab.type === "draft" && tab.draftID === chat().tab.draftID)
+                if (index !== -1) tabs.removeTab(index)
+                queueMicrotask(() => refs.search?.focus({ preventScroll: true }))
+              }}
+            >
+              {language.t("sidebar.session.discardDraft")}
+            </MenuV2.Item>
+          </MenuV2.Content>
+        </MenuV2.Portal>
+      </MenuV2>
     </div>
   )
 
@@ -383,23 +533,62 @@ export function Cm3Shell() {
           />
         </label>
         <div class="cm3-sidebar-scroll">
+          <Show when={settings.general.newLayoutDesigns()}>
+            <div class="cm3-sidebar-tabs" ref={(element) => layout.tabStrip.setMount(element)} />
+          </Show>
           <HomeProjects
             projects={projects}
             sidebar
             onOpenProjectNewSession={openTask}
-            onSelectProject={(conn, directory) => {
-              home.project.select(conn, directory)
-              closeNavigation()
+            onSelectProject={home.project.select}
+            onActivateProject={closeNavigation}
+            renderProjectSessions={(conn, project) => {
+              const limitKey = () => JSON.stringify([ServerConnection.key(conn), pathKey(project.worktree)])
+              const group = () => projectSessions().get(pathKey(project.worktree)) ?? []
+              const limit = () => sessionLimits[limitKey()] ?? PROJECT_SESSIONS_PAGE
+              const visible = () => {
+                const page = group().slice(0, limit())
+                const active = group().find(activeChat)
+                if (!active || page.includes(active)) return page
+                // Keep the active chat within the page size without advancing Show more.
+                return [...page.slice(0, -1), active]
+              }
+              return (
+                <Show when={ServerConnection.key(conn) === sessions.session.server()}>
+                  <div class="cm3-sidebar-project-sessions">
+                    <For each={visible().map((chat) => chat.key)}>
+                      {(key) => {
+                        const chat = createMemo(() => group().find((chat) => chat.key === key))
+                        const draft = () => {
+                          const value = chat()
+                          return value?.type === "draft" ? value : undefined
+                        }
+                        const record = () => {
+                          const value = chat()
+                          return value?.type === "session" ? value.record : undefined
+                        }
+                        return (
+                          <>
+                            <Show when={draft()}>{renderDraft}</Show>
+                            <Show when={record()}>{(record) => renderSession(record)}</Show>
+                          </>
+                        )
+                      }}
+                    </For>
+                    <Show when={group().length > limit()}>
+                      <button
+                        class="cm3-sidebar-action"
+                        type="button"
+                        data-action="project-sessions-show-more"
+                        onClick={() => setSessionLimits(limitKey(), limit() + PROJECT_SESSIONS_PAGE)}
+                      >
+                        {language.t("common.showMore")}
+                      </button>
+                    </Show>
+                  </div>
+                </Show>
+              )
             }}
-            renderProjectSessions={(conn, project) => (
-              <Show when={ServerConnection.key(conn) === sessions.session.server()}>
-                <div class="cm3-sidebar-project-sessions">
-                  <For each={projectSessions().get(pathKey(project.worktree)) ?? []}>
-                    {(record) => renderSession(record)}
-                  </For>
-                </div>
-              </Show>
-            )}
           />
           <button
             class="cm3-sidebar-action"
@@ -424,12 +613,12 @@ export function Cm3Shell() {
           <Show when={pinnedRecords().length > 0}>
             <section aria-label={language.t("sidebar.session.pinned")}>
               <p class="cm3-sidebar-section">{language.t("sidebar.session.pinned")}</p>
-              <For each={pinnedRecords()}>{(record) => renderSession(record, true)}</For>
+              <For each={pinnedRecords()}>{(record) => renderSession(() => record, true)}</For>
             </section>
           </Show>
           <section aria-label={language.t("sidebar.project.recentSessions")}>
             <p class="cm3-sidebar-section">{language.t("sidebar.project.recentSessions")}</p>
-            <For each={recentRecords()}>{(record) => renderSession(record, true)}</For>
+            <For each={recentRecords()}>{(record) => renderSession(() => record, true)}</For>
             <Show
               when={!sessions.data.loading()}
               fallback={<p role="status">{language.t("quietCompanion.loading")}</p>}
@@ -440,7 +629,7 @@ export function Cm3Shell() {
                   {language.t("browser.action.reload")}
                 </button>
               </Show>
-              <Show when={!records().length && !pinnedRecords().length && !sessions.data.error()}>
+              <Show when={!chats().length && !pinnedRecords().length && !sessions.data.error()}>
                 <p role="status">{language.t("quietCompanion.noThreads")}</p>
               </Show>
             </Show>

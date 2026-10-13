@@ -226,6 +226,7 @@ export async function handleChatCompletions(request, response, body, { bridge = 
   let finalTurnContinued = continueThread;
 
   const bridgeOptionsFor = (runContinueThread, attempt) => ({
+    runId: id,
     timeoutMs: body.o1_code_timeout_ms,
     target,
     url: body.o1_code_url,
@@ -366,6 +367,7 @@ export async function handleChatCompletions(request, response, body, { bridge = 
             diagnostics: agentChatTimeoutDiagnostics(failure),
             retryCount
           },
+          worker: failure.worker,
           bridgeResult: failure.bridgeResult ? redact(failure.bridgeResult) : undefined
         }).catch(() => null);
 
@@ -416,6 +418,7 @@ export async function handleChatCompletions(request, response, body, { bridge = 
             diagnostics: agentChatTimeoutDiagnostics(failure),
             retryCount
           },
+          worker: failure.worker,
           bridgeResult: failure.bridgeResult ? redact(failure.bridgeResult) : undefined
         });
 
@@ -478,6 +481,7 @@ export async function handleChatCompletions(request, response, body, { bridge = 
     id,
     startedAt,
     finishedAt: new Date().toISOString(),
+    worker: o1CodeRun.worker || null,
     request: redact(body),
     prompt,
     context,
@@ -745,6 +749,7 @@ async function loginRequiredFailure(bridge, failure) {
   error.statusCode = 401;
   error.type = "wpp_auth_required";
   error.diagnostics = failure.diagnostics || undefined;
+  error.worker = failure.worker;
   return error;
 }
 

@@ -54,6 +54,7 @@ export type HomeProjectsViewProps = {
   onPinProject: (server: ServerConnection.Any, project: LocalProject) => void
   onToggleProjectExpanded: (server: ServerConnection.Any, project: LocalProject) => void
   onSelectProject: (server: ServerConnection.Any, directory: string) => void
+  onActivateProject?: () => void
   onAddProjects: (server: ServerConnection.Any, directories: string[]) => void
   onOpenProjectNewSession: (server: ServerConnection.Any, directory: string) => void
   onEditProject: (server: ServerConnection.Any, project: LocalProject) => void
@@ -575,6 +576,8 @@ function HomeProjectRow(
         data-active={props.sidebar ? props.selected : undefined}
         data-selected={props.selected ? "" : undefined}
         aria-current={props.selected ? "page" : undefined}
+        aria-expanded={props.sidebar ? props.project.expanded : undefined}
+        aria-controls={props.sidebar && props.renderProjectSessions ? props.sessionsID : undefined}
         disabled={serverUnreachable()}
         onPointerDown={(event) => {
           // Same-server mouse selection happens on pointerdown (like tabs),
@@ -591,8 +594,11 @@ function HomeProjectRow(
         }}
         onClick={(event) => {
           // The drag sensor calls preventDefault on post-drag clicks; never
-          // toggle selection as part of a reorder.
+          // toggle selection or expansion as part of a reorder.
           if (event.defaultPrevented) return
+          if (props.sidebar) props.onToggleProjectExpanded(props.server, props.project)
+          // Pointer-down selection must leave the mobile drawer open until the click or drag settles.
+          props.onActivateProject?.()
           // Keyboard activation and touch taps keep the original toggle.
           if (event.detail === 0 || pointerDownSelected === undefined) {
             props.onSelectProject(props.server, props.project.worktree)

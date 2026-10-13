@@ -56,3 +56,24 @@ describe("client cancellation", () => {
     expect(bridge.health().counters.failed).toBe(1);
   });
 });
+
+test("worker requests carry the bridge run ID and return worker correlation", async () => {
+  const bridge = new ExtensionBridge()
+  bridge.workerPoolUrl = "https://example.test/chat"
+  bridge.workerPool = {
+    run: async (job) => {
+      expect(job.runId).toBe("run-1")
+      return { ok: true, responseSource: "network", worker: { workerId: 7, jobId: job.id, runId: job.runId } }
+    },
+  }
+  const result = await bridge.run("private prompt", { runId: "run-1", url: bridge.workerPoolUrl })
+  expect(result.worker).toEqual({ workerId: 7, jobId: result.extension.jobId, runId: "run-1" })
+  bridge.workerPool.run = async (job) => ({
+    ok: false,
+    error: "worker failed",
+    worker: { workerId: 7, jobId: job.id, runId: job.runId },
+  })
+  await expect(bridge.run("private prompt", { runId: "run-2", url: bridge.workerPoolUrl })).rejects.toMatchObject({
+    worker: { workerId: 7, runId: "run-2" },
+  })
+})

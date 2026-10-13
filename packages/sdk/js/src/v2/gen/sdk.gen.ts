@@ -349,6 +349,8 @@ import type {
   V2ReferenceListResponses,
   V2SessionActiveErrors,
   V2SessionActiveResponses,
+  V2SessionArchiveErrors,
+  V2SessionArchiveResponses,
   V2SessionCompactErrors,
   V2SessionCompactResponses,
   V2SessionContextErrors,
@@ -5788,6 +5790,25 @@ export class Session3 extends HeyApiClient {
     const params = buildClientParams([parameters], [{ args: [{ in: "path", key: "sessionID" }] }])
     return (options?.client ?? this.client).get<V2SessionGetResponses, V2SessionGetErrors, ThrowOnError>({
       url: "/api/session/{sessionID}",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Archive session
+   *
+   * Archive a session while preserving its messages and durable history.
+   */
+  public archive<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "path", key: "sessionID" }] }])
+    return (options?.client ?? this.client).post<V2SessionArchiveResponses, V2SessionArchiveErrors, ThrowOnError>({
+      url: "/api/session/{sessionID}/archive",
       ...options,
       ...params,
     })

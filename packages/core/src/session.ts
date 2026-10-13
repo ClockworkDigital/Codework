@@ -114,6 +114,7 @@ export interface Interface {
   readonly list: (input?: ListInput) => Effect.Effect<SessionSchema.Info[]>
   readonly create: (input: CreateInput) => Effect.Effect<SessionSchema.Info>
   readonly get: (sessionID: SessionSchema.ID) => Effect.Effect<SessionSchema.Info, NotFoundError>
+  readonly archive: (sessionID: SessionSchema.ID) => Effect.Effect<void, NotFoundError>
   readonly messages: (input: {
     sessionID: SessionSchema.ID
     limit?: number
@@ -264,6 +265,15 @@ const layer = Layer.effect(
         const session = yield* store.get(sessionID)
         if (!session) return yield* new NotFoundError({ sessionID })
         return session
+      }),
+      archive: Effect.fn("V2Session.archive")(function* (sessionID) {
+        const session = yield* result.get(sessionID)
+        if (session.time.archived) return
+        yield* events.publish(
+          SessionEvent.Archived,
+          { sessionID, timestamp: yield* DateTime.now },
+          { location: session.location },
+        )
       }),
       list: Effect.fn("V2Session.list")(function* (input = {}) {
         const direction = input.anchor?.direction ?? "next"

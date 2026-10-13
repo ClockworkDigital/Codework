@@ -19,6 +19,7 @@ export type Event =
   | EventSessionNextAgentSwitched
   | EventSessionNextModelSwitched
   | EventSessionNextMoved
+  | EventSessionNextArchived
   | EventSessionNextPrompted
   | EventSessionNextPromptAdmitted
   | EventSessionNextContextUpdated
@@ -856,6 +857,14 @@ export type GlobalEvent = {
       }
     | {
         id: string
+        type: "session.next.archived"
+        properties: {
+          timestamp: number
+          sessionID: string
+        }
+      }
+    | {
+        id: string
         type: "session.next.prompted"
         properties: {
           timestamp: number
@@ -1617,6 +1626,7 @@ export type GlobalEvent = {
     | SyncEventSessionNextAgentSwitched
     | SyncEventSessionNextModelSwitched
     | SyncEventSessionNextMoved
+    | SyncEventSessionNextArchived
     | SyncEventSessionNextPrompted
     | SyncEventSessionNextPromptAdmitted
     | SyncEventSessionNextContextUpdated
@@ -2751,6 +2761,7 @@ export type SessionDurableEvent =
   | SessionNextAgentSwitched
   | SessionNextModelSwitched
   | SessionNextMoved
+  | SessionNextArchived
   | SessionNextPrompted
   | SessionNextPromptAdmitted
   | SessionNextContextUpdated
@@ -2878,6 +2889,7 @@ export type V2Event =
   | SessionNextAgentSwitched
   | SessionNextModelSwitched
   | SessionNextMoved
+  | SessionNextArchived
   | SessionNextPrompted
   | SessionNextPromptAdmitted
   | SessionNextContextUpdated
@@ -3356,6 +3368,21 @@ export type SyncEventSessionNextMoved = {
       sessionID: string
       location: LocationRef
       subdirectory?: string
+    }
+  }
+}
+
+export type SyncEventSessionNextArchived = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "session.next.archived.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      timestamp: number
+      sessionID: string
     }
   }
 }
@@ -4230,6 +4257,24 @@ export type SessionNextMoved = {
     sessionID: string
     location: LocationRef
     subdirectory?: string
+  }
+}
+
+export type SessionNextArchived = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "session.next.archived"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    timestamp: number
+    sessionID: string
   }
 }
 
@@ -6289,6 +6334,15 @@ export type EventSessionNextMoved = {
     sessionID: string
     location: LocationRef
     subdirectory?: string
+  }
+}
+
+export type EventSessionNextArchived = {
+  id: string
+  type: "session.next.archived"
+  properties: {
+    timestamp: number
+    sessionID: string
   }
 }
 
@@ -11760,6 +11814,41 @@ export type V2SessionGetResponses = {
 }
 
 export type V2SessionGetResponse = V2SessionGetResponses[keyof V2SessionGetResponses]
+
+export type V2SessionArchiveData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query?: never
+  url: "/api/session/{sessionID}/archive"
+}
+
+export type V2SessionArchiveErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * SessionNotFoundError
+   */
+  404: SessionNotFoundError
+}
+
+export type V2SessionArchiveError = V2SessionArchiveErrors[keyof V2SessionArchiveErrors]
+
+export type V2SessionArchiveResponses = {
+  /**
+   * <No Content>
+   */
+  204: void
+}
+
+export type V2SessionArchiveResponse = V2SessionArchiveResponses[keyof V2SessionArchiveResponses]
 
 export type V2SessionSwitchAgentData = {
   body: {

@@ -25,10 +25,14 @@ async function fixture() {
       control.login++
     },
     reconcile: async (item) => receipts.get(item.promptID) ?? "absent",
-    execute: async (item, admitted) => {
-      control.executed.push(item.promptID)
-      receipts.set(item.promptID, "admitted")
-      await admitted()
+    execute: async (item, authorize) => {
+      if (
+        !(await authorize(async () => {
+          control.executed.push(item.promptID)
+          receipts.set(item.promptID, "admitted")
+        }))
+      )
+        throw new Busy("Admission denied")
       receipts.set(item.promptID, "completed")
       return { state: "completed", assistantID: "msg_assistant" }
     },
@@ -319,9 +323,13 @@ describe("persistent scheduler", () => {
     let running: Promise<void> | undefined
     try {
       context.control.signedIn = true
-      context.adapter.execute = async (item, admitted) => {
-        context.control.executed.push(item.promptID)
-        await admitted()
+      context.adapter.execute = async (item, authorize) => {
+        if (
+          !(await authorize(async () => {
+            context.control.executed.push(item.promptID)
+          }))
+        )
+          throw new Busy("Admission denied")
         if (item.definition.name === "Slow") {
           started.resolve()
           await finish.promise
@@ -346,12 +354,33 @@ describe("persistent scheduler", () => {
     }
   })
 
+  test("an admitted run can pause its own schedule without blocking execution", async () => {
+    const context = await fixture()
+    try {
+      context.control.signedIn = true
+      context.adapter.execute = async (item, authorize) => {
+        if (!(await authorize(async () => {}))) throw new Busy("Admission denied")
+        await context.engine.pause(item.scheduleID)
+        return { state: "completed" }
+      }
+      await context.engine.put(definition())
+      context.control.now += 60000
+      await context.engine.tick()
+      const state = await context.engine.list()
+      expect(state.schedules[0].definition.enabled).toBe(false)
+      expect(state.schedules[0].runs).toBe(1)
+      expect(state.occurrences[0].state).toBe("completed")
+    } finally {
+      await context.cleanup()
+    }
+  })
+
   test("partial execution stays for review until explicitly acknowledged", async () => {
     const context = await fixture()
     try {
       context.control.signedIn = true
-      context.adapter.execute = async (_item, admitted) => {
-        await admitted()
+      context.adapter.execute = async (_item, authorize) => {
+        if (!(await authorize(async () => {}))) throw new Busy("Admission denied")
         throw new Error("Interrupted provider")
       }
       await context.engine.put(definition())
@@ -382,6 +411,168 @@ describe("persistent scheduler", () => {
       await context.engine.tick()
       expect((await context.engine.list()).occurrences[0].state).toBe("skipped")
       expect(context.control.executed).toHaveLength(0)
+    } finally {
+      await context.cleanup()
+    }
+  })
+
+  test.each(["endsAt", "maxRuns", "close"] as const)("rechecks %s after preparation", async (limit) => {
+    const context = await fixture()
+    const ready = Promise.withResolvers<void>()
+    const release = Promise.withResolvers<void>()
+    let dispatch: Promise<void> | undefined
+    try {
+      context.control.signedIn = true
+      const saved = await context.engine.put({ ...definition(), endsAt: "2026-10-08T08:03:00Z" })
+      if (limit === "maxRuns") {
+        context.control.now += 60000
+        await context.engine.tick()
+        expect((await context.engine.list()).schedules[0].runs).toBe(1)
+        context.control.executed.length = 0
+        context.control.notifications.length = 0
+      }
+      context.adapter.execute = async (item, authorize) => {
+        ready.resolve()
+        await release.promise
+        if (
+          !(await authorize(async () => {
+            context.control.executed.push(item.promptID)
+          }))
+        )
+          return { state: "cancelled" }
+        return { state: "completed" }
+      }
+      context.control.now += 60000
+      dispatch = context.engine.tick()
+      await ready.promise
+      if (limit === "endsAt") context.control.now += 120000
+      if (limit === "maxRuns") await context.engine.put({ ...definition(), maxRuns: 1 }, saved.id)
+      if (limit === "close") await context.engine.close()
+      release.resolve()
+      await dispatch
+      const state = await context.engine.list()
+      expect(context.control.executed).toHaveLength(0)
+      expect(state.schedules[0].runs).toBe(limit === "maxRuns" ? 1 : 0)
+      expect(state.occurrences.at(-1)?.admitted).toBe(false)
+      expect(state.occurrences.at(-1)?.state).toBe(limit === "close" ? "pending" : "skipped")
+      expect(context.control.notifications).toEqual([])
+    } finally {
+      release.resolve()
+      await dispatch
+      await context.cleanup()
+    }
+  })
+
+  test("management writes wait for the prompt commit and its admission accounting", async () => {
+    const context = await fixture()
+    const ready = Promise.withResolvers<void>()
+    const release = Promise.withResolvers<void>()
+    const order: string[] = []
+    let dispatch: Promise<void> | undefined
+    try {
+      context.control.signedIn = true
+      const saved = await context.engine.put(definition())
+      context.adapter.execute = async (_item, authorize) => {
+        if (
+          !(await authorize(async () => {
+            ready.resolve()
+            await release.promise
+            order.push("commit")
+          }))
+        )
+          return { state: "cancelled" }
+        return { state: "completed" }
+      }
+      context.control.now += 60000
+      dispatch = context.engine.tick()
+      await ready.promise
+      const pause = context.engine.pause(saved.id).then(() => {
+        order.push("pause")
+      })
+      release.resolve()
+      await pause
+      await dispatch
+      expect(order).toEqual(["commit", "pause"])
+      const state = await context.engine.list()
+      expect(state.schedules[0].runs).toBe(1)
+      expect(state.schedules[0].definition.enabled).toBe(false)
+      expect(state.occurrences[0].state).toBe("completed")
+    } finally {
+      release.resolve()
+      await dispatch
+      await context.cleanup()
+    }
+  })
+
+  test.each(["pause", "delete"] as const)("%s after admission preserves the admitted run", async (action) => {
+    const context = await fixture()
+    try {
+      context.control.signedIn = true
+      context.adapter.execute = async (item, authorize) => {
+        if (
+          !(await authorize(async () => {
+            context.control.executed.push(item.promptID)
+          }))
+        )
+          return { state: "cancelled" }
+        if (action === "pause") await context.engine.pause(item.scheduleID)
+        if (action === "delete") await context.engine.remove(item.scheduleID)
+        return { state: "completed" }
+      }
+      await context.engine.put(definition())
+      context.control.now += 60000
+      await context.engine.tick()
+      const state = await context.engine.list()
+      expect(state.schedules[0].definition.enabled).toBe(false)
+      expect(state.schedules[0].runs).toBe(1)
+      expect(state.occurrences[0].admitted).toBe(true)
+      expect(state.occurrences[0].state).toBe("completed")
+      expect(context.control.executed).toEqual([state.occurrences[0].promptID])
+    } finally {
+      await context.cleanup()
+    }
+  })
+
+  test("a failure after the prompt write starts never becomes a busy-session retry", async () => {
+    const context = await fixture()
+    try {
+      context.control.signedIn = true
+      context.adapter.execute = async (item, authorize) => {
+        await authorize(async () => {
+          context.control.executed.push(item.promptID)
+          context.receipts.set(item.promptID, "uncertain")
+          throw new Busy("Partial prompt write")
+        })
+        return { state: "completed" }
+      }
+      await context.engine.put(definition())
+      context.control.now += 60000
+      await context.engine.tick()
+      const initial = await context.engine.list()
+      expect(initial.occurrences[0].state).toBe("attention")
+      expect(initial.schedules[0].runs).toBe(0)
+      await context.engine.tick()
+      expect(context.control.executed).toHaveLength(1)
+      await context.engine.close()
+      // Simulate a crash at the persisted dispatch boundary before attention was saved.
+      initial.occurrences[0].state = "dispatching"
+      await writeFile(context.file, JSON.stringify(initial))
+      const reopened = await new Scheduler(context.file, context.adapter, () => context.control.now).open()
+      try {
+        await reopened.tick()
+        const reconciled = await reopened.list()
+        expect(reconciled.occurrences[0]).toMatchObject({
+          id: initial.occurrences[0].id,
+          sessionID: initial.occurrences[0].sessionID,
+          promptID: initial.occurrences[0].promptID,
+          state: "attention",
+          admitted: true,
+        })
+        expect(reconciled.schedules[0].runs).toBe(1)
+        expect(context.control.executed).toHaveLength(1)
+      } finally {
+        await reopened.close()
+      }
     } finally {
       await context.cleanup()
     }

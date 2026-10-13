@@ -131,7 +131,11 @@ async function reconcile(item: Occurrence) {
   return "uncertain" as const
 }
 
-async function execute(item: Occurrence, admitted: () => Promise<void>, persist: () => Promise<void>) {
+async function execute(
+  item: Occurrence,
+  authorize: (persist: () => Promise<void>) => Promise<boolean>,
+  persist: () => Promise<void>,
+) {
   const target = item.definition.target
   if (target.type === "new_session" && target.workspace.type === "worktree") {
     await prepareWorktree(
@@ -170,34 +174,38 @@ async function execute(item: Occurrence, admitted: () => Promise<void>, persist:
     inDirectory(
       item.directory!,
       SessionPrompt.Service.use((prompts) =>
-        prompts.scheduled(
-          {
-            sessionID: SessionID.make(item.sessionID),
-            messageID: MessageID.make(item.promptID),
-            parts: [
-              {
-                type: "text",
-                text: "Scheduled task " + item.scheduleID + " (occurrence " + item.id + ").\n" + item.definition.prompt,
-              },
-            ],
-            ...(target.type === "new_session"
-              ? {
-                  agent: target.agent,
-                  model: target.model
-                    ? {
-                        providerID: ProviderV2.ID.make(target.model.providerID),
-                        modelID: ModelV2.ID.make(target.model.id),
-                      }
-                    : undefined,
-                  variant: target.model?.variant,
-                }
-              : {}),
-          },
-          admitted,
-        ),
+        prompts
+          .scheduled(
+            {
+              sessionID: SessionID.make(item.sessionID),
+              messageID: MessageID.make(item.promptID),
+              parts: [
+                {
+                  type: "text",
+                  text:
+                    "Scheduled task " + item.scheduleID + " (occurrence " + item.id + ").\n" + item.definition.prompt,
+                },
+              ],
+              ...(target.type === "new_session"
+                ? {
+                    agent: target.agent,
+                    model: target.model
+                      ? {
+                          providerID: ProviderV2.ID.make(target.model.providerID),
+                          modelID: ModelV2.ID.make(target.model.id),
+                        }
+                      : undefined,
+                    variant: target.model?.variant,
+                  }
+                : {}),
+            },
+            authorize,
+          )
+          .pipe(Effect.catchTag("ScheduledAdmissionDenied", () => Effect.succeed("cancelled" as const))),
       ),
     ),
   )
+  if (result === "cancelled") return { state: "cancelled" as const }
   if (Option.isNone(result)) throw new Busy("Waiting for the target session to become idle")
   const message = result.value
   const completed =

@@ -492,8 +492,10 @@ it.instance(
           messageID,
           parts: [{ type: "text", text: "Run scheduled check" }],
         },
-        async () => {
+        async (persist) => {
+          await persist()
           admissions.push(messageID)
+          return true
         },
       )
       expect(Option.isSome(result)).toBe(true)
@@ -516,8 +518,10 @@ it.instance(
             messageID,
             parts: [{ type: "text", text: "Run scheduled check" }],
           },
-          async () => {
+          async (persist) => {
+            await persist()
             admissions.push(messageID)
+            return true
           },
         )
         .pipe(Effect.exit)
@@ -546,8 +550,10 @@ it.instance(
           messageID,
           parts: [{ type: "text", text: "Queued scheduled task" }],
         },
-        async () => {
+        async (persist) => {
+          await persist()
           admissions.push(messageID)
+          return true
         },
       )
       expect(Option.isNone(result)).toBe(true)

@@ -6,11 +6,7 @@ import { DateTime } from "luxon"
 import { type Accessor, createEffect, createMemo, createRoot, type JSX, startTransition } from "solid-js"
 import { produce } from "solid-js/store"
 import { useCommand } from "@/context/command"
-import {
-  loadHomeSessionIndex,
-  retainHomeSessions,
-  type HomeSessionEvents,
-} from "@/context/global-sync/home-session-index"
+import { loadHomeSessionIndex, type HomeSessionEvents } from "@/context/global-sync/home-session-index"
 import type { LocalProject } from "@/context/layout"
 import { useLanguage } from "@/context/language"
 import { ServerConnection, useServer } from "@/context/server"
@@ -94,14 +90,7 @@ export function createHomeSessionsController(
     }),
     () => homeSessions().queryClient,
   )
-  const indexedSessions = createMemo(() =>
-    retainHomeSessions(
-      homeSessions().sessions(sessionLoad.data, sessionEventLoad.data),
-      HOME_SESSION_LIMIT,
-      Date.now(),
-      pinnedIDs(),
-    ),
-  )
+  const indexedSessions = createMemo(() => homeSessions().sessions(sessionLoad.data, sessionEventLoad.data))
   const allRecords = createMemo(() =>
     buildHomeSessionRecords({
       sessions: indexedSessions,
@@ -235,25 +224,27 @@ export function createHomeSessionsController(
         const ctx = home.server.focusedContext()
         if (!conn || !ctx) return
         const [, setStore] = ctx.sync.child(session.directory)
-        if ((await ctx.sdk.protocol) !== "v1") return
         await archiveHomeSession({
           server: ServerConnection.key(conn),
           session,
-          archive: (sessionID) =>
-            ctx.sdk.client.session.update({
-              sessionID,
-              directory: session.directory,
-              time: { archived: Date.now() },
-            }),
+          archive: async (sessionID) =>
+            (await ctx.sdk.protocol) === "v2"
+              ? ctx.sdk.client.v2.session.archive({ sessionID })
+              : ctx.sdk.client.session.update({
+                  sessionID,
+                  directory: session.directory,
+                  time: { archived: Date.now() },
+                }),
           remove: () => {
             server.sessionPins.set(ServerConnection.key(conn), session.id, false)
+            ctx.sync.session.evict(session.id)
             setStore(
               produce((draft) => {
                 const match = Binary.search(draft.session, session.id, (item) => item.id)
                 if (match.found) draft.session.splice(match.index, 1)
               }),
             )
-            homeSessions().remove(session.id)
+            ctx.sync.homeSessions.remove(session.id)
           },
           onError: (cause) =>
             showToast({

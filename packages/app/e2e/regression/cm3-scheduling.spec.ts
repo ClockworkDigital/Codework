@@ -112,6 +112,52 @@ const panel = (page: Page) => page.locator('[data-component="scheduling-panel"]'
 const open = (page: Page) =>
   page.locator(".cm3-sidebar").getByRole("button", { name: "Scheduled", exact: true }).click()
 
+for (const route of ["session", "draft", "legacy"] as const) {
+  test(`new schedules prefer the active ${route} directory over the last project`, async ({ page }) => {
+    const api = await setup(page)
+    await page.addInitScript(
+      ({ directory, legacy }) => {
+        localStorage.setItem(
+          "opencode.global.dat:server",
+          JSON.stringify({
+            projects: {
+              local: [
+                { worktree: "C:/OpenCode/OtherProject", expanded: true },
+                { worktree: directory, expanded: true },
+              ],
+            },
+            lastProject: { local: "C:/OpenCode/OtherProject" },
+          }),
+        )
+        if (legacy)
+          localStorage.setItem(
+            "settings.v3",
+            JSON.stringify({ general: { newLayoutDesigns: false, quietCompanion: true } }),
+          )
+      },
+      { directory: fixture.directory, legacy: route === "legacy" },
+    )
+    await page.goto(
+      route === "draft"
+        ? "/new-session?draftId=draft_scheduling"
+        : route === "legacy"
+          ? `/${base64Encode(fixture.directory)}/session`
+          : stressSessionHref(fixture.sourceID),
+    )
+    await expect(page.locator('[data-component="prompt-input"][contenteditable="true"]')).toBeEditable()
+    await open(page)
+    await panel(page).getByRole("button", { name: "New task", exact: true }).click()
+    await expect(panel(page).getByLabel("Project folder", { exact: true })).toHaveValue(fixture.directory)
+    await panel(page).getByLabel("Name", { exact: true }).fill("Active project review")
+    await panel(page).getByLabel("Instructions", { exact: true }).fill("Review this project.")
+    await panel(page).getByRole("button", { name: "Save task", exact: true }).click()
+    await expect(panel(page).getByText("Active project review", { exact: true })).toBeVisible()
+    expect(api.requests.findLast((item) => item.action === "create")?.definition?.target).toMatchObject({
+      directory: fixture.directory,
+    })
+  })
+}
+
 test("the scheduling deep link opens the panel on CM3 home", async ({ page }) => {
   await setup(page)
   await page.goto("/scheduled")

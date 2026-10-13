@@ -1,6 +1,8 @@
 {
   "extends": "../tsconfig.json",
   "compilerOptions": {
+    "composite": false,
+    "emitDeclarationOnly": false,
     "noEmit": true,
     "rootDir": "..",
     "types": ["node", "bun"]
@@ -17,6 +19,8 @@
     "../src/pages/session/timeline/observe-element-offset.ts",
     "./regression/new-session-panel-corner.spec.ts",
     "./regression/cm3-live-integration.spec.ts",
+    "./regression/cm3-drafts.spec.ts",
+    "./regression/cm3-scheduling.spec.ts",
     "./regression/session-timeline-context-resize.spec.ts",
     "./utils/**/*.ts"
   ]

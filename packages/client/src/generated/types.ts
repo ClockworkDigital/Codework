@@ -365,6 +365,10 @@ export type SessionsGetOutput = {
   }
 }["data"]
 
+export type SessionsArchiveInput = { readonly sessionID: { readonly sessionID: string }["sessionID"] }
+
+export type SessionsArchiveOutput = void
+
 export type SessionsSwitchAgentInput = {
   readonly sessionID: { readonly sessionID: string }["sessionID"]
   readonly agent: { readonly agent: string }["agent"]
@@ -722,6 +726,14 @@ export type SessionsHistoryOutput = {
           readonly location: { readonly directory: string; readonly workspaceID?: string }
           readonly subdirectory?: string
         }
+      }
+    | {
+        readonly id: string
+        readonly metadata?: { readonly [x: string]: JsonValue }
+        readonly type: "session.next.archived"
+        readonly durable?: { readonly aggregateID: string; readonly seq: number; readonly version: number }
+        readonly location?: { readonly directory: string; readonly workspaceID?: string }
+        readonly data: { readonly timestamp: number; readonly sessionID: string }
       }
     | {
         readonly id: string
@@ -1180,6 +1192,14 @@ export type SessionsEventsOutput =
         readonly location: { readonly directory: string; readonly workspaceID?: string }
         readonly subdirectory?: string
       }
+    }
+  | {
+      readonly id: string
+      readonly metadata?: { readonly [x: string]: unknown }
+      readonly type: "session.next.archived"
+      readonly durable?: { readonly aggregateID: string; readonly seq: number; readonly version: number }
+      readonly location?: { readonly directory: string; readonly workspaceID?: string }
+      readonly data: { readonly timestamp: number; readonly sessionID: string }
     }
   | {
       readonly id: string

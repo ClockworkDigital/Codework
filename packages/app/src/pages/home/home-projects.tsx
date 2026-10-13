@@ -8,6 +8,7 @@ export function HomeProjects(props: {
   sidebar?: boolean
   renderProjectSessions?: HomeProjectsViewProps["renderProjectSessions"]
   onSelectProject?: HomeProjectsViewProps["onSelectProject"]
+  onActivateProject?: HomeProjectsViewProps["onActivateProject"]
   onOpenProjectNewSession?: HomeProjectsViewProps["onOpenProjectNewSession"]
 }) {
   return (
@@ -38,6 +39,7 @@ export function HomeProjects(props: {
       onPinProject={props.projects.project.pin}
       onToggleProjectExpanded={props.projects.project.toggleExpanded}
       onSelectProject={props.onSelectProject ?? props.projects.project.select}
+      onActivateProject={props.onActivateProject}
       onAddProjects={props.projects.project.add}
       onOpenProjectNewSession={props.onOpenProjectNewSession ?? props.projects.project.openNewSession}
       onEditProject={props.projects.project.edit}

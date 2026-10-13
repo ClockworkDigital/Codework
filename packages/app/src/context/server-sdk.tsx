@@ -1,5 +1,5 @@
 import type { OpenCodeEvent } from "@opencode-ai/client/promise"
-import type { Event } from "@opencode-ai/sdk/v2/client"
+import type { Event, SessionNextArchived } from "@opencode-ai/sdk/v2/client"
 import { createSimpleContext } from "@opencode-ai/ui/context"
 import { createGlobalEmitter } from "@solid-primitives/event-bus"
 import { makeEventListener } from "@solid-primitives/event-listener"
@@ -25,7 +25,9 @@ type CurrentDelta = Extract<
   { type: "session.text.delta" | "session.reasoning.delta" | "session.tool.input.delta" | "session.compaction.delta" }
 >
 
-export function adaptServerEvent(event: OpenCodeEvent): ServerEvent {
+export function adaptServerEvent(event: OpenCodeEvent | SessionNextArchived): ServerEvent {
+  if (event.type === "session.next.archived")
+    return { id: event.id, type: event.type, properties: event.data } as ServerEvent
   if (event.type === "permission.v2.asked") {
     return {
       id: event.id,

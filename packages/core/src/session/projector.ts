@@ -1,6 +1,6 @@
 export * as SessionProjector from "./projector"
 
-import { and, desc, eq, gt, or, sql } from "drizzle-orm"
+import { and, desc, eq, gt, isNull, or, sql } from "drizzle-orm"
 import { DateTime, Effect, Layer, Schema } from "effect"
 import { Database } from "../database/database"
 import { EventV2 } from "../event"
@@ -256,6 +256,17 @@ const layer = Layer.effectDiscard(
     )
     yield* events.project(SessionV1.Event.Deleted, (event) =>
       db.delete(SessionTable).where(eq(SessionTable.id, event.data.sessionID)).run().pipe(Effect.orDie),
+    )
+    yield* events.project(SessionEvent.Archived, (event) =>
+      db
+        .update(SessionTable)
+        .set({
+          time_archived: DateTime.toEpochMillis(event.data.timestamp),
+          time_updated: DateTime.toEpochMillis(event.data.timestamp),
+        })
+        .where(and(eq(SessionTable.id, event.data.sessionID), isNull(SessionTable.time_archived)))
+        .run()
+        .pipe(Effect.orDie),
     )
     yield* events.project(SessionV1.Event.MessageUpdated, (event) =>
       Effect.gen(function* () {

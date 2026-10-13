@@ -18,7 +18,7 @@ import { useLanguage } from "@/context/language"
 import { usePlatform } from "@/context/platform"
 import { ServerConnection, useServer } from "@/context/server"
 import { useGlobal } from "@/context/global"
-import { useTabs } from "@/context/tabs"
+import { tabKey, useTabs } from "@/context/tabs"
 import { useLayout } from "@/context/layout"
 import { decode64 } from "@/utils/base64"
 import { sessionHref } from "@/utils/session-route"
@@ -251,9 +251,24 @@ function createScheduling() {
   onCleanup(() => window.removeEventListener("keydown", escape, { capture: true }))
   const edit = (task?: ScheduledTask) =>
     leave(() => {
+      const route = location.pathname.match(/^\/server\/[^/]+\/session\/([^/]+)$/)
+      const draftID =
+        location.pathname === "/new-session" ? new URLSearchParams(location.search).get("draftId") : undefined
+      const tab = tabs.store.find((tab) => {
+        if (tab.server !== serverKey()) return false
+        if (tab.type === "draft") return tab.draftID === draftID
+        return tab.sessionId === route?.[1]
+      })
+      const directory =
+        tab?.type === "draft"
+          ? tab.directory
+          : (tab && tabs.info[tabKey(tab)]?.directory) ||
+            (route && connection() && global.ensureServerCtx(connection()!).sync.session.peek(route[1])?.directory) ||
+            decode64(location.pathname.match(/^\/([^/]+)\/session(?:\/[^/]+)?$/)?.[1])
       const form = draft(
         task,
-        (location.pathname === "/" ? state.homeDirectory : undefined) ||
+        directory ||
+          (location.pathname === "/" ? state.homeDirectory : undefined) ||
           projects().last() ||
           projects().list()[0]?.worktree ||
           "",
