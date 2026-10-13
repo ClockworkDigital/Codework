@@ -62,10 +62,10 @@ describe("decideCaptureVerdict", () => {
     expect(verdict.message).toContain("cdpTarget=worker")
     expect(verdict.message).toContain("cdpMime=text/event-stream")
     expect(verdict.message).toContain("host=abc.lambda-url.eu-west-1.on.aws")
-    expect(verdict.message).not.toContain("cause=inject_arm_miss")
+    expect(verdict.message).not.toContain("cause=recorder_miss")
   })
 
-  test("flags inject/arm miss for iframe + recorderSawRequest=false", () => {
+  test("flags recorder miss for iframe + recorderSawRequest=false", () => {
     const verdict = decideCaptureVerdict({
       responseSource: "dom",
       pageRecorderRequestSeen: false,
@@ -83,7 +83,7 @@ describe("decideCaptureVerdict", () => {
     expect(verdict.kind).toBe("recorder_parser_miss")
     expect(verdict.message).toContain("recorderSawRequest=false")
     expect(verdict.message).toContain("cdpTarget=iframe")
-    expect(verdict.message).toContain("cause=inject_arm_miss")
+    expect(verdict.message).toContain("cause=recorder_miss")
     expect(verdict.message).toContain("host=ydrlzt42d3f4jnndx73jwk6x3q0lnrho.lambda-url.eu-west-1.on.aws")
   })
 })

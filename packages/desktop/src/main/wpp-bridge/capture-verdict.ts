@@ -76,7 +76,7 @@ export function decideCaptureVerdict(input: CaptureInput): CaptureVerdict {
 // wrong-agent "[diag …]" convention. `recorderSawRequest` vs `cdpTarget` is the key split for
 // recorder_parser_miss:
 //   - worker/service_worker + recorderSawRequest=false → structural miss (patch can't reach)
-//   - iframe/page + recorderSawRequest=false → inject/arm miss (patch never saw the Fetch)
+//   - iframe/page + recorderSawRequest=false → recorder miss (inject/arm or admission filter)
 //   - recorderSawRequest=true → saw the request but failed to parse / fell to DOM
 // `cdpMime` flags a streamed body.
 function captureDiagSuffix(input: CaptureInput): string {
@@ -92,16 +92,17 @@ function captureDiagSuffix(input: CaptureInput): string {
     w.mimeType ? `cdpMime=${w.mimeType}` : "",
     w.targetType ? `cdpTarget=${w.targetType}` : "",
     host ? `host=${host}` : "",
-    injectArmHint(input),
+    recorderMissHint(input),
   ].filter(Boolean)
   return ` [capture ${parts.join(" ")}]`
 }
 
-function injectArmHint(input: CaptureInput): string {
+function recorderMissHint(input: CaptureInput): string {
   if (input.pageRecorderRequestSeen) return ""
   const target = input.witness.targetType
   if (target !== "iframe" && target !== "page") return ""
-  return "cause=inject_arm_miss"
+  // Covers inject/arm races and post-arm admission filter misses — not inject-only.
+  return "cause=recorder_miss"
 }
 
 function hostOf(url: string | null | undefined): string {

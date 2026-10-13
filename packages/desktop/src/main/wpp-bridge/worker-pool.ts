@@ -165,9 +165,10 @@ export class WorkerPool {
       throwIfClientAborted(signal)
       const startedAt = Date.now()
       this.record(worker.id, "protocol-ready", {})
-      const admittedJob = { ...job, payload: { ...job.payload, expectedEndpoint: worker.protocolEndpoint } }
+      // Do not pin protocolEndpoint onto the job: the probe often learns /v1/chat while the live
+      // turn hits *.lambda-url…/, and pageRecorder's expectedEndpoint gate would drop the Fetch.
       const result = await withClientAbort(
-        worker.controller.runJob(admittedJob, onProgress, remainingJobTimeout(job)),
+        worker.controller.runJob(job, onProgress, remainingJobTimeout(job)),
         signal,
       )
       this.record(worker.id, "job-result", {

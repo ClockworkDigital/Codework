@@ -228,7 +228,11 @@ async function runJobWithProgress(job, jobId) {
       ignoredAssistantErrorText,
       domMessage: beforeAssistantMessage
     });
-    capture = beginNetworkCapture({ verboseRecorder, expectedPrompt: prompt, expectedEndpoint: job?.payload?.expectedEndpoint });
+    // Live turns must not pin expectedPrompt/expectedEndpoint: dedicated-chat wire bodies and
+    // lambda URLs often fail that admission gate while CDP still sees the SSE, which ends as
+    // recorderSawRequest=false + unfinished stream. Greeting isolation stays on requireIdle /
+    // waitForGreetingSettlement; the arm-with-prompt API remains for tests.
+    capture = beginNetworkCapture({ verboseRecorder });
     registerProgressRun(capture.runId, jobId);
   });
   const afterSubmitDiagnostics = buildBridgeDiagnostics({

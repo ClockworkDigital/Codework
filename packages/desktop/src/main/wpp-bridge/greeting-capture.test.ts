@@ -42,6 +42,22 @@ describe("WPP greeting capture boundary", () => {
     expect(h.records()).toEqual([])
     expect(h.requests()).toEqual([])
   })
+
+  test("records a lambda SSE when armed without expectedPrompt (live job path)", async () => {
+    const h = await harness()
+    h.arm("prompt")
+    const request = h.fetch(
+      "https://ydrlzt42d3f4jnndx73jwk6x3q0lnrho.lambda-url.eu-west-1.on.aws/",
+      JSON.stringify({ messages: [{ content: "live turn" }] }),
+    )
+    const body = h.stream("text/event-stream")
+    await request
+    body.enqueue(new TextEncoder().encode(sse("pong")))
+    body.close()
+    await h.idle()
+    expect(h.requests()).toHaveLength(1)
+    expect(h.records().at(-1)).toMatchObject({ runId: "prompt", finalText: "pong", done: true })
+  })
   test.each([
     "https://www.google-analytics.com/g/collect",
     "https://events.launchdarkly.com/events/bulk/flags",
