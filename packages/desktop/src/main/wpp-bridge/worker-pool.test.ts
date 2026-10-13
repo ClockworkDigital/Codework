@@ -1,11 +1,74 @@
 import { describe, expect, test } from "bun:test"
-import { cleanupWindowOnFailure, classifyWppAuthState, classifyWppProjectAccessState, classifyWppSessionProbe, isWppFrameUrl, wppAuthRequiredError, wppProjectAccessError } from "./worker-startup"
+import {
+  cleanupWindowOnFailure,
+  classifyWppAuthState,
+  classifyWppProjectAccessState,
+  classifyWppSessionProbe,
+  isWppFrameUrl,
+  wppAuthRequiredError,
+  wppProjectAccessError,
+} from "./worker-startup"
 import { selectWorkerSlot, shouldReapWorker, ttlForWorker, type WorkerView } from "./worker-slot"
-import { WorkerPool, openAssistantPopover } from "./worker-pool"
-import vm from "node:vm"
-import type { WebContents } from "electron"
-import { runLogRecord } from "./proxy/logging.mjs"
+import { WorkerPool, submissionStartedAt, toggleWorkerWindows } from "./worker-pool"
+import { createCdpNetworkReducer } from "./cdp-network-recorder"
 import { WPP_COOKIE_MONSTER_PROJECT_URL } from "./proxy/wppProject.mjs"
+import { commitThread, resetThread, threadContextUsage } from "./proxy/sessionThreads.mjs"
+import type { WorkerLogWriter } from "./worker-logging"
+
+const DESKTOP_KEY = JSON.stringify(["desktop", "runtime-D", "sess-A", "CM_Opus5.5-High"])
+const CLI_KEY = JSON.stringify(["cli", "runtime-A", "sess-A", "CM_Opus5.5-High"])
+const OTHER_CLI_KEY = JSON.stringify(["cli", "runtime-B", "sess-A", "CM_Opus5.5-High"])
+
+test("concurrent jobs retain their own worker correlation and log retirement reasons", async () => {
+  const records: { id: number; event: string; details: Record<string, unknown> }[] = []
+  const log: WorkerLogWriter = (id, event, details) => records.push({ id, event, details })
+  const pool = new WorkerPool({ chatUrl: "https://example.test/chat", log })
+  const completions = new Map<number, (value: unknown) => void>()
+  const workers = [1, 2].map((id) => ({
+    id,
+    window: { isDestroyed: () => false, destroy: () => {} },
+    agent: "test-agent",
+    protocolAgent: "test-agent",
+    sessionKey: `private-owner-${id}`,
+    subagent: false,
+    busy: false,
+    lastUsed: Date.now(),
+    controller: { runJob: () => new Promise((resolve) => completions.set(id, resolve)) },
+    netWitness: { summarizeWindow: () => ({ cdpRequestSeen: true, cdpStatus: 200, cdpFinished: true }) },
+  }))
+  workers.forEach((worker) => Reflect.get(pool, "workers").set(worker.id, worker))
+  try {
+    const runs = workers.map((worker) =>
+      pool.run({
+        id: `job-${worker.id}`,
+        runId: `run-${worker.id}`,
+        payload: { model: worker.agent, sessionKey: worker.sessionKey, continueThread: true },
+      }),
+    )
+    await Promise.resolve()
+    await Promise.resolve()
+    completions.get(2)!({ ok: false, type: "o1_code_thread_desync", error: "private error" })
+    completions.get(1)!({ ok: true, responseSource: "network", finalText: "private response" })
+    const results = await Promise.allSettled(runs)
+    expect(results[0].status).toBe("fulfilled")
+    if (results[0].status === "fulfilled") {
+      expect(results[0].value).toMatchObject({ worker: { workerId: 1, runId: "run-1", jobId: "job-1" } })
+    }
+    expect(results[1].status).toBe("rejected")
+    if (results[1].status === "rejected") {
+      expect(results[1].reason.worker).toEqual({ workerId: 2, runId: "run-2", jobId: "job-2" })
+    }
+    expect(records.filter((record) => record.event === "job-started").map((record) => record.details.runId)).toEqual([
+      "run-1",
+      "run-2",
+    ])
+    expect(records.find((record) => record.event === "worker-discarded")?.details.reason).toBe("o1_code_thread_desync")
+    expect(records.find((record) => record.event === "worker-released")?.details.jobId).toBe("job-1")
+    expect(JSON.stringify(records)).not.toContain("private")
+  } finally {
+    pool.destroy()
+  }
+})
 
 const worker = (
   id: number,
@@ -108,19 +171,12 @@ describe("selectWorkerSlot", () => {
   })
 
   test("adopts an unpinned agent-matching worker when the session has no tab yet", () => {
-    const slot = selectWorkerSlot(
-      [worker(1, "GPT", false, 1), worker(2, "Opus", false, 2)],
-      "Opus",
-      "sess-A::Opus",
-    )
+    const slot = selectWorkerSlot([worker(1, "GPT", false, 1), worker(2, "Opus", false, 2)], "Opus", "sess-A::Opus")
     expect(slot).toEqual({ action: "reuse", id: 2 })
   })
 
   test("a sessionless request does not steal a session-pinned worker", () => {
-    const slot = selectWorkerSlot(
-      [worker(1, "Opus", false, 1, "sess-A::Opus"), worker(2, "", false, 5)],
-      "Opus",
-    )
+    const slot = selectWorkerSlot([worker(1, "Opus", false, 1, "sess-A::Opus"), worker(2, "", false, 5)], "Opus")
     expect(slot).toEqual({ action: "reuse", id: 2 })
   })
 
@@ -140,8 +196,13 @@ describe("ttlForWorker", () => {
     expect(ttlForWorker(worker(1, "Opus", false, 0), ttls)).toBe(10)
   })
 
-  test("session-pinned worker uses the pinned TTL", () => {
-    expect(ttlForWorker(worker(1, "Opus", false, 0, "sess-A::Opus"), ttls)).toBe(30)
+  test("desktop session-pinned worker uses the pinned TTL", () => {
+    expect(ttlForWorker(worker(1, "Opus", false, 0, DESKTOP_KEY), ttls)).toBe(30)
+  })
+
+  test("non-desktop runtime-pinned workers use the short TTL", () => {
+    expect(ttlForWorker(worker(1, "Opus", false, 0, CLI_KEY), ttls)).toBe(5)
+    expect(ttlForWorker(worker(1, "Opus", false, 0, JSON.stringify(["acp", "r", "s", "Opus"])), ttls)).toBe(5)
   })
 
   test("sub-agent pinned worker uses the shorter subagent TTL", () => {
@@ -161,14 +222,90 @@ describe("ttlForWorker", () => {
     const subagent = 5 * 60 * 1000
 
     const sub = worker(1, "Opus", false, lastUsed, "sub-A::Opus", true)
-    const interactive = worker(2, "Opus", false, lastUsed, "sess-A::Opus")
+    const interactive = worker(2, "Opus", false, lastUsed, DESKTOP_KEY)
 
     expect(shouldReapWorker(sub, now, ttlForWorker(sub, { idle, pinned, subagent }))).toBe(true)
     expect(shouldReapWorker(interactive, now, ttlForWorker(interactive, { idle, pinned, subagent }))).toBe(false)
   })
 })
 
+describe("WorkerPool startup visibility", () => {
+  test("toggles starting windows before they enter the ready pool", () => {
+    const pool = new WorkerPool({ chatUrl: "https://example.test/chat" })
+    const calls: string[] = []
+    let destroyed = false
+    Reflect.get(pool, "startingWorkers").set(1, {
+      window: {
+        isDestroyed: () => destroyed,
+        showInactive: () => calls.push("show"),
+        hide: () => calls.push("hide"),
+        setTitle: (title: string) => calls.push(title),
+        destroy: () => {
+          destroyed = true
+        },
+      },
+      agent: "test-agent",
+      sessionKey: "test-session",
+      subagent: false,
+    })
+    const visible = toggleWorkerWindows()
+    expect(calls[0]).toBe(visible ? "show" : "hide")
+    calls.length = 0
+    expect(toggleWorkerWindows()).toBe(!visible)
+    expect(calls[0]).toBe(visible ? "hide" : "show")
+    pool.destroy()
+    expect(destroyed).toBe(true)
+    expect(Reflect.get(pool, "startingWorkers").size).toBe(0)
+  })
+})
+
 describe("WorkerPool cancellation", () => {
+  test("does not start the user job when cancellation follows protocol preparation", async () => {
+    const pool = new WorkerPool({ chatUrl: "https://example.test/chat" })
+    const probe = Promise.withResolvers<unknown>()
+    const started = Promise.withResolvers<void>()
+    const cancellation = new AbortController()
+    let destroyed = false
+    let userJobs = 0
+    const entry = {
+      id: 1,
+      window: {
+        isDestroyed: () => destroyed,
+        destroy: () => {
+          destroyed = true
+        },
+      },
+      controller: {
+        runJob: (job: { id?: string }) => {
+          if (job.id === "user-job") {
+            userJobs += 1
+            return Promise.resolve({ ok: true })
+          }
+          started.resolve()
+          return probe.promise
+        },
+      },
+      netWitness: { summarizeWindow: () => ({}) },
+      agent: "CM_Opus5.5-High",
+      protocolAgent: "",
+      sessionKey: "session",
+      subagent: false,
+      busy: true,
+      lastUsed: Date.now(),
+    }
+    Reflect.get(pool, "workers").set(entry.id, entry)
+    Reflect.set(pool, "acquire", async () => entry)
+    const run = pool
+      .run({ id: "user-job", payload: { model: entry.agent } }, undefined, cancellation.signal)
+      .catch((error) => error)
+    await started.promise
+    probe.resolve({ ok: true, finalText: "CM_CAPABILITY_V1_OK" })
+    queueMicrotask(() => queueMicrotask(() => cancellation.abort()))
+    expect(await run).toMatchObject({ type: "o1_code_client_aborted" })
+    expect(userJobs).toBe(0)
+    expect(destroyed).toBe(true)
+    pool.destroy()
+  })
   test("discards the leased worker when its client aborts", async () => {
     const pool = new WorkerPool({ chatUrl: "https://example.test/chat" })
     let destroyed = false
@@ -194,17 +331,23 @@ describe("WorkerPool cancellation", () => {
     Reflect.get(pool, "workers").set(worker.id, worker)
     Reflect.set(pool, "acquire", async () => worker)
     const controller = new AbortController()
-    const run = pool.run({
-      id: "job",
-      payload: {
-        model: worker.agent,
-        sessionKey: worker.sessionKey,
-        continueThread: true,
-      },
-    }, undefined, controller.signal).then(
-      () => "resolved",
-      (error) => Reflect.get(error, "type"),
-    )
+    const run = pool
+      .run(
+        {
+          id: "job",
+          payload: {
+            model: worker.agent,
+            sessionKey: worker.sessionKey,
+            continueThread: true,
+          },
+        },
+        undefined,
+        controller.signal,
+      )
+      .then(
+        () => "resolved",
+        (error) => Reflect.get(error, "type"),
+      )
 
     controller.abort()
     const outcome = await Promise.race([
@@ -219,54 +362,57 @@ describe("WorkerPool cancellation", () => {
 })
 
 describe("WorkerPool capture failures", () => {
-  test("discards a worker after an image attachment desync", async () => {
-    const pool = new WorkerPool({ chatUrl: "https://example.test/chat" })
-    let destroyed = false
-    const worker = {
-      id: 2,
-      window: {
-        isDestroyed: () => destroyed,
-        destroy: () => {
-          destroyed = true
+  test.each(["o1_code_image_attachment_desync", "o1_code_greeting_not_settled", "o1_code_fresh_chat_failed"])(
+    "discards a worker after %s",
+    async (type) => {
+      const pool = new WorkerPool({ chatUrl: "https://example.test/chat" })
+      let destroyed = false
+      const worker = {
+        id: 2,
+        window: {
+          isDestroyed: () => destroyed,
+          destroy: () => {
+            destroyed = true
+          },
         },
-      },
-      controller: {
-        runJob: async () => ({
-          ok: false,
-          error: "Timed out waiting for trusted image paste.",
-          statusCode: 502,
-          type: "o1_code_image_attachment_desync",
-        }),
-      },
-      netWitness: { summarizeWindow: () => ({}) },
-      agent: "CM_GPT-5.6 Sol - High",
-      protocolAgent: "CM_GPT-5.6 Sol - High",
-      sessionKey: "session",
-      subagent: false,
-      busy: true,
-      lastUsed: Date.now(),
-    }
-    Reflect.get(pool, "workers").set(worker.id, worker)
-    Reflect.set(pool, "acquire", async () => worker)
-
-    const error = await pool
-      .run({
-        id: "job",
-        payload: {
-          model: worker.agent,
-          sessionKey: worker.sessionKey,
-          continueThread: true,
+        controller: {
+          runJob: async () => ({
+            ok: false,
+            error: "Timed out waiting for trusted image paste.",
+            statusCode: 502,
+            type,
+          }),
         },
-      })
-      .then(
-        () => null,
-        (failure) => failure,
-      )
+        netWitness: { summarizeWindow: () => ({}) },
+        agent: "CM_GPT-5.6 Sol - High",
+        protocolAgent: "CM_GPT-5.6 Sol - High",
+        sessionKey: "session",
+        subagent: false,
+        busy: true,
+        lastUsed: Date.now(),
+      }
+      Reflect.get(pool, "workers").set(worker.id, worker)
+      Reflect.set(pool, "acquire", async () => worker)
 
-    expect(Reflect.get(error, "type")).toBe("o1_code_image_attachment_desync")
-    expect(destroyed).toBe(true)
-    pool.destroy()
-  })
+      const error = await pool
+        .run({
+          id: "job",
+          payload: {
+            model: worker.agent,
+            sessionKey: worker.sessionKey,
+            continueThread: true,
+          },
+        })
+        .then(
+          () => null,
+          (failure) => failure,
+        )
+
+      expect(Reflect.get(error, "type")).toBe(type)
+      expect(destroyed).toBe(true)
+      pool.destroy()
+    },
+  )
 
   test("classifies a no-network-response worker result for fresh replay", async () => {
     const pool = new WorkerPool({ chatUrl: "https://example.test/chat" })
@@ -307,17 +453,19 @@ describe("WorkerPool capture failures", () => {
     Reflect.get(pool, "workers").set(worker.id, worker)
     Reflect.set(pool, "acquire", async () => worker)
 
-    const error = await pool.run({
-      id: "job",
-      payload: {
-        model: worker.agent,
-        sessionKey: worker.sessionKey,
-        continueThread: true,
-      },
-    }).then(
-      () => null,
-      (failure) => failure,
-    )
+    const error = await pool
+      .run({
+        id: "job",
+        payload: {
+          model: worker.agent,
+          sessionKey: worker.sessionKey,
+          continueThread: true,
+        },
+      })
+      .then(
+        () => null,
+        (failure) => failure,
+      )
 
     expect(Reflect.get(error, "type")).toBe("o1_code_capture_failure")
     expect(Reflect.get(error, "kind")).toBe("wpp_request_failed")
@@ -326,209 +474,173 @@ describe("WorkerPool capture failures", () => {
   })
 })
 
-describe("assistant popover startup", () => {
-  test("prefers the dedicated control even without an English label", async () => {
-    const h = popoverHarness()
-    h.button.innerText = ""
-    h.button.textContent = ""
-    await h.run()
-    expect(h.clicks).toEqual([{ time: 0, x: 120 }])
-  })
-
-  test("falls back to an aria-labelled button when the dedicated control is absent", async () => {
-    const h = popoverHarness()
-    h.state.dedicated = false
-    h.fallback.innerText = ""
-    h.fallback.textContent = ""
-    h.fallback.attributes["aria-label"] = "AI Assistant"
-    await h.run()
-    expect(h.clicks).toEqual([{ time: 0, x: 320 }])
-  })
-
-  test("does not toggle a slowly opening expanded panel closed", async () => {
-    const h = popoverHarness()
-    h.state.openAfter = 45000
-    h.state.expandOnClick = true
-    await h.run()
-    expect(h.clicks).toEqual([{ time: 0, x: 120 }])
-    expect(h.state.time).toBe(45000)
-  })
-
-  test("spaces retries while still detecting readiness on every poll", async () => {
-    const h = popoverHarness()
-    h.state.openAfter = 3500
-    await h.run()
-    expect(h.clicks).toEqual([{ time: 0, x: 120 }, { time: 3000, x: 120 }])
-    expect(h.state.time).toBe(3500)
-  })
-
-  test.each(["disabled", "aria-disabled"])("waits for a %s control to become enabled", async (attribute) => {
-    const h = popoverHarness()
-    h.button.attributes[attribute] = "true"
-    h.state.onPoll = () => {
-      if (h.state.time >= 1000) delete h.button.attributes[attribute]
-    }
-    await h.run()
-    expect(h.clicks).toEqual([{ time: 1000, x: 120 }])
-  })
-
-  test("waits for an overlay to clear and accepts a child hit target", async () => {
-    const h = popoverHarness()
-    h.state.covered = true
-    h.state.onPoll = () => { h.state.covered = h.state.time < 1000 }
-    await h.run()
-    expect(h.clicks).toEqual([{ time: 1000, x: 120 }])
-  })
-
-  test("does not click a zero-sized control even when its centre hits a child", async () => {
-    const h = popoverHarness()
-    h.state.onPoll = () => {
-      h.button.rect.height = h.state.time < 1000 ? 0 : 20
-    }
-    await h.run()
-    expect(h.clicks).toEqual([{ time: 1000, x: 120 }])
-  })
-
-  test("waits until an offscreen control enters the viewport", async () => {
-    const h = popoverHarness()
-    h.state.onPoll = () => {
-      h.button.rect.left = h.state.time < 1000 ? -100 : 100
-    }
-    await h.run()
-    expect(h.clicks).toEqual([{ time: 1000, x: 120 }])
-  })
-
-  test("returns immediately when the assistant iframe already exists", async () => {
-    const h = popoverHarness()
-    h.state.openAfter = 0
-    await h.run()
-    expect(h.clicks).toEqual([])
-    expect(h.state.time).toBe(0)
-  })
-
-  test("preserves safe timeout diagnostics through default run-log filtering", async () => {
-    const h = popoverHarness()
-    h.state.openAfter = Infinity
-    h.state.expandOnClick = true
-    h.state.iframeSrc = "about:blank"
-    const error = await h.run().catch((failure) => failure)
-    expect(error.message).toBe("Timed out opening WPP AI Assistant popover.")
-    expect(error.diagnostics).toEqual({
-      phase: "assistant-popover",
-      elapsedMs: 60000,
-      clickCount: 1,
-      inspectionFailures: 0,
-      popover: {
-        buttonFound: true,
-        expanded: true,
-        disabled: false,
-        unobscured: true,
-        iframePresent: true,
+describe("WorkerPool retirement", () => {
+  const mirrorBody = { model: "CM_Opus5.5-High", messages: [{ role: "user", content: "hi" }] }
+  const mirror = (key: string) =>
+    commitThread(key, mirrorBody, { role: "assistant", content: "ok" }, { totalTokens: 10 })
+  const fakeWorker = (id: number, sessionKey: string, lastUsed: number, busy = false) => {
+    const state = { destroyed: false }
+    return {
+      state,
+      worker: {
+        id,
+        window: {
+          isDestroyed: () => state.destroyed,
+          destroy: () => {
+            state.destroyed = true
+          },
+        },
+        controller: { runJob: async () => ({ ok: false, type: "o1_code_thread_desync", error: "lost" }) },
+        netWitness: { summarizeWindow: () => ({}) },
+        agent: "CM_Opus5.5-High",
+        protocolAgent: "CM_Opus5.5-High",
+        sessionKey,
+        subagent: false,
+        busy,
+        lastUsed,
       },
-    })
-    expect(runLogRecord({ bridgeResult: error.bridgeResult }, false)).toEqual({
-      bridgeResult: { diagnostics: error.diagnostics },
-    })
-    expect(JSON.stringify(error.bridgeResult)).not.toContain("private")
+    }
+  }
+  const keys = [DESKTOP_KEY, CLI_KEY, OTHER_CLI_KEY]
+
+  test("prune retires an idle non-desktop runtime tab and its mirror, keeping live and busy tabs", () => {
+    const pool = new WorkerPool({ chatUrl: "https://example.test/chat" })
+    const stale = Date.now() - 6 * 60 * 1000
+    const abandoned = fakeWorker(1, CLI_KEY, stale)
+    const desktop = fakeWorker(2, DESKTOP_KEY, stale)
+    const otherRuntime = fakeWorker(3, OTHER_CLI_KEY, Date.now())
+    const busy = fakeWorker(4, JSON.stringify(["cli", "runtime-C", "sess-A", "CM_Opus5.5-High"]), stale, true)
+    const workers = Reflect.get(pool, "workers")
+    for (const entry of [abandoned, desktop, otherRuntime, busy]) workers.set(entry.worker.id, entry.worker)
+    keys.forEach(mirror)
+
+    expect(pool.hasSession(CLI_KEY)).toBe(false)
+    expect(abandoned.state.destroyed).toBe(true)
+    expect(threadContextUsage(CLI_KEY)).toBeUndefined()
+    expect(desktop.state.destroyed).toBe(false)
+    expect(threadContextUsage(DESKTOP_KEY)?.totalTokens).toBe(10)
+    expect(otherRuntime.state.destroyed).toBe(false)
+    expect(threadContextUsage(OTHER_CLI_KEY)?.totalTokens).toBe(10)
+    expect(busy.state.destroyed).toBe(false)
+    expect(pool.hasSession(busy.worker.sessionKey)).toBe(true)
+
+    pool.destroy()
+    keys.forEach(resetThread)
   })
 
-  test("records missing controls and failed inspections without leaking errors", async () => {
-    const h = popoverHarness()
-    h.state.openAfter = Infinity
-    h.state.dedicated = false
-    h.state.fallback = false
-    h.state.failInspection = true
-    const error = await h.run().catch((failure) => failure)
-    expect(error.diagnostics).toMatchObject({
-      clickCount: 0,
-      inspectionFailures: 1,
-      popover: { buttonFound: false, expanded: null, iframePresent: false },
-    })
-    expect(JSON.stringify(error.bridgeResult)).not.toContain("private")
+  test("discard after a pre-submit failure clears that tab's mirror", async () => {
+    const pool = new WorkerPool({ chatUrl: "https://example.test/chat" })
+    const entry = fakeWorker(5, CLI_KEY, Date.now(), true)
+    Reflect.get(pool, "workers").set(entry.worker.id, entry.worker)
+    Reflect.set(pool, "acquire", async () => entry.worker)
+    mirror(CLI_KEY)
+
+    const error = await pool.run({ id: "job", payload: { model: entry.worker.agent, sessionKey: CLI_KEY } }).then(
+      () => null,
+      (failure) => failure,
+    )
+
+    expect(Reflect.get(error, "type")).toBe("o1_code_thread_desync")
+    expect(entry.state.destroyed).toBe(true)
+    expect(threadContextUsage(CLI_KEY)).toBeUndefined()
+    pool.destroy()
+  })
+
+  test.each([
+    "o1_code_thread_desync",
+    "o1_code_recorder_not_armed",
+    "o1_code_greeting_not_settled",
+    "o1_code_fresh_chat_failed",
+    "o1_code_image_attachment_desync",
+  ])("discards a direct pre-submit rejection %s and preserves its identity", async (type) => {
+    const pool = new WorkerPool({ chatUrl: "https://example.test/chat" })
+    const entry = fakeWorker(8, CLI_KEY, Date.now(), true)
+    const failure = new Error("failed before RUN_JOB was posted")
+    Reflect.set(failure, "type", type)
+    Reflect.set(failure, "statusCode", 502)
+    entry.worker.controller.runJob = async (job?: { id?: string }) => {
+      expect(job?.id).toBe("job")
+      throw failure
+    }
+    Reflect.get(pool, "workers").set(entry.worker.id, entry.worker)
+    Reflect.set(pool, "acquire", async () => entry.worker)
+    mirror(CLI_KEY)
+
+    const error = await pool
+      .run({ id: "job", payload: { model: entry.worker.agent, sessionKey: CLI_KEY, continueThread: true } })
+      .catch((error) => error)
+
+    expect(error).toBe(failure)
+    expect(entry.state.destroyed).toBe(true)
+    expect(Reflect.get(pool, "workers").has(entry.worker.id)).toBe(false)
+    expect(threadContextUsage(CLI_KEY)).toBeUndefined()
+    pool.destroy()
+  })
+
+  test("does not reclassify an uncertain generic controller rejection as pre-submit", async () => {
+    const pool = new WorkerPool({ chatUrl: "https://example.test/chat" })
+    const entry = fakeWorker(9, CLI_KEY, Date.now(), true)
+    const failure = new Error("renderer evaluation failed after possible submission")
+    entry.worker.controller.runJob = async (job?: { id?: string }) => {
+      expect(job?.id).toBe("job")
+      throw failure
+    }
+    Reflect.get(pool, "workers").set(entry.worker.id, entry.worker)
+    Reflect.set(pool, "acquire", async () => entry.worker)
+    mirror(CLI_KEY)
+
+    const error = await pool
+      .run({ id: "job", payload: { model: entry.worker.agent, sessionKey: CLI_KEY, continueThread: true } })
+      .catch((error) => error)
+
+    expect(error).toBe(failure)
+    expect(Reflect.get(error, "type")).toBeUndefined()
+    expect(entry.state.destroyed).toBe(false)
+    expect(threadContextUsage(CLI_KEY)?.totalTokens).toBe(10)
+    pool.destroy()
+  })
+
+  test("destroy clears every live tab's mirror", () => {
+    const pool = new WorkerPool({ chatUrl: "https://example.test/chat" })
+    const desktop = fakeWorker(6, DESKTOP_KEY, Date.now())
+    const cli = fakeWorker(7, CLI_KEY, Date.now())
+    const workers = Reflect.get(pool, "workers")
+    workers.set(desktop.worker.id, desktop.worker)
+    workers.set(cli.worker.id, cli.worker)
+    keys.forEach(mirror)
+
+    pool.destroy()
+
+    expect(desktop.state.destroyed && cli.state.destroyed).toBe(true)
+    expect(threadContextUsage(DESKTOP_KEY)).toBeUndefined()
+    expect(threadContextUsage(CLI_KEY)).toBeUndefined()
+    expect(threadContextUsage(OTHER_CLI_KEY)?.totalTokens).toBe(10)
+    keys.forEach(resetThread)
   })
 })
 
-function popoverHarness() {
-  const state = {
-    time: 0,
-    dedicated: true,
-    fallback: true,
-    covered: false,
-    openAfter: 500,
-    expandOnClick: false,
-    iframeSrc: "",
-    failInspection: false,
-    onPoll: () => {},
-  }
-  const clicks: { time: number; x: number }[] = []
-  const button = popoverButton(100)
-  const fallback = popoverButton(300)
-  const document = {
-    querySelector(selector: string) {
-      if (selector === "#assistant-iframe") {
-        if (state.time >= state.openAfter && (clicks.length > 0 || state.openAfter === 0)) {
-          return { src: "https://open-web-assistant-cs.wpp.ai/external?private=value" }
-        }
-        return state.iframeSrc ? { src: state.iframeSrc } : null
-      }
-      return state.dedicated ? button : null
-    },
-    querySelectorAll() {
-      // Generic text matches can appear before the dedicated control in document order.
-      return [state.fallback ? fallback : null, state.dedicated ? button : null].filter(Boolean)
-    },
-    elementFromPoint(x: number) {
-      if (x < 0 || x >= 1440) return null
-      if (state.covered) return {}
-      return x === 120 ? button.child : fallback.child
-    },
-  }
-  const context = vm.createContext({ document })
-  const contents = {
-    async executeJavaScript(source: string) {
-      state.onPoll()
-      if (state.failInspection) {
-        state.failInspection = false
-        throw new Error("private page error")
-      }
-      return vm.runInContext(source, context)
-    },
-    sendInputEvent(event: Parameters<WebContents["sendInputEvent"]>[0]) {
-      if (event.type !== "mouseUp" || !("x" in event)) return
-      clicks.push({ time: state.time, x: event.x })
-      if (state.expandOnClick) button.attributes["aria-expanded"] = "true"
-    },
-    getURL: () => "https://ogilvy.os.wpp.com/orchestration/project/private",
-    mainFrame: { framesInSubtree: [] },
-  }
-  return {
-    state, clicks, button, fallback,
-    run: () => openAssistantPopover(contents, {
-      now: () => state.time,
-      sleep: async (ms: number) => { state.time += ms },
-    }),
-  }
-}
+describe("submission witness boundary", () => {
+  test("excludes launch and reset greetings, including late greeting completion", () => {
+    let now = 100
+    const witness = createCdpNetworkReducer(() => now)
+    const request = { url: "https://open-web-assistant-cs.wpp.ai/v1/chat", method: "POST" }
+    witness.handle("Network.requestWillBeSent", { requestId: "greeting", request })
+    now = 200
+    witness.handle("Network.loadingFinished", { requestId: "greeting", encodedDataLength: 100 })
+    const start = submissionStartedAt({ submitted: { startedAtMs: 150 } }, 90)
+    expect(witness.summarizeWindow(start).cdpRequestSeen).toBe(false)
+    witness.handle("Network.requestWillBeSent", { requestId: "prompt", request })
+    expect(witness.summarizeWindow(start).cdpRequestSeen).toBe(true)
+  })
 
-function popoverButton(left: number) {
-  const attributes: Record<string, string> = {}
-  const child = {}
-  return {
-    attributes,
-    child,
-    innerText: "AI Assistant",
-    textContent: "AI Assistant",
-    rect: { left, top: 0, width: 40, height: 20 },
-    getAttribute(name: string) { return attributes[name] ?? null },
-    hasAttribute(name: string) { return Object.hasOwn(attributes, name) },
-    matches() { return Object.hasOwn(attributes, "disabled") },
-    closest() {
-      return Object.hasOwn(attributes, "disabled") || attributes["aria-disabled"] === "true" ? this : null
-    },
-    contains(node: unknown) { return node === child },
-    getBoundingClientRect() { return this.rect },
-  }
-}
+  test("uses error diagnostics and fails closed on missing or invalid timestamps", () => {
+    expect(submissionStartedAt({ diagnostics: { submitted: { startedAtMs: 150 } } }, 90)).toBe(150)
+    for (const startedAtMs of [undefined, null, "150", NaN, Infinity, 89, Date.now() + 60000]) {
+      expect(submissionStartedAt({ submitted: { startedAtMs } }, 90)).toBe(Infinity)
+    }
+    expect(submissionStartedAt({}, 90)).toBe(Infinity)
+  })
+})
 
 describe("worker startup helpers", () => {
   test("destroys a created window when startup fails", async () => {
@@ -540,9 +652,11 @@ describe("worker startup helpers", () => {
       },
     }
 
-    await expect(cleanupWindowOnFailure(window, async () => {
-      throw new Error("startup failed")
-    })).rejects.toThrow("startup failed")
+    await expect(
+      cleanupWindowOnFailure(window, async () => {
+        throw new Error("startup failed")
+      }),
+    ).rejects.toThrow("startup failed")
 
     expect(destroyed).toBe(true)
   })

@@ -9,47 +9,49 @@
 // The agentName is also the affinity key the extension uses to pin a tab to one agent
 // (extension/background.js) and the label it selects in the composer pill (extension/content.js).
 export const MODEL_PROFILES = {
-  "CM_GPT6_Sol_Low": {
+  // Keep shipped fixed-effort IDs callable for saved sessions and string-only defaults.
+  // The app hides them by default when the matching family selector is available.
+  CM_GPT6_Sol_Low: {
     agentName: "CM_GPT6_Sol_Low",
     toolFormat: "xml",
     commentaryPhase: true,
   },
-  "CM_GPT6_Sol_Medium": {
+  CM_GPT6_Sol_Medium: {
     agentName: "CM_GPT6_Sol_Medium",
     toolFormat: "xml",
     commentaryPhase: true,
   },
-  "CM_GPT6_Sol_High": {
+  CM_GPT6_Sol_High: {
     agentName: "CM_GPT6_Sol_High",
     toolFormat: "xml",
     commentaryPhase: true,
   },
-  "CM_GPT6_Sol_XHigh": {
+  CM_GPT6_Sol_XHigh: {
     agentName: "CM_GPT6_Sol_XHigh",
     toolFormat: "xml",
     commentaryPhase: true,
   },
-  "CM_GPT6_Astra_Low": {
+  CM_GPT6_Astra_Low: {
     agentName: "CM_GPT6_Astra_Low",
     toolFormat: "xml",
     commentaryPhase: true,
   },
-  "CM_GPT6_Astra_Medium": {
+  CM_GPT6_Astra_Medium: {
     agentName: "CM_GPT6_Astra_Medium",
     toolFormat: "xml",
     commentaryPhase: true,
   },
-  "CM_GPT6_Astra_High": {
+  CM_GPT6_Astra_High: {
     agentName: "CM_GPT6_Astra_High",
     toolFormat: "xml",
     commentaryPhase: true,
   },
-  "CM_GPT6_Astra_XHigh": {
+  CM_GPT6_Astra_XHigh: {
     agentName: "CM_GPT6_Astra_XHigh",
     toolFormat: "xml",
     commentaryPhase: true,
   },
-  "CM_GPT6_Astra_Max": {
+  CM_GPT6_Astra_Max: {
     agentName: "CM_GPT6_Astra_Max",
     toolFormat: "xml",
     commentaryPhase: true,
@@ -116,6 +118,73 @@ export const MODEL_PROFILES = {
     agentName: "CM_Gemini-3.7-Flash_High",
     toolFormat: "xml",
   },
+  "CM_GPT6.1_Sol": {
+    defaultReasoningEffort: "medium",
+    reasoningEfforts: {
+      low: "CM_GPT6.1_Sol_Low",
+      medium: "CM_GPT6.1_Sol_Medium",
+      high: "CM_GPT6.1_Sol_High",
+      xhigh: "CM_GPT6.1_Sol_XHigh",
+      max: "CM_GPT6.1_Sol_Max",
+    },
+    toolFormat: "xml",
+    commentaryPhase: true,
+  },
+  CM_GPT6_Sol: {
+    defaultReasoningEffort: "medium",
+    reasoningEfforts: {
+      low: "CM_GPT6_Sol_Low",
+      medium: "CM_GPT6_Sol_Medium",
+      high: "CM_GPT6_Sol_High",
+      xhigh: "CM_GPT6_Sol_XHigh",
+    },
+    toolFormat: "xml",
+    commentaryPhase: true,
+  },
+  CM_GPT6_Astra: {
+    defaultReasoningEffort: "medium",
+    reasoningEfforts: {
+      low: "CM_GPT6_Astra_Low",
+      medium: "CM_GPT6_Astra_Medium",
+      high: "CM_GPT6_Astra_High",
+      xhigh: "CM_GPT6_Astra_XHigh",
+      max: "CM_GPT6_Astra_Max",
+    },
+    toolFormat: "xml",
+    commentaryPhase: true,
+  },
+  "CM_GPT-5.6 Sol": {
+    defaultReasoningEffort: "medium",
+    reasoningEfforts: {
+      low: "CM_GPT-5.6 Sol - Low",
+      medium: "CM_GPT-5.6 Sol - Medium",
+      high: "CM_GPT-5.6 Sol - High",
+      xhigh: "CM_GPT-5.6 Sol - Extra High",
+      max: "CM_GPT-5.6 Sol - Max",
+    },
+    toolFormat: "xml",
+    commentaryPhase: true,
+  },
+  "CM_Opus5.5": {
+    defaultReasoningEffort: "medium",
+    reasoningEfforts: {
+      auto: "CM_Opus5.5-Auto",
+      medium: "CM_Opus5.5-Medium",
+      high: "CM_Opus5.5-High",
+      xhigh: "CM_Opus5.5-XHigh",
+      max: "CM_Opus5.5-Max",
+    },
+    toolFormat: "xml",
+  },
+  "CM_Gemini-3.7-Flash": {
+    defaultReasoningEffort: "medium",
+    reasoningEfforts: {
+      low: "CM_Gemini-3.7-Flash_Low",
+      medium: "CM_Gemini-3.7-Flash_Medium",
+      high: "CM_Gemini-3.7-Flash_High",
+    },
+    toolFormat: "xml",
+  },
 }
 
 export const DEFAULT_MODEL_ID = "CM_GPT-5.6-Sol_High"
@@ -132,8 +201,40 @@ export const RENAMED_MODEL_IDS = new Map([
 
 export function resolveModelProfile(modelId) {
   const id = RENAMED_MODEL_IDS.get(modelId) ?? modelId
-  // Own keys only: inherited names like "constructor" must fall back instead of resolving to a builtin.
-  return Object.hasOwn(MODEL_PROFILES, id) ? MODEL_PROFILES[id] : MODEL_PROFILES[DEFAULT_MODEL_ID]
+  const profile = Object.hasOwn(MODEL_PROFILES, id) ? MODEL_PROFILES[id] : undefined
+  if (profile) {
+    if (!Object.hasOwn(profile, "reasoningEfforts")) return profile
+    return { ...profile, agentName: profile.reasoningEfforts[profile.defaultReasoningEffort] }
+  }
+
+  const sol = MODEL_PROFILES["CM_GPT6.1_Sol"]
+  if (Object.values(sol.reasoningEfforts).includes(id)) {
+    return { agentName: id, toolFormat: sol.toolFormat, commentaryPhase: sol.commentaryPhase }
+  }
+  if (typeof id === "string" && (id === "CM_GPT6.1" || id.startsWith("CM_GPT6.1_"))) {
+    const error = new Error(`Unknown model: ${id}`)
+    error.statusCode = 400
+    error.type = "invalid_model"
+    throw error
+  }
+  return MODEL_PROFILES[DEFAULT_MODEL_ID]
+}
+
+export function resolveRequestModelProfile(body) {
+  const override = body?.o1_code_model
+  const profile = resolveModelProfile(override || body?.model)
+  if (!Object.hasOwn(profile, "reasoningEfforts")) {
+    return override ? { ...profile, agentName: override } : profile
+  }
+
+  const effort = Object.hasOwn(body, "reasoning_effort") ? body.reasoning_effort : profile.defaultReasoningEffort
+  if (typeof effort !== "string" || !Object.hasOwn(profile.reasoningEfforts, effort)) {
+    const error = new Error(`reasoning_effort must be one of: ${Object.keys(profile.reasoningEfforts).join(", ")}`)
+    error.statusCode = 400
+    error.type = "invalid_reasoning_effort"
+    throw error
+  }
+  return { ...profile, agentName: profile.reasoningEfforts[effort] }
 }
 
 export const MODEL_IDS = Object.keys(MODEL_PROFILES)

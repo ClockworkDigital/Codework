@@ -37,6 +37,7 @@ function createSession() {
       onErrorOccurred: noop,
     },
     cookies: {
+      on: noop,
       get: async () => [],
       set: async () => {},
       remove: async () => {},
@@ -134,6 +135,7 @@ const app = {
   getLocale: () => "en-US",
   on: noop,
   once: noop,
+  removeListener: noop,
   whenReady: async () => {},
   quit: noop,
   exit: noop,
@@ -218,6 +220,7 @@ const electron = {
   crashReporter: { start: noop },
   netLog: { startLogging: async () => {}, stopLogging: async () => {} },
   powerMonitor: { on: noop },
+  safeStorage: { isEncryptionAvailable: () => false, getSelectedStorageBackend: () => "unknown" },
   globalShortcut: { register: () => true, unregister: noop, unregisterAll: noop },
   screen: {
     getPrimaryDisplay: () => ({ workAreaSize: { width: 1920, height: 1080 } }),

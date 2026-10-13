@@ -1,0 +1,28 @@
+{
+  "repository": "https://github.com/phosphor-icons/core",
+  "tag": "v2.0.8",
+  "commit": "d42782b2abe747d904b971ccab48b182a1455f86",
+  "license": "MIT",
+  "copyright": "Copyright (c) 2023 Phosphor Icons",
+  "licenseFile": "LICENSE",
+  "weight": "regular",
+  "viewBox": "0 0 256 256",
+  "source": "https://raw.githubusercontent.com/phosphor-icons/core/d42782b2abe747d904b971ccab48b182a1455f86/assets/regular/{name}.svg",
+  "transformation": "phosphor.ts keys are upstream icon names. Each value is the unmodified d attribute of the upstream single path. Existing UI names map to these paths. Renderers retain the upstream viewBox and currentColor fill.",
+  "consumers": [
+    "packages/ui/src/components/phosphor.ts",
+    "packages/ui/src/components/icon.tsx",
+    "packages/ui/src/v2/components/icon.tsx",
+    "packages/ui/src/components/file-icon.tsx",
+    "packages/ui/src/components/provider-icon.tsx",
+    "packages/ui/src/components/app-icon.tsx",
+    "packages/app/src/components/cm3-icon.tsx",
+    "packages/cm-ui-prototype/src/icon.ts"
+  ],
+  "exceptions": {
+    "cookie": {
+      "weight": "bold",
+      "source": "https://raw.githubusercontent.com/phosphor-icons/core/d42782b2abe747d904b971ccab48b182a1455f86/assets/bold/cookie-bold.svg"
+    }
+  }
+}

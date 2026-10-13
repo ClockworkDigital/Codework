@@ -5,7 +5,10 @@ import { DialogProvider } from "@opencode-ai/ui/context/dialog"
 import { FileComponentProvider } from "@opencode-ai/ui/context/file"
 import { File } from "@opencode-ai/session-ui/file"
 import { Font } from "@opencode-ai/ui/font"
+import { CookieLoader } from "@opencode-ai/ui/cookie-loader"
 import { Splash } from "@opencode-ai/ui/logo"
+import { LoadingAnimationProvider } from "@opencode-ai/ui/loading"
+import { cmLoading } from "@/components/cm-loading"
 import { ThemeProvider } from "@opencode-ai/ui/theme/context"
 import { MetaProvider } from "@solidjs/meta"
 import {
@@ -33,6 +36,7 @@ import {
   type JSX,
   lazy,
   onCleanup,
+  onMount,
   type ParentProps,
   Show,
 } from "solid-js"
@@ -68,8 +72,11 @@ import { createSessionLineage } from "@/pages/session/session-lineage"
 import { SessionPage, SessionRouteErrorBoundary, TargetSessionRouteContent } from "@/pages/session"
 import { NewHome } from "@/pages/home"
 import { LegacyHome } from "@/pages/home/legacy-home"
+import { QuietCompanionSwitch } from "@/components/quiet-companion-switch"
+import { SchedulingProvider, useScheduling } from "@/components/scheduling-panel"
 
 const NewSession = lazy(() => import("@/pages/new-session"))
+const Scheduled = lazy(() => import("@/pages/scheduled"))
 
 const SessionRoute = () => {
   const settings = useSettings()
@@ -315,20 +322,32 @@ function SharedProviders(props: ParentProps) {
     <>
       <BodyDesignClass />
       <CommandProvider>
-        <DesktopCommands />
-        <HighlightsProvider>{props.children}</HighlightsProvider>
+        <SchedulingProvider>
+          <DesktopCommands />
+          <HighlightsProvider>{props.children}</HighlightsProvider>
+        </SchedulingProvider>
       </CommandProvider>
     </>
   )
 }
 
 function DesktopCommands() {
+  const navigate = useNavigate()
   const command = useCommand()
   const language = useLanguage()
   const platform = usePlatform()
+  const scheduling = useScheduling()
+  const settings = useSettings()
 
   command.register("desktop", () => {
-    const commands: CommandOption[] = []
+    const commands: CommandOption[] = [
+      {
+        id: "schedule.open",
+        title: language.t("schedules.title"),
+        category: language.t("command.category.settings"),
+        onSelect: () => (settings.general.newLayoutDesigns() ? scheduling.open() : navigate("/scheduled")),
+      },
+    ]
     if (platform.platform === "desktop" && platform.exportDebugLogs) {
       commands.push({
         id: "logs.export",
@@ -397,33 +416,35 @@ export function AppBaseProviders(
   }>,
 ) {
   return (
-    <MetaProvider>
-      <Font />
-      <ThemeProvider
-        onThemeApplied={(_, mode, scheme) => {
-          void window.api?.setTitlebar?.({ mode, scheme })
-        }}
-      >
-        <LanguageProvider locale={props.locale} onNativeTranslations={props.onNativeTranslations}>
-          <UiI18nBridge>
-            <ErrorBoundary
-              fallback={(error) => {
-                Sentry.captureException(error)
-                return <ErrorPage error={error} />
-              }}
-            >
-              <QueryProvider>
-                <WslServersProvider>
-                  <DialogProvider>
-                    <FileComponentProvider component={File}>{props.children}</FileComponentProvider>
-                  </DialogProvider>
-                </WslServersProvider>
-              </QueryProvider>
-            </ErrorBoundary>
-          </UiI18nBridge>
-        </LanguageProvider>
-      </ThemeProvider>
-    </MetaProvider>
+    <LoadingAnimationProvider value={import.meta.env.VITE_CM_BRAND ? cmLoading : undefined}>
+      <MetaProvider>
+        <Font />
+        <ThemeProvider
+          onThemeApplied={(_, mode, scheme) => {
+            void window.api?.setTitlebar?.({ mode, scheme })
+          }}
+        >
+          <LanguageProvider locale={props.locale} onNativeTranslations={props.onNativeTranslations}>
+            <UiI18nBridge>
+              <ErrorBoundary
+                fallback={(error) => {
+                  Sentry.captureException(error)
+                  return <ErrorPage error={error} />
+                }}
+              >
+                <QueryProvider>
+                  <WslServersProvider>
+                    <DialogProvider>
+                      <FileComponentProvider component={File}>{props.children}</FileComponentProvider>
+                    </DialogProvider>
+                  </WslServersProvider>
+                </QueryProvider>
+              </ErrorBoundary>
+            </UiI18nBridge>
+          </LanguageProvider>
+        </ThemeProvider>
+      </MetaProvider>
+    </LoadingAnimationProvider>
   )
 }
 
@@ -491,7 +512,9 @@ function ConnectionGate(props: ParentProps<{ disableHealthCheck?: boolean; start
       </Show>
       <Show when={loading()}>
         <div class="fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-background-base">
-          <Splash class="w-16 h-20 opacity-50 animate-pulse" />
+          <Show when={import.meta.env.VITE_CM_BRAND} fallback={<Splash class="w-16 h-20 opacity-50 animate-pulse" />}>
+            <CookieLoader class="text-icon-base" />
+          </Show>
         </div>
       </Show>
     </>
@@ -570,8 +593,10 @@ export function AppInterface(props: {
   const ServerShell = (shellProps: ParentProps) => (
     <QueryProvider>
       <SharedProviders>
-        {props.children}
-        {shellProps.children}
+        <QuietCompanionSwitch>
+          {props.children}
+          {shellProps.children}
+        </QuietCompanionSwitch>
       </SharedProviders>
     </QueryProvider>
   )
@@ -618,6 +643,21 @@ function Routes(props: { serverScoped?: JSX.Element }) {
   return (
     <>
       <Route
+        path="/scheduled"
+        component={() => (
+          <Show
+            when={settings.general.newLayoutDesigns()}
+            fallback={
+              <LegacyServerLayout serverScoped={props.serverScoped}>
+                <Scheduled />
+              </LegacyServerLayout>
+            }
+          >
+            <SchedulingLanding />
+          </Show>
+        )}
+      />
+      <Route
         component={(routeProps) => (
           <LegacyServerLayout serverScoped={props.serverScoped}>{routeProps.children}</LegacyServerLayout>
         )}
@@ -643,6 +683,12 @@ function Routes(props: { serverScoped?: JSX.Element }) {
       <Route path="/new-session" component={DraftRoute} />
     </>
   )
+}
+
+function SchedulingLanding() {
+  const scheduling = useScheduling()
+  onMount(() => scheduling.open())
+  return <Navigate href="/" />
 }
 
 function NewLayoutLegacySessionRedirect() {

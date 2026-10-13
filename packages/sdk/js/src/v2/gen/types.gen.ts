@@ -19,6 +19,7 @@ export type Event =
   | EventSessionNextAgentSwitched
   | EventSessionNextModelSwitched
   | EventSessionNextMoved
+  | EventSessionNextArchived
   | EventSessionNextPrompted
   | EventSessionNextPromptAdmitted
   | EventSessionNextContextUpdated
@@ -106,6 +107,19 @@ export type QuestionRejected = {
   requestID: string
 }
 
+export type ServiceUnavailableError = {
+  _tag: "ServiceUnavailableError"
+  message: string
+  service?: string
+}
+
+export type InvalidRequestError = {
+  _tag: "InvalidRequestError"
+  message: string
+  kind?: string
+  field?: string
+}
+
 export type OAuth = {
   type: "oauth"
   refresh: string
@@ -133,13 +147,6 @@ export type Auth = OAuth | ApiAuth | WellKnownAuth
 
 export type EffectHttpApiErrorBadRequest = {
   _tag: "BadRequest"
-}
-
-export type InvalidRequestError = {
-  _tag: "InvalidRequestError"
-  message: string
-  kind?: string
-  field?: string
 }
 
 export type MoveSessionError = {
@@ -846,6 +853,14 @@ export type GlobalEvent = {
           sessionID: string
           location: LocationRef
           subdirectory?: string
+        }
+      }
+    | {
+        id: string
+        type: "session.next.archived"
+        properties: {
+          timestamp: number
+          sessionID: string
         }
       }
     | {
@@ -1611,6 +1626,7 @@ export type GlobalEvent = {
     | SyncEventSessionNextAgentSwitched
     | SyncEventSessionNextModelSwitched
     | SyncEventSessionNextMoved
+    | SyncEventSessionNextArchived
     | SyncEventSessionNextPrompted
     | SyncEventSessionNextPromptAdmitted
     | SyncEventSessionNextContextUpdated
@@ -1843,6 +1859,7 @@ export type McpLocalConfig = {
 }
 
 export type McpOAuthConfig = {
+  clientName?: string
   clientId?: string
   clientSecret?: string
   scope?: string
@@ -2372,6 +2389,13 @@ export type Agent = {
   steps?: number
 }
 
+export type SkillError = {
+  name: "SkillError"
+  data: {
+    message: string
+  }
+}
+
 export type LspStatus = {
   id: string
   name: string
@@ -2720,12 +2744,6 @@ export type ConflictError = {
   resource?: string
 }
 
-export type ServiceUnavailableError = {
-  _tag: "ServiceUnavailableError"
-  message: string
-  service?: string
-}
-
 export type MessageNotFoundError = {
   _tag: "MessageNotFoundError"
   sessionID: string
@@ -2743,6 +2761,7 @@ export type SessionDurableEvent =
   | SessionNextAgentSwitched
   | SessionNextModelSwitched
   | SessionNextMoved
+  | SessionNextArchived
   | SessionNextPrompted
   | SessionNextPromptAdmitted
   | SessionNextContextUpdated
@@ -2870,6 +2889,7 @@ export type V2Event =
   | SessionNextAgentSwitched
   | SessionNextModelSwitched
   | SessionNextMoved
+  | SessionNextArchived
   | SessionNextPrompted
   | SessionNextPromptAdmitted
   | SessionNextContextUpdated
@@ -3348,6 +3368,21 @@ export type SyncEventSessionNextMoved = {
       sessionID: string
       location: LocationRef
       subdirectory?: string
+    }
+  }
+}
+
+export type SyncEventSessionNextArchived = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "session.next.archived.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      timestamp: number
+      sessionID: string
     }
   }
 }
@@ -4222,6 +4257,24 @@ export type SessionNextMoved = {
     sessionID: string
     location: LocationRef
     subdirectory?: string
+  }
+}
+
+export type SessionNextArchived = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "session.next.archived"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    timestamp: number
+    sessionID: string
   }
 }
 
@@ -6284,6 +6337,15 @@ export type EventSessionNextMoved = {
   }
 }
 
+export type EventSessionNextArchived = {
+  id: string
+  type: "session.next.archived"
+  properties: {
+    timestamp: number
+    sessionID: string
+  }
+}
+
 export type EventSessionNextPrompted = {
   id: string
   type: "session.next.prompted"
@@ -7095,6 +7157,71 @@ export type BadRequestError = {
     message: string
     kind?: "Params" | "Headers" | "Query" | "Body" | "Payload"
   }
+}
+
+export type ScheduleListData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/schedule"
+}
+
+export type ScheduleListErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * ServiceUnavailableError
+   */
+  503: ServiceUnavailableError
+}
+
+export type ScheduleListError = ScheduleListErrors[keyof ScheduleListErrors]
+
+export type ScheduleListResponses = {
+  /**
+   * Success
+   */
+  200: {
+    version: 1
+    schedules: Array<unknown>
+    occurrences: Array<unknown>
+    totalOccurrences: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  }
+}
+
+export type ScheduleListResponse = ScheduleListResponses[keyof ScheduleListResponses]
+
+export type ScheduleManageData = {
+  body?: {
+    action: "create" | "update" | "pause" | "resume" | "delete" | "acknowledge"
+    id?: string
+    definition?: unknown
+  }
+  path?: never
+  query?: never
+  url: "/schedule"
+}
+
+export type ScheduleManageErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * ServiceUnavailableError
+   */
+  503: ServiceUnavailableError
+}
+
+export type ScheduleManageError = ScheduleManageErrors[keyof ScheduleManageErrors]
+
+export type ScheduleManageResponses = {
+  /**
+   * Success
+   */
+  200: unknown
 }
 
 export type AuthRemoveData = {
@@ -8374,6 +8501,215 @@ export type AppSkillsResponses = {
 }
 
 export type AppSkillsResponse = AppSkillsResponses[keyof AppSkillsResponses]
+
+export type InstanceSkillCatalogData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/skill/catalog"
+}
+
+export type InstanceSkillCatalogErrors = {
+  /**
+   * SkillError | InvalidRequestError
+   */
+  400: SkillError | InvalidRequestError
+}
+
+export type InstanceSkillCatalogError = InstanceSkillCatalogErrors[keyof InstanceSkillCatalogErrors]
+
+export type InstanceSkillCatalogResponses = {
+  /**
+   * Success
+   */
+  200: Array<{
+    name: string
+    source: string
+    revision: string
+    description?: string
+  }>
+}
+
+export type InstanceSkillCatalogResponse = InstanceSkillCatalogResponses[keyof InstanceSkillCatalogResponses]
+
+export type InstanceSkillValidateData = {
+  body?: {
+    name: string
+    source: string
+    revision: string
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/skill/validate"
+}
+
+export type InstanceSkillValidateErrors = {
+  /**
+   * SkillError | InvalidRequestError
+   */
+  400: SkillError | InvalidRequestError
+}
+
+export type InstanceSkillValidateError = InstanceSkillValidateErrors[keyof InstanceSkillValidateErrors]
+
+export type InstanceSkillValidateResponses = {
+  /**
+   * Success
+   */
+  200: {
+    name: string
+    source: string
+    revision: string
+    description?: string
+  }
+}
+
+export type InstanceSkillValidateResponse = InstanceSkillValidateResponses[keyof InstanceSkillValidateResponses]
+
+export type InstanceSkillManageData = {
+  body?: {
+    action: "read" | "review" | "apply"
+    selected: {
+      name: string
+      source: string
+      revision: string
+    }
+    operation?: "edit" | "delete"
+    draft?: {
+      name: string
+      description: string
+      instructions: string
+      scope: "workspace" | "global"
+    }
+    token?: string
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/skill/manage"
+}
+
+export type InstanceSkillManageErrors = {
+  /**
+   * SkillError | InvalidRequestError
+   */
+  400: SkillError | InvalidRequestError
+}
+
+export type InstanceSkillManageError = InstanceSkillManageErrors[keyof InstanceSkillManageErrors]
+
+export type InstanceSkillManageResponses = {
+  /**
+   * Success
+   */
+  200: {
+    name: string
+    source: string
+    revision: string
+    description?: string
+    content: string
+    document: string
+    location: string
+    editable: boolean
+    scope: "workspace" | "global" | "external"
+    token?: string
+    digest?: string
+    backup?: string
+    deleted?: boolean
+  }
+}
+
+export type InstanceSkillManageResponse = InstanceSkillManageResponses[keyof InstanceSkillManageResponses]
+
+export type InstanceSkillReviewData = {
+  body?: {
+    name: string
+    description: string
+    instructions: string
+    scope: "workspace" | "global"
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/skill/review"
+}
+
+export type InstanceSkillReviewErrors = {
+  /**
+   * SkillError | InvalidRequestError
+   */
+  400: SkillError | InvalidRequestError
+}
+
+export type InstanceSkillReviewError = InstanceSkillReviewErrors[keyof InstanceSkillReviewErrors]
+
+export type InstanceSkillReviewResponses = {
+  /**
+   * Success
+   */
+  200: {
+    token: string
+    digest: string
+    directory: string
+    destination: string
+    scope: "workspace" | "global"
+  }
+}
+
+export type InstanceSkillReviewResponse = InstanceSkillReviewResponses[keyof InstanceSkillReviewResponses]
+
+export type InstanceSkillCreateData = {
+  body?: {
+    name: string
+    description: string
+    instructions: string
+    scope: "workspace" | "global"
+    token: string
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/skill/create"
+}
+
+export type InstanceSkillCreateErrors = {
+  /**
+   * SkillError | InvalidRequestError
+   */
+  400: SkillError | InvalidRequestError
+}
+
+export type InstanceSkillCreateError = InstanceSkillCreateErrors[keyof InstanceSkillCreateErrors]
+
+export type InstanceSkillCreateResponses = {
+  /**
+   * Success
+   */
+  200: {
+    name: string
+    source: string
+    revision: string
+    description?: string
+    directory: string
+    destination: string
+    scope: "workspace" | "global"
+    digest: string
+  }
+}
+
+export type InstanceSkillCreateResponse = InstanceSkillCreateResponses[keyof InstanceSkillCreateResponses]
 
 export type LspStatusData = {
   body?: never
@@ -11478,6 +11814,41 @@ export type V2SessionGetResponses = {
 }
 
 export type V2SessionGetResponse = V2SessionGetResponses[keyof V2SessionGetResponses]
+
+export type V2SessionArchiveData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query?: never
+  url: "/api/session/{sessionID}/archive"
+}
+
+export type V2SessionArchiveErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * SessionNotFoundError
+   */
+  404: SessionNotFoundError
+}
+
+export type V2SessionArchiveError = V2SessionArchiveErrors[keyof V2SessionArchiveErrors]
+
+export type V2SessionArchiveResponses = {
+  /**
+   * <No Content>
+   */
+  204: void
+}
+
+export type V2SessionArchiveResponse = V2SessionArchiveResponses[keyof V2SessionArchiveResponses]
 
 export type V2SessionSwitchAgentData = {
   body: {

@@ -8,17 +8,29 @@
 // affinity is in-memory only — durable affinity + last-good chat URL persistence is handoff item 3.
 
 import type { BrowserWindow } from "electron"
+import { createHash } from "node:crypto"
+import { diagnosticUrl, observeWorkerWindow, writeWorkerLog, type WorkerLogWriter } from "./worker-logging"
 import { createWorkerWindow } from "./session"
+import { agentChatProjectId, openAgentChat } from "./agent-chat"
 import { armTargetAttach } from "./cdp-targets"
 import { installController, type Controller, type ProgressFrame } from "./controller-injection"
 import { installRecorder } from "./recorder-injection"
 import { installNetworkWitness, type NetworkWitness } from "./cdp-network-recorder"
 import { captureFailureError, captureHealth, decideCaptureVerdict } from "./capture-verdict"
-import { cleanupWindowOnFailure, classifyWppAuthState, classifyWppProjectAccessState, classifyWppSessionProbe, isWppFrameUrl, wppAuthRequiredError, wppProjectAccessError } from "./worker-startup"
+import {
+  cleanupWindowOnFailure,
+  classifyWppAuthState,
+  classifyWppProjectAccessState,
+  classifyWppSessionProbe,
+  isWppFrameUrl,
+  wppAuthRequiredError,
+  wppProjectAccessError,
+} from "./worker-startup"
 import { selectWorkerSlot, shouldReapWorker, ttlForWorker, type WorkerView } from "./worker-slot"
 import { SpawnGate } from "./spawn-gate"
 import { assertCapabilityResponse, buildCapabilityProbeJob } from "./proxy/protocol.mjs"
 import { DEFAULT_MODEL_ID } from "./proxy/modelProfiles.mjs"
+import { resetThread } from "./proxy/sessionThreads.mjs"
 
 const IDLE_WORKER_TTL_MS = 10 * 60 * 1000
 // A session-pinned tab holds that session's WPP thread (browser-held context), so reaping it throws
@@ -72,6 +84,7 @@ type Worker = {
   agent: string
   // Agent for which this worker most recently passed the CM_REQUEST_V1 capability handshake.
   protocolAgent: string
+  protocolEndpoint?: string
   // The OpenCode session this worker's WPP tab is pinned to ("" = unpinned). Set on claim so later
   // turns of the same session reuse the same authenticated thread.
   sessionKey: string
@@ -81,16 +94,20 @@ type Worker = {
   lastUsed: number
 }
 
-export type WorkerPoolOptions = { chatUrl: string }
+export type WorkerPoolOptions = { chatUrl: string; log?: WorkerLogWriter }
 
 export class WorkerPool {
   private readonly workers = new Map<number, Worker>()
+  private readonly startingWorkers = new Map<number, Pick<Worker, "window" | "agent" | "sessionKey" | "subagent">>()
   private readonly chatUrl: string
+  private readonly log?: WorkerLogWriter
+  private readonly jobs = new Map<number, { runId?: string; jobId?: string }>()
   private readonly reapTimer: NodeJS.Timeout
   private readonly spawnGate = new SpawnGate(MAX_CONCURRENT_SPAWNS)
 
   constructor(options: WorkerPoolOptions) {
     this.chatUrl = options.chatUrl
+    this.log = options.log
     this.reapTimer = setInterval(() => this.prune(), REAP_INTERVAL_MS)
     this.reapTimer.unref()
     livePools.add(this)
@@ -99,7 +116,8 @@ export class WorkerPool {
   // Show or hide every live worker window to match the current visibility flag. Driven by the runtime
   // toggle (toggleWorkerWindows); spawn() applies the flag to newly created workers itself.
   applyWorkerVisibility() {
-    for (const worker of this.workers.values()) {
+    // Include windows still loading WPP so the toggle can reveal a stalled startup.
+    for (const worker of [...this.startingWorkers.values(), ...this.workers.values()]) {
       if (worker.window.isDestroyed()) continue
       if (workersVisible) {
         worker.window.showInactive()
@@ -111,35 +129,52 @@ export class WorkerPool {
   }
 
   // Acquire + run + release in one call — the single entry point a caller (extensionBridge) needs.
-  // The agent string doubles as the affinity key; content.js reselects the composer pill to match.
+  // The agent string doubles as the affinity key; the dedicated chat must match it exactly.
   async run(
     job: {
       id?: string
+      runId?: string
       createdAtMs?: number
       timeoutMs?: number
-      payload?: { model?: string; sessionKey?: string; subagent?: boolean }
+      payload?: { model?: string; sessionKey?: string; subagent?: boolean; continueThread?: boolean }
     },
     onProgress?: (frame: ProgressFrame) => void,
     signal?: AbortSignal,
   ): Promise<unknown> {
+    const queuedAt = Date.now()
     const worker = await this.acquire(
       (job.payload?.model || DEFAULT_MODEL_ID).trim(),
       (job.payload?.sessionKey || "").trim(),
       job.payload?.subagent === true,
       signal,
+      job,
     )
+    this.jobs.set(worker.id, { runId: job.runId, jobId: job.id })
+    this.record(worker.id, "job-started", {
+      queueMs: Date.now() - queuedAt,
+      mode: job.payload?.continueThread ? "continue" : "fresh",
+    })
+    const correlation = { workerId: worker.id, jobId: job.id, runId: job.runId }
     try {
       try {
         await withClientAbort(this.ensureProtocolCapability(worker, job), signal)
       } catch (error) {
-        this.discard(worker.id)
+        this.discard(worker.id, "protocol-failed")
         throw error
       }
+      throwIfClientAborted(signal)
       const startedAt = Date.now()
+      this.record(worker.id, "protocol-ready", {})
+      const admittedJob = { ...job, payload: { ...job.payload, expectedEndpoint: worker.protocolEndpoint } }
       const result = await withClientAbort(
-        worker.controller.runJob(job, onProgress, remainingJobTimeout(job)),
+        worker.controller.runJob(admittedJob, onProgress, remainingJobTimeout(job)),
         signal,
       )
+      this.record(worker.id, "job-result", {
+        durationMs: Date.now() - startedAt,
+        ok: result && typeof result === "object" ? Reflect.get(result, "ok") : null,
+        type: result && typeof result === "object" ? Reflect.get(result, "type") : null,
+      })
       // content.js reported its OWN failure (agent selection, missing composer, chat busy, …). Surface
       // it verbatim so extensionBridge converts it to the real typed error (e.g. o1_code_wrong_agent)
       // with content.js's diagnostics. Running the capture verdict here instead would relabel every
@@ -150,12 +185,8 @@ export class WorkerPool {
         // Discard is mandatory: a released worker stays eligible, so acquire() could re-select this same
         // dead tab on the retry and fail identically. openaiCompat.shouldRetryFreshReplay does the replay.
         const failureType = (result as Record<string, unknown>).type
-        if (
-          failureType === "o1_code_recorder_not_armed" ||
-          failureType === "o1_code_thread_desync" ||
-          failureType === "o1_code_image_attachment_desync"
-        ) {
-          this.discard(worker.id)
+        if (isPreSubmitFailureType(failureType)) {
+          this.discard(worker.id, failureType)
           const r = result as Record<string, unknown>
           const error = new Error(String(r.error || "O1-Code worker reported a pre-submit failure.")) as Error & {
             statusCode?: number
@@ -168,15 +199,24 @@ export class WorkerPool {
           throw error
         }
         const diagnostics = Reflect.get(result, "diagnostics")
-        const captureTimedOut = diagnostics
-          && typeof diagnostics === "object"
-          && Reflect.get(diagnostics, "phase") === "no-network-response"
-        if (!captureTimedOut) return result
+        const captureTimedOut =
+          diagnostics && typeof diagnostics === "object" && Reflect.get(diagnostics, "phase") === "no-network-response"
+        if (!captureTimedOut) return { ...result, worker: correlation }
       }
-      const enriched = attachCaptureVerdict(result, worker.netWitness.summarizeWindow(startedAt))
-      if (enriched.captureVerdict.accept) return enriched.result
+      const enriched = attachCaptureVerdict(
+        result,
+        worker.netWitness.summarizeWindow(submissionStartedAt(result, startedAt)),
+      )
+      this.record(worker.id, "capture-verdict", {
+        accepted: enriched.captureVerdict.accept,
+        capture: {
+          ...enriched.result.capture,
+          cdpUrl: enriched.result.capture.cdpUrl ? diagnosticUrl(enriched.result.capture.cdpUrl) : null,
+        },
+      })
+      if (enriched.captureVerdict.accept) return { ...enriched.result, worker: correlation }
 
-      this.discard(worker.id)
+      this.discard(worker.id, "capture-rejected")
       const error = captureFailureError(enriched.captureVerdict, enriched.result.capture)
       if (error) {
         // Surface content.js's own submit view on the failure so the log distinguishes "prompt never
@@ -198,12 +238,16 @@ export class WorkerPool {
       }
       throw new Error("Unexpected capture verdict failure.")
     } catch (error) {
-      if (error instanceof Error && Reflect.get(error, "type") === "o1_code_client_aborted") {
-        this.discard(worker.id)
+      const type = error && typeof error === "object" ? Reflect.get(error, "type") : undefined
+      this.record(worker.id, "job-failed", { type: type ?? "unknown", durationMs: Date.now() - queuedAt }, "error")
+      if (error && typeof error === "object") Reflect.set(error, "worker", correlation)
+      if (type === "o1_code_client_aborted" || isPreSubmitFailureType(type)) {
+        this.discard(worker.id, type)
       }
       throw error
     } finally {
       this.release(worker.id)
+      this.jobs.delete(worker.id)
     }
   }
 
@@ -212,21 +256,38 @@ export class WorkerPool {
   // ponytail: select->claim is kept await-free so single-threaded JS serializes it — that, not a
   // mutex, is what prevents two callers double-booking one free worker. Do NOT insert an await
   // between selectWorkerSlot and claim() or the race becomes real.
-  async acquire(agent: string, sessionKey = "", subagent = false, signal?: AbortSignal): Promise<Worker> {
+  async acquire(
+    agent: string,
+    sessionKey = "",
+    subagent = false,
+    signal?: AbortSignal,
+    job?: { id?: string; runId?: string },
+  ): Promise<Worker> {
     // Wait out a busy same-session tab before adopting/growing, so concurrent turns of one session
     // never fork its WPP thread. The loop re-selects each poll (the tab may free, be reaped, or the
     // session may still be busy); a "wait" past the deadline falls through to the spawn path.
     const waitDeadline = Date.now() + SESSION_WAIT_TIMEOUT_MS
+    const queuedAt = Date.now()
     for (;;) {
       throwIfClientAborted(signal)
       this.prune()
       const slot = selectWorkerSlot(this.view(), agent, sessionKey)
-      if (slot.action === "reuse") return this.claim(slot.id, agent, sessionKey, subagent)
+      if (slot.action === "reuse") {
+        const worker = this.claim(slot.id, agent, sessionKey, subagent)
+        this.record(worker.id, "worker-reused", { runId: job?.runId, jobId: job?.id, queueMs: Date.now() - queuedAt })
+        return worker
+      }
+      if (slot.action === "wait" && Date.now() - queuedAt < SESSION_WAIT_POLL_MS) {
+        this.record(slot.id, "waiting-for-worker", { runId: job?.runId, jobId: job?.id })
+      }
       if (slot.action !== "wait" || Date.now() >= waitDeadline) break
       await withClientAbort(wait(SESSION_WAIT_POLL_MS), signal)
     }
 
-    await this.spawnGate.acquire()
+    await this.spawnGate.acquire(signal).catch((error) => {
+      throwIfClientAborted(signal)
+      throw error
+    })
     try {
       throwIfClientAborted(signal)
       // A worker may have freed (or been spawned for this agent) while we waited for a spawn slot.
@@ -234,11 +295,15 @@ export class WorkerPool {
       // (that would hold a spawn slot idle) — spawn a fresh thread instead, the same timeout fallback.
       this.prune()
       const slot = selectWorkerSlot(this.view(), agent, sessionKey)
-      if (slot.action === "reuse") return this.claim(slot.id, agent, sessionKey, subagent)
+      if (slot.action === "reuse") {
+        const worker = this.claim(slot.id, agent, sessionKey, subagent)
+        this.record(worker.id, "worker-reused", { runId: job?.runId, jobId: job?.id, queueMs: Date.now() - queuedAt })
+        return worker
+      }
 
-      const worker = await this.spawn(agent, sessionKey, subagent)
+      const worker = await this.spawn(agent, sessionKey, subagent, signal, job)
       if (signal?.aborted) {
-        this.discard(worker.id)
+        this.discard(worker.id, "o1_code_client_aborted")
         throw clientAbortedError()
       }
       worker.busy = true
@@ -251,7 +316,10 @@ export class WorkerPool {
   private claim(id: number, agent: string, sessionKey: string, subagent: boolean): Worker {
     const worker = this.workers.get(id)!
     worker.busy = true
-    if (worker.agent !== agent) worker.protocolAgent = ""
+    if (worker.agent !== agent) {
+      worker.protocolAgent = ""
+      worker.protocolEndpoint = undefined
+    }
     worker.agent = agent
     if (sessionKey) worker.sessionKey = sessionKey
     // Classification follows the turn that claimed the worker: an adopted unpinned worker takes the
@@ -268,13 +336,16 @@ export class WorkerPool {
     if (!worker) return
     worker.busy = false
     worker.lastUsed = Date.now()
+    this.record(id, "worker-released", {})
   }
 
-  private discard(id: number) {
+  private discard(id: number, reason = "discarded") {
     const worker = this.workers.get(id)
     if (!worker) return
+    this.record(id, "worker-discarded", { reason })
     if (!worker.window.isDestroyed()) worker.window.destroy()
     this.workers.delete(id)
+    resetThread(worker.sessionKey)
   }
 
   private async ensureProtocolCapability(
@@ -312,35 +383,99 @@ export class WorkerPool {
     }
     assertCapabilityResponse(result, agent)
     worker.protocolAgent = agent
+    const request = result && typeof result === "object" ? Reflect.get(result, "request") : undefined
+    const endpoint = request && typeof request === "object" ? Reflect.get(request, "endpoint") : undefined
+    const url = typeof endpoint === "string" ? URL.parse(endpoint) : null
+    worker.protocolEndpoint = url ? url.origin + url.pathname : undefined
   }
 
   destroy() {
     clearInterval(this.reapTimer)
     livePools.delete(this)
-    for (const worker of this.workers.values()) {
+    for (const [id, worker] of this.startingWorkers) {
+      this.record(id, "worker-discarded", { reason: "pool-destroyed-during-startup" })
       if (!worker.window.isDestroyed()) worker.window.destroy()
     }
+    this.startingWorkers.clear()
+    for (const worker of this.workers.values()) {
+      this.record(worker.id, "worker-discarded", { reason: "pool-destroyed" })
+      if (!worker.window.isDestroyed()) worker.window.destroy()
+      resetThread(worker.sessionKey)
+    }
     this.workers.clear()
+    this.jobs.clear()
   }
 
   // Recorder + controller + network witness register installers first; armTargetAttach then enables
   // paused auto-attach so every child iframe gets the full set before page scripts run. Navigating
   // only after arm is what makes the document-start fetch/XHR patch hold.
-  private async spawn(agent: string, sessionKey: string, subagent: boolean): Promise<Worker> {
+  private async spawn(
+    agent: string,
+    sessionKey: string,
+    subagent: boolean,
+    signal?: AbortSignal,
+    job?: { id?: string; runId?: string },
+  ): Promise<Worker> {
+    throwIfClientAborted(signal)
     const window = createWorkerWindow()
+    const id = window.webContents.id
+    this.startingWorkers.set(id, { window, agent, sessionKey, subagent })
+    this.jobs.set(id, { runId: job?.runId, jobId: job?.id })
+    const startedAt = Date.now()
+    const stage = (phase: string) => this.record(id, "startup-stage", { phase, elapsedMs: Date.now() - startedAt })
+    observeWorkerWindow(window.webContents, (event, details, level) => this.record(id, event, details, level))
+    stage("created")
     if (workersVisible) {
       window.showInactive()
       window.setTitle(workerTitle(agent, sessionKey, subagent))
     }
     return cleanupWindowOnFailure(window, async () => {
-      await installRecorder(window.webContents)
-      const controller = await installController(window.webContents)
-      const netWitness = await installNetworkWitness(window.webContents)
-      await armTargetAttach(window.webContents)
-      await window.webContents.loadURL(this.chatUrl)
-      await throwIfAuthRequired(window.webContents)
-      await openAssistantPopover(window.webContents)
-      await waitForAssistantBridge(window.webContents, controller)
+      stage("installing-recorder")
+      await withClientAbort(
+        installRecorder(window.webContents, (event) => {
+          if (
+            event.type === "O1_CODE_BRIDGE_RECORDER_STATUS" &&
+            ["ready", "reset", "request", "observed"].includes(event.status ?? "")
+          ) {
+            this.record(id, "recorder-status", { status: event.status })
+          }
+        }),
+        signal,
+      )
+      stage("installing-controller")
+      const controller = await withClientAbort(installController(window.webContents), signal)
+      stage("installing-network-witness")
+      const netWitness = await withClientAbort(installNetworkWitness(window.webContents), signal)
+      stage("arming-targets")
+      await withClientAbort(armTargetAttach(window.webContents), signal)
+      stage("loading-project")
+      await withClientAbort(window.webContents.loadURL(this.chatUrl), signal)
+      stage("checking-auth")
+      await withClientAbort(throwIfAuthRequired(window.webContents), signal)
+      const target = URL.parse(this.chatUrl)
+      const loaded = URL.parse(window.webContents.getURL())
+      if (
+        !target ||
+        loaded?.origin !== target.origin ||
+        loaded.pathname.replace(/\/$/, "") !== target.pathname.replace(/\/$/, "")
+      ) {
+        const error = new Error("o1_code_wrong_project")
+        Reflect.set(error, "type", "o1_code_wrong_project")
+        Reflect.set(error, "statusCode", 400)
+        throw error
+      }
+      // The orchestration project UUID and the embedded builder project ID differ.
+      // Outer placement was verified above; roster navigation pins the builder ID.
+      const projectId = agentChatProjectId(this.chatUrl)
+      stage("opening-agent-chat")
+      await openAgentChat(window.webContents, agent, { signal, projectId }).catch(async (error) => {
+        throwIfClientAborted(signal)
+        await withClientAbort(throwIfAuthRequired(window.webContents), signal)
+        throw error
+      })
+      stage("waiting-for-composer")
+      await waitForAssistantBridge(window.webContents, controller, signal)
+      throwIfClientAborted(signal)
 
       const worker: Worker = {
         id: window.webContents.id,
@@ -355,8 +490,25 @@ export class WorkerPool {
         lastUsed: Date.now(),
       }
       this.workers.set(worker.id, worker)
+      stage("ready")
       return worker
     })
+      .catch((error) => {
+        this.record(
+          id,
+          "startup-failed",
+          {
+            type: error && typeof error === "object" ? (Reflect.get(error, "type") ?? "unknown") : "unknown",
+            elapsedMs: Date.now() - startedAt,
+          },
+          "error",
+        )
+        if (error && typeof error === "object")
+          Reflect.set(error, "worker", { workerId: id, runId: job?.runId, jobId: job?.id })
+        this.jobs.delete(id)
+        throw error
+      })
+      .finally(() => this.startingWorkers.delete(id))
   }
 
   // Drop workers whose window was destroyed or sat idle past the TTL so a dead or stale id is never
@@ -369,12 +521,16 @@ export class WorkerPool {
         pinned: PINNED_WORKER_TTL_MS,
         subagent: SUBAGENT_WORKER_TTL_MS,
       })
-      if (worker.window.isDestroyed()) {
-        this.workers.delete(id)
-      } else if (shouldReapWorker(worker, now, ttl)) {
-        worker.window.destroy()
-        this.workers.delete(id)
-      }
+      if (!worker.window.isDestroyed() && !shouldReapWorker(worker, now, ttl)) continue
+      this.record(id, "worker-discarded", {
+        reason: worker.window.isDestroyed() ? "window-destroyed" : "idle-timeout",
+        idleMs: now - worker.lastUsed,
+        ttlMs: ttl,
+      })
+      if (!worker.window.isDestroyed()) worker.window.destroy()
+      this.workers.delete(id)
+      // A retired tab's thread is gone; its mirror must not survive to fake a continue.
+      resetThread(worker.sessionKey)
     }
   }
 
@@ -413,6 +569,25 @@ export class WorkerPool {
       lastUsed: worker.lastUsed,
     }))
   }
+
+  private record(id: number, event: string, details: Record<string, unknown>, level?: "info" | "warn" | "error") {
+    const worker = this.workers.get(id) ?? this.startingWorkers.get(id)
+    writeWorkerLog(
+      id,
+      event,
+      {
+        workerId: id,
+        agent: worker?.agent,
+        ownerId: worker?.sessionKey ? createHash("sha256").update(worker.sessionKey).digest("hex").slice(0, 16) : null,
+        subagent: worker?.subagent,
+        ...this.jobs.get(id),
+        ...details,
+        ...(typeof details.url === "string" ? { url: diagnosticUrl(details.url) } : {}),
+      },
+      level,
+      this.log,
+    )
+  }
 }
 
 function withClientAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
@@ -437,16 +612,28 @@ function throwIfClientAborted(signal?: AbortSignal) {
   if (signal?.aborted) throw clientAbortedError()
 }
 
+function isPreSubmitFailureType(type: unknown): type is string {
+  return (
+    typeof type === "string" &&
+    [
+      "o1_code_recorder_not_armed",
+      "o1_code_thread_desync",
+      "o1_code_greeting_not_settled",
+      "o1_code_fresh_chat_failed",
+      "o1_code_image_attachment_desync",
+    ].includes(type)
+  )
+}
+
 function remainingJobTimeout(job: { createdAtMs?: number; timeoutMs?: number }) {
   if (!job.timeoutMs) return undefined
   return Math.max(1, job.timeoutMs - (Date.now() - (job.createdAtMs ?? Date.now())))
 }
 
 function attachCaptureVerdict(result: unknown, witness: ReturnType<NetworkWitness["summarizeWindow"]>) {
-  const value = result && typeof result === "object" ? result as Record<string, unknown> : {}
-  const recorder = value.recorder && typeof value.recorder === "object"
-    ? value.recorder as { requestCount?: number }
-    : null
+  const value = result && typeof result === "object" ? (result as Record<string, unknown>) : {}
+  const recorder =
+    value.recorder && typeof value.recorder === "object" ? (value.recorder as { requestCount?: number }) : null
   const responseSource = typeof value.responseSource === "string" ? value.responseSource : null
   const pageRecorderRequestSeen = Number(recorder?.requestCount) > 0
   const parseComplete = responseSource === "network"
@@ -468,104 +655,25 @@ function attachCaptureVerdict(result: unknown, witness: ReturnType<NetworkWitnes
   }
 }
 
-type StartupContents = Pick<BrowserWindow["webContents"], "executeJavaScript" | "sendInputEvent" | "getURL"> & {
+type StartupContents = Pick<BrowserWindow["webContents"], "executeJavaScript" | "getURL"> & {
   mainFrame: Pick<BrowserWindow["webContents"]["mainFrame"], "framesInSubtree">
 }
 
-export async function openAssistantPopover(
-  contents: StartupContents,
-  { now = Date.now, sleep = wait } = {},
-) {
-  const startedAt = now()
-  const deadline = startedAt + 60000
-  let nextClickAt = startedAt
-  let clickCount = 0
-  let inspectionFailures = 0
-  let state: {
-    open?: boolean
-    click?: boolean
-    x?: number
-    y?: number
-    buttonFound?: boolean
-    expanded?: boolean | null
-    disabled?: boolean
-    unobscured?: boolean
-    iframePresent?: boolean
-  } | null = null
-
-  while (now() < deadline) {
-    state = await contents.executeJavaScript(`
-      (() => {
-        const iframe = document.querySelector("#assistant-iframe");
-        // The src attribute does not follow SPA routing. Composer readiness is checked downstream.
-        if (iframe && String(iframe.src || "").includes("open-web-assistant-cs.wpp.ai")) {
-          return { open: true };
-        }
-
-        const control = document.querySelector('[data-testid="assistant-popover-button-new"]')
-          || Array.from(document.querySelectorAll('wpp-action-button-v2-22-2, button, [role="button"]'))
-            .find((el) => [el.innerText, el.textContent, el.getAttribute("aria-label")]
-              .some((label) => /AI\\s*Assistant/i.test(label || "")));
-        if (!control) return { open: false, buttonFound: false, expanded: null, iframePresent: !!iframe };
-
-        const expanded = control.getAttribute("aria-expanded");
-        const disabled = control.matches(":disabled") || !!control.closest('[disabled], [aria-disabled="true"]');
-        const rect = control.getBoundingClientRect();
-        const x = Math.round(rect.left + rect.width / 2);
-        const y = Math.round(rect.top + rect.height / 2);
-        const hit = document.elementFromPoint(x, y);
-        const unobscured = !!hit && (hit === control || control.contains(hit));
-        return {
-          open: false,
-          buttonFound: true,
-          expanded: expanded === null ? null : expanded === "true",
-          disabled,
-          unobscured,
-          iframePresent: !!iframe,
-          click: expanded !== "true" && !disabled && unobscured && rect.width > 0 && rect.height > 0,
-          x,
-          y
-        };
-      })()
-    `, true).catch(() => {
-      inspectionFailures += 1
-      return null
-    })
-
-    if (state?.open) return
-    // Poll readiness frequently, but give a dispatched click time to open the panel.
-    if (state?.click && now() >= nextClickAt && typeof state.x === "number" && typeof state.y === "number") {
-      contents.sendInputEvent({ type: "mouseMove", x: state.x, y: state.y })
-      contents.sendInputEvent({ type: "mouseDown", button: "left", x: state.x, y: state.y, clickCount: 1 })
-      contents.sendInputEvent({ type: "mouseUp", button: "left", x: state.x, y: state.y, clickCount: 1 })
-      clickCount += 1
-      nextClickAt = now() + 3000
-    }
-    await sleep(500)
-  }
-
-  await throwIfAuthRequired(contents)
-  // Explicitly select state fields so page content, URLs and evaluation errors never enter the log.
-  const diagnostics = {
-    phase: "assistant-popover",
-    elapsedMs: now() - startedAt,
-    clickCount,
-    inspectionFailures,
-    popover: state ? {
-      buttonFound: state.buttonFound === true,
-      expanded: state.expanded ?? null,
-      disabled: state.disabled === true,
-      unobscured: state.unobscured === true,
-      iframePresent: state.iframePresent === true,
-    } : null,
-  }
-  const error = new Error("Timed out opening WPP AI Assistant popover.")
-  Reflect.set(error, "diagnostics", diagnostics)
-  Reflect.set(error, "bridgeResult", { diagnostics })
-  throw error
+export function submissionStartedAt(result: unknown, earliest: number) {
+  if (!result || typeof result !== "object") return Infinity
+  const diagnostics = Reflect.get(result, "diagnostics")
+  const submitted =
+    Reflect.get(result, "submitted") ??
+    (diagnostics && typeof diagnostics === "object" ? Reflect.get(diagnostics, "submitted") : undefined)
+  const at = submitted && typeof submitted === "object" ? Reflect.get(submitted, "startedAtMs") : undefined
+  return typeof at === "number" && Number.isFinite(at) && at >= earliest && at <= Date.now() ? at : Infinity
 }
 
-async function waitForAssistantBridge(contents: BrowserWindow["webContents"], controller: Controller) {
+async function waitForAssistantBridge(
+  contents: BrowserWindow["webContents"],
+  controller: Controller,
+  signal?: AbortSignal,
+) {
   const deadline = Date.now() + 30000
   // Require the composer to report ready for two CONSECUTIVE polls before declaring the bridge
   // usable. inspectChat runs inside the assistant iframe, so its readiness reflects the real chat
@@ -574,15 +682,20 @@ async function waitForAssistantBridge(contents: BrowserWindow["webContents"], co
   // wipes the composer we then fill → post-login submit_or_ui_failure. Stability debounces that.
   let stable = 0
   while (Date.now() < deadline) {
-    const state = await controller.inspectChat(2000).catch(() => null) as { ok?: boolean; ready?: boolean } | null
+    throwIfClientAborted(signal)
+    const state = (await withClientAbort(
+      controller.inspectChat(2000).catch(() => null),
+      signal,
+    )) as { ok?: boolean; ready?: boolean } | null
     if (state?.ok && state.ready) {
       stable += 1
       if (stable >= 2) return
     } else {
       stable = 0
     }
-    await wait(500)
+    await withClientAbort(wait(500), signal)
   }
+  throwIfClientAborted(signal)
   await throwIfAuthRequired(contents)
   throw new Error("Timed out waiting for WPP AI Assistant bridge readiness.")
 }
@@ -597,10 +710,19 @@ async function throwIfAuthRequired(contents: StartupContents) {
 
 async function readStartupAuthState(contents: StartupContents) {
   const frames = contents.mainFrame.framesInSubtree.filter((frame) => isWppFrameUrl(frame.url))
-  const texts = await Promise.all(frames.map((frame) => frame.executeJavaScript(`
+  const texts = await Promise.all(
+    frames.map((frame) =>
+      frame
+        .executeJavaScript(
+          `
     (() => String(document.body?.innerText || document.documentElement?.innerText || ""))()
-  `, true).catch(() => "")))
-  return { url: contents.getURL(), text: texts.map((text) => typeof text === "string" ? text : "").join("\n") }
+  `,
+          true,
+        )
+        .catch(() => ""),
+    ),
+  )
+  return { url: contents.getURL(), text: texts.map((text) => (typeof text === "string" ? text : "")).join("\n") }
 }
 
 // Post-failure logout probe (checkAuthState). Pass 1: classify every WPP frame's URL + visible text
@@ -612,19 +734,29 @@ async function probeWppAuthState(contents: BrowserWindow["webContents"]): Promis
   const frames = contents.mainFrame.framesInSubtree.filter((frame) => isWppFrameUrl(frame.url))
 
   for (const frame of frames) {
-    const text = await frame.executeJavaScript(`
+    const text = await frame
+      .executeJavaScript(
+        `
       (() => String(document.body?.innerText || document.documentElement?.innerText || ""))()
-    `, true).catch(() => "")
+    `,
+        true,
+      )
+      .catch(() => "")
     const reason = classifyWppAuthState({ url: frame.url, text: String(text || "") })
     if (reason) return reason
   }
 
   for (const frame of frames) {
-    const probe = await frame.executeJavaScript(`
+    const probe = await frame
+      .executeJavaScript(
+        `
       fetch(location.href, { credentials: "include", cache: "no-store", redirect: "manual" })
         .then((res) => ({ status: res.status, type: res.type }))
         .catch(() => null)
-    `, true).catch(() => null)
+    `,
+        true,
+      )
+      .catch(() => null)
     const reason = classifyWppSessionProbe(probe)
     if (reason) return reason
   }

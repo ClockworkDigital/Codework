@@ -1,6 +1,7 @@
 import { WorkerPool } from "../worker-pool";
 import { WPP_COOKIE_MONSTER_PROJECT_URL } from "./wppProject.mjs";
 import { DEFAULT_MODEL_ID } from "./modelProfiles.mjs";
+import { wppAuth } from "../session";
 
 const DEFAULT_EXTENSION_TIMEOUT_MS = Number(process.env.O1_CODE_EXTENSION_TIMEOUT_MS || process.env.O1_CODE_TIMEOUT_MS || 900000);
 const DEFAULT_CLIENT_TTL_MS = Number(process.env.O1_CODE_CLIENT_TTL_MS || 10 * 60 * 1000);
@@ -243,23 +244,30 @@ export class ExtensionBridge {
     this.jobs.set(job.id, job);
     this.counters.enqueued += 1;
     this.leaseJob(job, "worker-pool");
+    const cancellation = new AbortController();
+    const abort = () => cancellation.abort(options.signal?.reason);
+    if (options.signal?.aborted) abort();
+    else options.signal?.addEventListener("abort", abort, { once: true });
 
     try {
       const result = await withTimeout(
         this.poolFor(job.payload.url).run(job, (frame) => {
           this.pushProgress(job.id, frame);
           options.onProgress?.(frame);
-        }, options.signal),
+        }, cancellation.signal),
         timeoutMs,
+        () => cancellation.abort(),
       );
       if (result?.ok === false) {
         const error = new Error(result.error || "O1-Code worker job failed.");
         error.statusCode = result.statusCode || 502;
         error.type = result.type || "o1_code_worker_pool_error";
         error.bridgeResult = result;
+        error.worker = result.worker;
         throw error;
       }
       this.clearAuthRequired();
+      wppAuth.observe("signed-in");
       this.jobs.delete(job.id);
       this.teardownProgress(job.id);
       this.finishJob(job, "succeeded", result);
@@ -281,10 +289,13 @@ export class ExtensionBridge {
         diagnostics: error.diagnostics || null
       });
       throw error;
+    } finally {
+      options.signal?.removeEventListener("abort", abort);
     }
   }
 
   markAuthRequired(reason) {
+    wppAuth.observe("signed-out");
     const wasRequired = this.auth.required;
     this.auth = { required: true, reason, detectedAt: new Date().toISOString() };
     // Fire only on the false->true edge so repeated failed jobs don't spawn a window each.
@@ -303,6 +314,7 @@ export class ExtensionBridge {
     const url = options.url || process.env.O1_CODE_TARGET_URL || process.env.WPP_RECORDER_URL || WPP_COOKIE_MONSTER_PROJECT_URL;
     return {
       id: crypto.randomUUID(),
+      runId: options.runId,
       type: "ask",
       createdAt: new Date(createdAtMs).toISOString(),
       createdAtMs,
@@ -480,6 +492,7 @@ function buildRunEnvelope(prompt, options, result, startedAt, transport = "exten
   return {
     ok: true,
     transport,
+    worker: result.worker || null,
     prompt,
     images: (options.images || []).map((image) => ({
       id: image.id,
@@ -526,7 +539,7 @@ function buildRunEnvelope(prompt, options, result, startedAt, transport = "exten
   };
 }
 
-function withTimeout(promise, timeoutMs) {
+function withTimeout(promise, timeoutMs, onTimeout) {
   let timeout;
   const timeoutPromise = new Promise((_resolve, reject) => {
     timeout = setTimeout(() => {
@@ -534,6 +547,7 @@ function withTimeout(promise, timeoutMs) {
       error.statusCode = 504;
       error.type = "o1_code_extension_timeout";
       reject(error);
+      onTimeout?.();
     }, timeoutMs);
   });
 

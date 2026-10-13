@@ -1,0 +1,1561 @@
+import { expect, test, type Page } from "@playwright/test"
+import { fixture, pageMessages } from "../performance/timeline/session-timeline-stress.fixture"
+import {
+  installStressSessionTabs,
+  mockStressTimeline,
+  stressSessionHref,
+} from "../performance/timeline/timeline-test-helpers"
+import { expectSessionTitle } from "../utils/waits"
+import { mockOpenCodeServer } from "../utils/mock-server"
+
+test("CM3 keeps draft navigation in project chats across UI switches", async ({ page }) => {
+  await mockStressTimeline(page)
+  await installStressSessionTabs(page, { draftID: "draft_cm3_tabs" })
+  await page.addInitScript(() => {
+    localStorage.setItem("settings.v3", JSON.stringify({ general: { newLayoutDesigns: true, quietCompanion: true } }))
+  })
+  await page.goto("/new-session?draftId=draft_cm3_tabs")
+  const strip = page.locator('[data-slot="titlebar-tabs"]')
+  const draft = page.locator('.cm3-sidebar-project-sessions [data-draft-id="draft_cm3_tabs"]')
+  const input = page.locator('[data-component="prompt-input"][contenteditable="true"]')
+  await expect(input).toBeEditable()
+  await input.fill("Keep this unsent chat")
+  await expect(draft.getByRole("button", { name: "Keep this unsent chat Draft", exact: true })).toBeVisible()
+  await expect(strip).toBeVisible()
+  await expect(strip.locator("[data-titlebar-tab-slot]")).toHaveCount(3)
+  await expect(page.locator(".cm3-sidebar-tabs").locator('[data-slot="titlebar-tabs"]')).toBeVisible()
+  await page.getByRole("switch", { name: "CM3 UI", exact: true }).click()
+  await expect(strip).toBeVisible()
+  await expect(input).toHaveText("Keep this unsent chat")
+  await page.getByRole("switch", { name: "CM3 UI", exact: true }).click()
+  await expect(strip).toBeVisible()
+  await expect(draft.getByRole("button", { name: "Keep this unsent chat Draft", exact: true })).toBeVisible()
+  await expect(input).toHaveText("Keep this unsent chat")
+  await expect(page.locator(".cm3-sidebar-tabs").locator('[data-slot="titlebar-tabs"]')).toBeVisible()
+  const tab = strip
+    .locator("[data-titlebar-tab-slot]")
+    .filter({ has: page.locator('[href="/new-session?draftId=draft_cm3_tabs"]') })
+  await tab.getByRole("button", { name: "Close tab", exact: true }).click()
+  await expect(tab).toHaveCount(0)
+  await expect(draft).toHaveCount(0)
+})
+
+test("cold CM3 sessions hydrate their project before starting a new chat", async ({ page }) => {
+  await mockStressTimeline(page)
+  await installStressSessionTabs(page, { sessionIDs: [fixture.sourceID] })
+  await page.addInitScript(
+    ({ directory }) => {
+      localStorage.setItem("settings.v3", JSON.stringify({ general: { newLayoutDesigns: true, quietCompanion: true } }))
+      localStorage.setItem(
+        "opencode.global.dat:server",
+        JSON.stringify({
+          projects: {
+            local: [
+              { worktree: "C:/OpenCode/OtherProject", expanded: true },
+              { worktree: directory, expanded: true },
+            ],
+          },
+          lastProject: { local: "C:/OpenCode/OtherProject" },
+        }),
+      )
+      const tabs = JSON.parse(localStorage.getItem("opencode.window.browser.dat:tabs") ?? "[]")
+      localStorage.setItem(
+        "opencode.window.browser.dat:tabs",
+        JSON.stringify(
+          tabs.map((tab: { type: string; server: string; sessionId: string }) => ({
+            type: tab.type,
+            server: tab.server,
+            sessionId: tab.sessionId,
+          })),
+        ),
+      )
+    },
+    { directory: fixture.directory },
+  )
+  await page.goto(stressSessionHref(fixture.sourceID))
+  await expectSessionTitle(page, fixture.expected.sourceTitle)
+  const project = page.locator(`.cm3-sidebar-project[title="${fixture.directory}"]`)
+  await expect(project).toHaveAttribute("data-active", "true")
+  const projectName = (await project.locator(":scope > span").innerText()).trim()
+  await page.getByRole("button", { name: "New chat", exact: true }).click()
+  await expect(
+    page.getByRole("heading", { name: `What should we build in ${projectName}?`, exact: true }),
+  ).toBeVisible()
+})
+
+for (const remote of [false, true]) {
+  test(`CM3 New chat uses the selected ${remote ? "server and " : ""}project`, async ({ page }) => {
+    await mockStressTimeline(page)
+    await mockCm3Projects(page)
+    await installStressSessionTabs(page)
+    const selectedServer = remote
+      ? `http://cm3-selected.test:${process.env.PLAYWRIGHT_SERVER_PORT ?? "4096"}`
+      : `http://${process.env.PLAYWRIGHT_SERVER_HOST ?? "127.0.0.1"}:${process.env.PLAYWRIGHT_SERVER_PORT ?? "4096"}`
+    await page.addInitScript(
+      ({ directory, selectedServer, remote }) => {
+        localStorage.setItem(
+          "settings.v3",
+          JSON.stringify({ general: { newLayoutDesigns: true, quietCompanion: true } }),
+        )
+        localStorage.setItem(
+          "opencode.global.dat:server",
+          JSON.stringify({
+            list: remote ? [{ type: "http", http: { url: selectedServer }, displayName: "Selected server" }] : [],
+            projects: {
+              local: [{ worktree: directory, expanded: true }],
+              [remote ? selectedServer : "local"]: [
+                ...(!remote ? [{ worktree: directory, expanded: true }] : []),
+                { worktree: "C:/OpenCode/OtherProject", expanded: true },
+              ],
+            },
+            lastProject: { local: directory },
+          }),
+        )
+      },
+      { directory: fixture.directory, selectedServer, remote },
+    )
+    await page.goto(stressSessionHref(fixture.sourceID))
+    await expectSessionTitle(page, fixture.expected.sourceTitle)
+    const selected = page.locator('.cm3-sidebar-project[title="C:/OpenCode/OtherProject"]')
+    await selected.click()
+    await expect(selected).toHaveAttribute("data-active", "true")
+    await page.getByRole("button", { name: "New chat", exact: true }).click()
+    await expect(
+      page.getByRole("heading", { name: "What should we build in OtherProject?", exact: true }),
+    ).toBeVisible()
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const draftID = new URLSearchParams(location.search).get("draftId")
+          return JSON.parse(localStorage.getItem("opencode.window.browser.dat:tabs") ?? "[]").find(
+            (tab: { draftID?: string }) => tab.draftID === draftID,
+          )
+        }),
+      )
+      .toMatchObject({ type: "draft", server: selectedServer, directory: "C:/OpenCode/OtherProject" })
+  })
+}
+
+test("CM3 projects retain editing, closing, and persistent drag ordering", async ({ page }) => {
+  await mockStressTimeline(page)
+  await mockCm3Projects(page)
+  await page.addInitScript(
+    ({ directory }) => {
+      if (localStorage.getItem("settings.v3")) return
+      localStorage.setItem("settings.v3", JSON.stringify({ general: { newLayoutDesigns: true, quietCompanion: true } }))
+      localStorage.setItem(
+        "opencode.global.dat:server",
+        JSON.stringify({
+          projects: {
+            local: [directory, "C:/OpenCode/OtherProject", "C:/OpenCode/ThirdProject"].map((worktree) => ({
+              worktree,
+              expanded: true,
+            })),
+          },
+          lastProject: { local: directory },
+        }),
+      )
+    },
+    { directory: fixture.directory },
+  )
+  await page.goto("/")
+  const projects = page.getByRole("complementary", { name: "Projects", exact: true })
+  const other = projects.locator('[data-component="home-project-row"][title="C:/OpenCode/OtherProject"]')
+  const third = projects.locator('[data-component="home-project-row"][title="C:/OpenCode/ThirdProject"]')
+  await expect(other).toBeEnabled()
+  await expect(third).toBeEnabled()
+  const otherBox = await other.boundingBox()
+  const thirdBox = await third.boundingBox()
+  expect(otherBox).not.toBeNull()
+  expect(thirdBox).not.toBeNull()
+  await page.mouse.move(otherBox!.x + 30, otherBox!.y + otherBox!.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(thirdBox!.x + 30, thirdBox!.y + thirdBox!.height - 2, { steps: 10 })
+  await page.mouse.up()
+  await expect(projects.locator('[data-component="home-project-row"] > span')).toHaveText([
+    fixture.project.name,
+    "ThirdProject",
+    "OtherProject",
+  ])
+  await other.click({ button: "right" })
+  await page.getByRole("menuitem", { name: "Edit project", exact: true }).click()
+  const dialog = page.getByRole("dialog", { name: "Edit project", exact: true })
+  await expect(dialog.getByRole("textbox", { name: "Name", exact: true })).toHaveValue("OtherProject")
+  await dialog.getByRole("textbox", { name: "Name", exact: true }).fill("Renamed project")
+  await dialog.getByRole("button", { name: "Save", exact: true }).click()
+  await expect(other.locator(":scope > span")).toHaveText("Renamed project")
+  await third.click({ button: "right" })
+  await page.getByRole("menuitem", { name: "Close", exact: true }).click()
+  await expect(third).toHaveCount(0)
+  await page.reload()
+  await expect(projects.locator('[data-component="home-project-row"] > span')).toHaveText([
+    fixture.project.name,
+    "Renamed project",
+  ])
+})
+
+for (const width of [1280, 390]) {
+  for (const direction of ["ltr", "rtl"]) {
+    test(`CM3 project pinning persists and closing unpins at ${width}px ${direction}`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 800 })
+      await mockStressTimeline(page)
+      await mockCm3Projects(page)
+      await page.addInitScript(
+        ({ directory }) => {
+          if (localStorage.getItem("settings.v3")) return
+          localStorage.setItem(
+            "settings.v3",
+            JSON.stringify({ general: { newLayoutDesigns: true, quietCompanion: true } }),
+          )
+          localStorage.setItem(
+            "opencode.global.dat:server",
+            JSON.stringify({
+              projects: {
+                local: [directory, "C:/OpenCode/OtherProject", "C:/OpenCode/ThirdProject"].map((worktree) => ({
+                  worktree,
+                  expanded: true,
+                })),
+              },
+              lastProject: { local: directory },
+            }),
+          )
+        },
+        { directory: fixture.directory },
+      )
+      await page.goto("/")
+      const toggle = page.getByRole("button", { name: "Toggle sidebar", exact: true })
+      if (width === 390) await toggle.click()
+      await page.locator("html").evaluate((element, dir) => element.setAttribute("dir", dir), direction)
+      const projects = page.getByRole("complementary", { name: "Projects", exact: true })
+      const pinned = projects.getByRole("region", { name: "Pinned", exact: true })
+      const other = projects.getByTitle("C:/OpenCode/OtherProject", { exact: true })
+      const third = projects.getByTitle("C:/OpenCode/ThirdProject", { exact: true })
+      await expect(other).toBeEnabled()
+      await expect(third).toBeEnabled()
+      await expect(pinned).toHaveCount(0)
+      await other.hover()
+      await other.locator("..").getByRole("button", { name: "Pin project", exact: true }).click()
+      await expect(pinned.getByTitle("C:/OpenCode/OtherProject", { exact: true })).toBeVisible()
+      await expect(other).toHaveCount(1)
+      await expect(projects.locator('[data-component="home-project-row"] > span')).toHaveText([
+        "OtherProject",
+        fixture.project.name,
+        "ThirdProject",
+      ])
+      const heading = projects.getByText("Projects", { exact: true })
+      expect((await pinned.boundingBox())!.y).toBeLessThan((await heading.boundingBox())!.y)
+
+      await page.reload()
+      if (width === 390) await toggle.click()
+      await page.locator("html").evaluate((element, dir) => element.setAttribute("dir", dir), direction)
+      await expect(pinned.getByTitle("C:/OpenCode/OtherProject", { exact: true })).toBeVisible()
+      await other.hover()
+      const unpin = other.locator("..").getByRole("button", { name: "Unpin project", exact: true })
+      await expect(unpin).toHaveAttribute("aria-pressed", "true")
+      await unpin.click()
+      await expect(pinned).toHaveCount(0)
+      await expect(projects.locator('[data-component="home-project-row"] > span')).toHaveText([
+        fixture.project.name,
+        "OtherProject",
+        "ThirdProject",
+      ])
+
+      await other.click({ button: "right" })
+      await page.getByRole("menuitem", { name: "Pin project", exact: true }).click()
+      await expect(pinned.getByTitle("C:/OpenCode/OtherProject", { exact: true })).toBeVisible()
+      await other.click({ button: "right" })
+      await page.getByRole("menuitem", { name: "Close", exact: true }).click()
+      await expect(other).toHaveCount(0)
+      await expect(pinned).toHaveCount(0)
+      await expect(third).toBeVisible()
+      await expect
+        .poll(() =>
+          page.evaluate(() => {
+            const store = JSON.parse(localStorage.getItem("opencode.global.dat:server") ?? "{}")
+            return store.recentlyClosed?.local
+          }),
+        )
+        .toEqual(["C:/OpenCode/OtherProject"])
+      await page.reload()
+      if (width === 390) await toggle.click()
+      await expect(other).toHaveCount(0)
+      await expect(pinned).toHaveCount(0)
+      await expect(third).toBeEnabled()
+      await page.route("**/find/file?**", (route) =>
+        route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify(["OtherProject"]),
+        }),
+      )
+      await page.getByRole("button", { name: "Open project", exact: true }).click()
+      const picker = page.getByRole("dialog", { name: "Open project", exact: true })
+      await picker.getByRole("button", { name: "C:/OpenCode/ OtherProject /", exact: true }).click()
+      await expect(picker).toHaveCount(0)
+      if (width === 390) await toggle.click()
+      const reopened = projects.getByTitle("C:\\OpenCode\\OtherProject", { exact: true })
+      await expect(reopened).toBeEnabled()
+      await expect(pinned).toHaveCount(0)
+      await reopened.click({ button: "right" })
+      await expect(page.getByRole("menuitem", { name: "Pin project", exact: true })).toBeVisible()
+      await page.keyboard.press("Escape")
+      await page.reload()
+      if (width === 390) await toggle.click()
+      await expect(reopened).toBeEnabled()
+      await expect(pinned).toHaveCount(0)
+    })
+  }
+}
+
+test("CM3 project sections retain interleaved drag ordering in both directions", async ({ page }) => {
+  await mockStressTimeline(page)
+  await mockCm3Projects(page, ["OtherProject", "ThirdProject", "FourthProject"])
+  await page.addInitScript(
+    ({ directory }) => {
+      if (localStorage.getItem("settings.v3")) return
+      localStorage.setItem("settings.v3", JSON.stringify({ general: { newLayoutDesigns: true, quietCompanion: true } }))
+      localStorage.setItem(
+        "opencode.global.dat:server",
+        JSON.stringify({
+          projects: {
+            local: [directory, "C:/OpenCode/OtherProject", "C:/OpenCode/ThirdProject", "C:/OpenCode/FourthProject"].map(
+              (worktree, index) => ({
+                worktree,
+                expanded: true,
+                pinned: index % 2 === 0,
+              }),
+            ),
+          },
+          lastProject: { local: directory },
+        }),
+      )
+    },
+    { directory: fixture.directory },
+  )
+  await page.goto("/")
+  const projects = page.getByRole("complementary", { name: "Projects", exact: true })
+  const rows = projects.locator('[data-component="home-project-row"] > span')
+  await expect(rows).toHaveText([fixture.project.name, "ThirdProject", "OtherProject", "FourthProject"])
+  for (const move of [
+    {
+      source: fixture.directory,
+      target: "C:/OpenCode/ThirdProject",
+      down: true,
+      order: ["ThirdProject", fixture.project.name, "OtherProject", "FourthProject"],
+    },
+    {
+      source: fixture.directory,
+      target: "C:/OpenCode/ThirdProject",
+      down: false,
+      order: [fixture.project.name, "ThirdProject", "OtherProject", "FourthProject"],
+    },
+    {
+      source: "C:/OpenCode/OtherProject",
+      target: "C:/OpenCode/FourthProject",
+      down: true,
+      order: [fixture.project.name, "ThirdProject", "FourthProject", "OtherProject"],
+    },
+    {
+      source: "C:/OpenCode/OtherProject",
+      target: "C:/OpenCode/FourthProject",
+      down: false,
+      order: [fixture.project.name, "ThirdProject", "OtherProject", "FourthProject"],
+    },
+  ]) {
+    const source = projects.getByTitle(move.source, { exact: true })
+    const target = projects.getByTitle(move.target, { exact: true })
+    await expect(source).toBeEnabled()
+    await expect(target).toBeEnabled()
+    const sourceBox = await source.boundingBox()
+    const targetBox = await target.boundingBox()
+    expect(sourceBox).not.toBeNull()
+    expect(targetBox).not.toBeNull()
+    await page.mouse.move(sourceBox!.x + 30, sourceBox!.y + sourceBox!.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(targetBox!.x + 30, targetBox!.y + (move.down ? targetBox!.height - 2 : 2), { steps: 10 })
+    await page.mouse.up()
+    await expect(rows).toHaveText(move.order)
+    await page.reload()
+    await expect(rows).toHaveText(move.order)
+    await expect(
+      projects.getByRole("region", { name: "Pinned", exact: true }).locator('[data-component="home-project-row"]'),
+    ).toHaveCount(2)
+  }
+})
+
+for (const width of [1280, 390]) {
+  for (const direction of ["ltr", "rtl"]) {
+    test(`CM3 pinned and unpinned project groups expand independently and persist at ${width}px ${direction}`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 800 })
+      const other = {
+        ...fixture.sessions[0],
+        id: "ses_cm3_other",
+        projectID: "proj_cm3_OtherProject",
+        directory: "C:/OpenCode/OtherProject",
+        title: "Most recent other project chat",
+        time: { created: 1700000003000, updated: 1700000003000 },
+      }
+      await mockOpenCodeServer(page, {
+        sessions: [...fixture.sessions, other],
+        provider: fixture.provider,
+        directory: fixture.directory,
+        project: fixture.project,
+        pageMessages,
+      })
+      await mockCm3Projects(page)
+      await page.addInitScript(
+        ({ directory, other }) => {
+          // Do not reseed project expansion on reload.
+          if (localStorage.getItem("settings.v3")) return
+          localStorage.setItem(
+            "settings.v3",
+            JSON.stringify({ general: { newLayoutDesigns: true, quietCompanion: true } }),
+          )
+          localStorage.setItem(
+            "opencode.global.dat:server",
+            JSON.stringify({
+              projects: {
+                local: [
+                  { worktree: directory, expanded: true, pinned: true },
+                  { worktree: other, expanded: false },
+                ],
+              },
+              lastProject: { local: directory },
+            }),
+          )
+        },
+        { directory: fixture.directory, other: other.directory },
+      )
+      await page.goto("/")
+      const navigation = page.getByRole("complementary", { name: "Projects and sessions", exact: true })
+      const toggle = page.getByRole("button", { name: "Toggle sidebar", exact: true })
+      if (width === 390) await toggle.click()
+      await page.locator("html").evaluate((element, dir) => element.setAttribute("dir", dir), direction)
+      const projects = navigation.getByRole("complementary", { name: "Projects", exact: true })
+      const pinned = projects.getByRole("region", { name: "Pinned", exact: true })
+      const titles = ".cm3-sidebar-session .cm3-sidebar-task-copy > span:first-child"
+      const recent = navigation.getByRole("region", { name: "Recent sessions", exact: true }).locator(titles)
+      const expected = [other.title, fixture.expected.targetTitle, fixture.expected.sourceTitle]
+      const groups = [
+        {
+          directory: fixture.directory,
+          name: fixture.project.name,
+          expanded: true,
+          titles: [fixture.expected.targetTitle, fixture.expected.sourceTitle],
+        },
+        { directory: other.directory, name: "OtherProject", expanded: false, titles: [other.title] },
+      ].map((group) => {
+        const row = projects.getByTitle(group.directory, { exact: true })
+        return { ...group, row, button: row.locator("..").locator('button[data-action="home-project-expand"]') }
+      })
+      const assertGroup = async (group: (typeof groups)[number], expanded: boolean) => {
+        await expect(group.button).toHaveAccessibleName(`${expanded ? "Collapse" : "Expand"} ${group.name}`)
+        await expect(group.button).toHaveAttribute("aria-expanded", String(expanded))
+        await expect(group.button.locator("svg use")).toHaveAttribute(
+          "href",
+          `#opencode-v2-icon-folder${expanded ? "-open" : ""}`,
+        )
+        await expect(group.button).toHaveAttribute("aria-controls", /\S+/)
+        const children = projects.locator(`[id=${JSON.stringify(await group.button.getAttribute("aria-controls"))}]`)
+        await expect(children).toBeAttached()
+        if (expanded) {
+          await expect(children).toBeVisible()
+          await expect(children.locator(titles)).toHaveText(group.titles)
+        } else {
+          await expect(children).toBeHidden()
+          await expect(children.locator(":scope > *")).toHaveCount(0)
+        }
+        await expect(recent).toHaveText(expected)
+        if (width === 390) await expect(toggle).toHaveAttribute("aria-expanded", "true")
+      }
+      await expect(pinned.getByTitle(fixture.directory, { exact: true })).toBeVisible()
+      await expect(pinned.getByTitle(other.directory, { exact: true })).toHaveCount(0)
+      await expect(projects.locator('[data-component="home-project-row"][data-active="true"]')).toHaveCount(0)
+      for (const group of groups) {
+        await assertGroup(group, group.expanded)
+        await expect(group.row).toHaveAttribute("data-active", "false")
+        const controls = await group.button.getAttribute("aria-controls")
+        await group.button.click()
+        await assertGroup(group, !group.expanded)
+        await expect(group.row).toHaveAttribute("data-active", "false")
+
+        await group.row.click()
+        if (width === 390) {
+          await expect(toggle).toHaveAttribute("aria-expanded", "false")
+          await toggle.click()
+        }
+        await expect(group.row).toHaveAttribute("data-active", "true")
+        await assertGroup(group, group.expanded)
+        await group.button.click()
+        await assertGroup(group, !group.expanded)
+        await group.button.focus()
+        await group.button.press("Tab")
+        await expect(group.row).toBeFocused()
+        await group.row.press("Shift+Tab")
+        await expect(group.button).toBeFocused()
+        await group.button.press("Enter")
+        await assertGroup(group, group.expanded)
+        await expect(group.button).toBeFocused()
+        await expect(group.row).toHaveAttribute("data-active", "true")
+        await group.button.press("Space")
+        await assertGroup(group, !group.expanded)
+        await expect(group.button).toBeFocused()
+        await expect(group.row).toHaveAttribute("data-active", "true")
+        await expect(group.button).toHaveAttribute("aria-controls", controls!)
+      }
+      await expect
+        .poll(() =>
+          page.evaluate(() => {
+            const store = JSON.parse(localStorage.getItem("opencode.global.dat:server") ?? "{}")
+            return store.projects?.local
+          }),
+        )
+        .toEqual([
+          { worktree: fixture.directory, expanded: false, pinned: true },
+          { worktree: other.directory, expanded: true },
+        ])
+      await page.reload()
+      if (width === 390) await toggle.click()
+      await page.locator("html").evaluate((element, dir) => element.setAttribute("dir", dir), direction)
+      await expect(pinned.getByTitle(fixture.directory, { exact: true })).toBeVisible()
+      for (const group of groups) await assertGroup(group, !group.expanded)
+      await expect(page).toHaveURL("/")
+    })
+  }
+}
+
+async function mockCm3Projects(page: Page, names = ["OtherProject", "ThirdProject"]) {
+  const projects = [
+    fixture.project,
+    ...names.map((name) => ({
+      ...fixture.project,
+      id: `proj_cm3_${name}`,
+      name,
+      worktree: `C:/OpenCode/${name}`,
+    })),
+  ]
+  await page.route("**/*", (route) => {
+    const url = new URL(route.request().url())
+    const project =
+      projects.find(
+        (item) => item.worktree === (url.searchParams.get("location[directory]") ?? url.searchParams.get("directory")),
+      ) ?? projects[0]
+    const target = projects.find((item) => url.pathname === `/project/${item.id}`)
+    if (target && route.request().method() === "PATCH") Object.assign(target, route.request().postDataJSON())
+    const body =
+      url.pathname === "/project" || url.pathname === "/api/project"
+        ? projects
+        : url.pathname === "/project/current"
+          ? project
+          : url.pathname === "/api/project/current"
+            ? { id: project.id, directory: project.worktree }
+            : url.pathname === "/path" || url.pathname === "/api/path"
+              ? {
+                  state: project.worktree,
+                  config: project.worktree,
+                  worktree: project.worktree,
+                  directory: project.worktree,
+                  home: "C:/OpenCode",
+                }
+              : target
+    if (!body) return route.fallback()
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      headers: { "access-control-allow-origin": "*" },
+      body: JSON.stringify(body),
+    })
+  })
+}
+
+test("CM3 mobile navigation is named and returns keyboard focus", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 800 })
+  await mockStressTimeline(page)
+  await installStressSessionTabs(page)
+  await page.addInitScript(() => {
+    localStorage.setItem("settings.v3", JSON.stringify({ general: { newLayoutDesigns: true, quietCompanion: true } }))
+  })
+  await page.goto(stressSessionHref(fixture.sourceID))
+  await expectSessionTitle(page, fixture.expected.sourceTitle)
+  const toggle = page.getByRole("button", { name: "Toggle sidebar", exact: true })
+  await expect(toggle).toHaveAttribute("aria-expanded", "false")
+  await toggle.click()
+  await expect(toggle).toHaveAttribute("aria-expanded", "true")
+  const navigation = page.getByRole("complementary", { name: "Projects and sessions", exact: true })
+  await expect(navigation.getByRole("button", { name: "New chat", exact: true })).toBeVisible()
+  await page.keyboard.press("Escape")
+  await expect(toggle).toHaveAttribute("aria-expanded", "false")
+  await expect(toggle).toBeFocused()
+})
+
+test("titlebar UI and color switches persist across reloads", async ({ page }) => {
+  await mockStressTimeline(page)
+  await installStressSessionTabs(page)
+  await page.addInitScript(() => {
+    if (!localStorage.getItem("settings.v3"))
+      localStorage.setItem("settings.v3", JSON.stringify({ general: { newLayoutDesigns: true, quietCompanion: true } }))
+  })
+  await page.goto(stressSessionHref(fixture.sourceID))
+  await expectSessionTitle(page, fixture.expected.sourceTitle)
+  const controls = page.locator('[data-component="titlebar-appearance"]')
+  const ui = controls.getByRole("switch", { name: "CM3 UI", exact: true })
+  const dark = controls.getByRole("switch", { name: "Dark", exact: true })
+  await expect(ui).toHaveAttribute("aria-checked", "true")
+  await ui.click()
+  await expect(page.locator(".cm3-live")).toHaveCount(0)
+  await ui.click()
+  await expect(page.locator(".cm3-live")).toBeVisible()
+  const initial = await dark.getAttribute("aria-checked")
+  await dark.click()
+  await expect(dark).toHaveAttribute("aria-checked", initial === "true" ? "false" : "true")
+  await expect(page.locator("html")).toHaveAttribute("data-color-scheme", initial === "true" ? "light" : "dark")
+  await page.reload()
+  await expect(ui).toHaveAttribute("aria-checked", "true")
+  await expect(dark).toHaveAttribute("aria-checked", initial === "true" ? "false" : "true")
+})
+
+test("CM3 home keeps project navigation in the sidebar", async ({ page }) => {
+  await mockStressTimeline(page)
+  await installStressSessionTabs(page)
+  await page.addInitScript(() => {
+    localStorage.setItem("settings.v3", JSON.stringify({ general: { newLayoutDesigns: true, quietCompanion: true } }))
+  })
+  await page.goto("/")
+  await expect(page.locator(".cm3-sidebar-project").first()).toBeVisible()
+  await expect(page.locator('[data-slot="home-projects-scroll"]')).toHaveCount(0)
+  await expect(page.locator(".cm3-sidebar-footer").getByRole("button", { name: "Projects", exact: true })).toHaveCount(
+    0,
+  )
+  await page.getByRole("switch", { name: "CM3 UI", exact: true }).click()
+  await expect(page.locator('[data-slot="home-projects-scroll"]')).toBeVisible()
+})
+
+test("CM3 uses the live session and preserves its editor across UI switches", async ({ page }, testInfo) => {
+  await mockStressTimeline(page)
+  await installStressSessionTabs(page)
+  await page.addInitScript(() => {
+    if (!localStorage.getItem("settings.v3"))
+      localStorage.setItem("settings.v3", JSON.stringify({ general: { newLayoutDesigns: true, quietCompanion: true } }))
+  })
+  await page.goto(stressSessionHref(fixture.sourceID))
+  await expectSessionTitle(page, fixture.expected.sourceTitle)
+  await expect(page.locator(".cm3-live")).toBeVisible()
+  await expect(page.locator('[data-cm3-region="session"]')).toBeVisible()
+  const input = page.locator('[data-component="prompt-input"][contenteditable="true"]')
+  await expect(input).toHaveCount(1)
+  await input.fill("Preserve this live draft")
+  await page.route("**/pty/shells", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: "[]",
+      headers: { "access-control-allow-origin": "*" },
+    }),
+  )
+  const editor = await input.elementHandle()
+  await page.screenshot({ path: testInfo.outputPath("cm3-live-session.png") })
+  await page.getByRole("switch", { name: "CM3 UI", exact: true }).click()
+  await expect(page.locator(".cm3-live")).toHaveCount(0)
+  await expect(input).toHaveText("Preserve this live draft")
+  expect(await input.evaluate((element, original) => element === original, editor)).toBe(true)
+  await page.keyboard.press("ControlOrMeta+Comma")
+  const toggle = page.locator('[data-action="settings-quiet-companion"]').getByRole("switch")
+  await expect(toggle).toBeVisible()
+  await toggle.press("Space")
+  await expect(page.locator(".cm3-live")).toBeVisible()
+  await expect(input).toHaveText("Preserve this live draft")
+  expect(await input.evaluate((element, original) => element === original, editor)).toBe(true)
+  await expect(page).toHaveURL(new RegExp(fixture.sourceID))
+  await page.reload()
+  await expectSessionTitle(page, fixture.expected.sourceTitle)
+  await expect(page.locator(".cm3-live")).toBeVisible()
+  await expect(input).toHaveText("Preserve this live draft")
+  await page.route(`**/session/${fixture.sourceID}/prompt_async`, (route) =>
+    route.fulfill({
+      status: 204,
+      headers: { "access-control-allow-origin": "*" },
+    }),
+  )
+  const submitted = page.waitForRequest(
+    (request) =>
+      request.method() === "POST" && new URL(request.url()).pathname === `/session/${fixture.sourceID}/prompt_async`,
+  )
+  await input.press("Enter")
+  const request = await submitted
+  expect(request.postDataJSON()).toMatchObject({ parts: [{ type: "text", text: "Preserve this live draft" }] })
+  await expect(input).toHaveText("")
+})
+
+test("CM3 landing suggestions edit the real project draft", async ({ page }, testInfo) => {
+  await mockStressTimeline(page)
+  await installStressSessionTabs(page, { draftID: "draft_cm3_live" })
+  await page.addInitScript(() => {
+    if (!localStorage.getItem("settings.v3"))
+      localStorage.setItem("settings.v3", JSON.stringify({ general: { newLayoutDesigns: true, quietCompanion: true } }))
+  })
+  await page.goto("/new-session?draftId=draft_cm3_live")
+  await expect(page.locator('[data-cm3-thread="false"]')).toBeVisible()
+  await expect(page.getByRole("heading", { name: "What should we build in SmokeProject?", exact: true })).toBeVisible()
+  const input = page.locator('[data-component="prompt-input"][contenteditable="true"]')
+  await expect(input).toHaveCount(1)
+  await page.getByRole("button", { name: "Trace a bug", exact: true }).click()
+  await expect(input).toHaveText("Help me trace a bug. Here is what happened:")
+  await expect(input).toBeFocused()
+  await page.screenshot({ path: testInfo.outputPath("cm3-live-landing.png") })
+})
+
+for (const scheme of ["light", "dark"] as const) {
+  for (const width of [1280, 390]) {
+    test(`CM3 ${scheme} ${width}px session keeps the live composer on screen`, async ({ page }, testInfo) => {
+      await page.setViewportSize({ width, height: 800 })
+      await mockStressTimeline(page)
+      await installStressSessionTabs(page)
+      await page.addInitScript((scheme) => {
+        localStorage.setItem(
+          "settings.v3",
+          JSON.stringify({ general: { newLayoutDesigns: true, quietCompanion: true } }),
+        )
+        localStorage.setItem("opencode-color-scheme", scheme)
+      }, scheme)
+      await page.goto(stressSessionHref(fixture.sourceID))
+      await expectSessionTitle(page, fixture.expected.sourceTitle)
+      const composer = page.locator('[data-cm3-region="composer"]')
+      await expect(composer).toBeVisible()
+      await expect(page.locator("html")).toHaveAttribute("data-color-scheme", scheme)
+      const box = await composer.boundingBox()
+      expect(box).not.toBeNull()
+      expect(box!.x).toBeGreaterThanOrEqual(0)
+      expect(box!.x + box!.width).toBeLessThanOrEqual(width + 1)
+      expect(box!.y + box!.height).toBeLessThanOrEqual(801)
+      await page.screenshot({ path: testInfo.outputPath(`cm3-session-${scheme}-${width}.png`) })
+    })
+  }
+}
+
+test("CM3 mobile Review opens actual changes and returns to the live draft", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 800 })
+  await mockStressTimeline(page)
+  await installStressSessionTabs(page)
+  await page.addInitScript(() => {
+    localStorage.setItem("settings.v3", JSON.stringify({ general: { newLayoutDesigns: true, quietCompanion: true } }))
+  })
+  await page.goto(stressSessionHref(fixture.sourceID))
+  await expectSessionTitle(page, fixture.expected.sourceTitle)
+  const input = page.locator('[data-component="prompt-input"][contenteditable="true"]')
+  await input.fill("Mobile draft")
+  const review = page.locator('[data-cm3-region="header"]').getByRole("button", { name: "Toggle review", exact: true })
+  await expect(review).toHaveAttribute("aria-pressed", "false")
+  await review.click()
+  await expect(review).toHaveAttribute("aria-pressed", "true")
+  await expect(input).not.toBeVisible()
+  await review.click()
+  await expect(review).toHaveAttribute("aria-pressed", "false")
+  await expect(input).toBeVisible()
+  await expect(input).toHaveText("Mobile draft")
+})
+
+for (const newLayout of [true, false]) {
+  test(`CM3 dark ${newLayout ? "V2" : "legacy"} landing is the live draft`, async ({ page }, testInfo) => {
+    await mockStressTimeline(page)
+    await installStressSessionTabs(page, { draftID: "draft_cm3_dark" })
+    await page.addInitScript((newLayout) => {
+      localStorage.setItem(
+        "settings.v3",
+        JSON.stringify({ general: { newLayoutDesigns: newLayout, quietCompanion: true } }),
+      )
+      localStorage.setItem("opencode-color-scheme", "dark")
+      localStorage.setItem("app-version.v1", JSON.stringify({ version: "1.18.34" }))
+    }, newLayout)
+    if (!newLayout) await page.clock.install({ time: new Date("2026-09-01T10:00:00Z") })
+    await page.goto(
+      newLayout
+        ? "/new-session?draftId=draft_cm3_dark"
+        : `/${Buffer.from(fixture.directory).toString("base64url")}/session`,
+    )
+    await expect(page.locator('[data-cm3-thread="false"]')).toBeVisible()
+    if (newLayout) {
+      await expect(
+        page.getByRole("heading", { name: "What should we build in SmokeProject?", exact: true }),
+      ).toBeVisible()
+    } else {
+      const landing = page.locator('[data-component="cm3-legacy-landing"]')
+      await expect(landing).toBeVisible()
+      await expect(landing.getByText("What should we build in smoke-project?", { exact: true })).toBeVisible()
+    }
+    const input = page.locator('[data-component="prompt-input"][contenteditable="true"]')
+    await expect(input).toHaveCount(1)
+    await page.getByRole("button", { name: "Trace a bug", exact: true }).click()
+    await expect(input).toHaveText("Help me trace a bug. Here is what happened:")
+    await page.screenshot({ path: testInfo.outputPath(`cm3-landing-dark-${newLayout ? "v2" : "legacy"}.png`) })
+  })
+}
+
+test("CM3 desktop Review and sidebar search use live session state", async ({ page }) => {
+  await mockStressTimeline(page)
+  await installStressSessionTabs(page)
+  await page.addInitScript(() => {
+    localStorage.setItem("settings.v3", JSON.stringify({ general: { newLayoutDesigns: true, quietCompanion: true } }))
+  })
+  await page.goto(stressSessionHref(fixture.sourceID))
+  await expectSessionTitle(page, fixture.expected.sourceTitle)
+  const review = page.locator('[data-cm3-region="header"]').getByRole("button", { name: "Toggle review", exact: true })
+  await review.click()
+  await expect(review).toHaveAttribute("aria-pressed", "true")
+  await expect(page.locator("#review-panel")).toBeVisible()
+  await review.click()
+  await expect(review).toHaveAttribute("aria-pressed", "false")
+  await expect(page.locator("#review-panel")).toHaveCount(0)
+  await review.click()
+  await expect(review).toHaveAttribute("aria-pressed", "true")
+  await expect(page.locator("#review-panel")).toBeVisible()
+  await expect(page.locator(".qc-preview-diff")).toHaveCount(0)
+  const navigation = page.getByRole("complementary", { name: "Projects and sessions", exact: true })
+  const search = navigation.getByRole("searchbox", { name: "Search threads", exact: true })
+  await search.fill(fixture.expected.targetTitle)
+  const target = navigation
+    .locator(".cm3-sidebar-scroll > .cm3-sidebar-task")
+    .filter({ hasText: fixture.expected.targetTitle })
+  await expect(target).toBeVisible()
+  await expect(navigation.getByRole("button", { name: fixture.expected.sourceTitle, exact: true })).toHaveCount(0)
+  await target.click()
+  await expectSessionTitle(page, fixture.expected.targetTitle)
+  await expect(page).toHaveURL(new RegExp(fixture.targetID))
+  await expect(page.locator('[data-component="prompt-input"][contenteditable="true"]')).toHaveCount(1)
+})
+
+test("CM3 recent threads show running status and unscoped project names", async ({ page }) => {
+  await mockOpenCodeServer(page, {
+    sessions: fixture.sessions,
+    provider: fixture.provider,
+    directory: fixture.directory,
+    project: fixture.project,
+    pageMessages,
+    sessionStatus: { [fixture.targetID]: { type: "busy" } },
+  })
+  await installCm3Sidebar(page)
+  await page.goto("/")
+  const recent = page
+    .getByRole("region", { name: "Recent sessions", exact: true })
+    .locator('[data-action="recent-session"]')
+    .filter({ hasText: fixture.expected.targetTitle })
+  await expect(recent.locator('[data-component="session-progress-indicator-v2"]')).toBeVisible()
+  await expect(recent).toHaveAccessibleDescription("Running")
+  await expect(recent.locator(".cm3-sidebar-task-project")).toHaveText(fixture.project.name)
+  await recent.click()
+  await expectSessionTitle(page, fixture.expected.targetTitle)
+  await expect(recent.locator(".cm3-sidebar-task-project")).toHaveText(fixture.project.name)
+})
+
+for (const kind of ["permission", "question"] as const) {
+  test(`CM3 recent threads flag a pending ${kind} instead of running progress`, async ({ page }) => {
+    await mockOpenCodeServer(page, {
+      sessions: fixture.sessions,
+      provider: fixture.provider,
+      directory: fixture.directory,
+      project: fixture.project,
+      pageMessages,
+      sessionStatus: { [fixture.targetID]: { type: "busy" } },
+      permissions:
+        kind === "permission"
+          ? [
+              {
+                id: "cm3_permission",
+                sessionID: fixture.targetID,
+                permission: "bash",
+                patterns: ["git status"],
+                metadata: {},
+                always: [],
+              },
+            ]
+          : [],
+      questions:
+        kind === "question"
+          ? [
+              {
+                id: "cm3_question",
+                sessionID: fixture.targetID,
+                questions: [{ header: "Choice", question: "Proceed?", options: [] }],
+              },
+            ]
+          : [],
+    })
+    await installCm3Sidebar(page)
+    await page.goto(stressSessionHref(fixture.sourceID))
+    await expectSessionTitle(page, fixture.expected.sourceTitle)
+    const recent = page
+      .getByRole("region", { name: "Recent sessions", exact: true })
+      .locator(".cm3-sidebar-task")
+      .filter({ hasText: fixture.expected.targetTitle })
+    await expect(recent.locator('[data-slot="project-avatar-unread-dot"]')).toBeVisible()
+    await expect(recent.locator('[data-component="session-progress-indicator-v2"]')).toHaveCount(0)
+    await expect(recent).toHaveAccessibleDescription(kind === "question" ? "Pending question" : "Permission required")
+  })
+}
+
+test("CM3 recent threads show unread completion notifications", async ({ page }) => {
+  await mockStressTimeline(page)
+  await installCm3Sidebar(page)
+  await page.addInitScript(
+    ({ directory, session }) => {
+      localStorage.setItem(
+        "opencode.global.dat:notification",
+        JSON.stringify({ list: [{ type: "turn-complete", directory, session, time: Date.now(), viewed: false }] }),
+      )
+    },
+    { directory: fixture.directory, session: fixture.targetID },
+  )
+  await page.goto(stressSessionHref(fixture.sourceID))
+  await expectSessionTitle(page, fixture.expected.sourceTitle)
+  const recent = page
+    .getByRole("region", { name: "Recent sessions", exact: true })
+    .locator(".cm3-sidebar-task")
+    .filter({ hasText: fixture.expected.targetTitle })
+  await expect(recent.locator('[data-slot="project-avatar-unread-dot"]')).toBeVisible()
+  await expect(recent).toHaveAccessibleDescription("Unread response")
+  await recent.click()
+  await expectSessionTitle(page, fixture.expected.targetTitle)
+  await expect(recent.locator('[data-slot="project-avatar-unread-dot"]')).toHaveCount(0)
+  await expect(recent).toHaveAccessibleDescription("")
+})
+
+for (const gesture of ["Control", "Meta", "middle"] as const) {
+  test(`CM3 recent thread ${gesture} opening preserves the active draft and mobile drawer`, async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 800 })
+    await mockStressTimeline(page)
+    const draftID = `draft_cm3_background_${gesture}`
+    await installCm3Sidebar(page, { sessionIDs: [fixture.sourceID], draftID })
+    await page.addInitScript(
+      (mac) => Object.defineProperty(navigator, "platform", { value: mac ? "MacIntel" : "Win32" }),
+      gesture === "Meta",
+    )
+    await page.goto(`/new-session?draftId=${draftID}`)
+    const input = page.locator('[data-component="prompt-input"][contenteditable="true"]')
+    await expect(input).toBeVisible()
+    await input.fill("Keep my active draft")
+    const toggle = page.getByRole("button", { name: "Toggle sidebar", exact: true })
+    await toggle.click()
+    await expect(toggle).toHaveAttribute("aria-expanded", "true")
+    const recent = page.locator(".cm3-sidebar-task").filter({ hasText: fixture.expected.targetTitle })
+    await recent.click(gesture === "middle" ? { button: "middle" } : { modifiers: [gesture] })
+    const tab = page.locator(
+      `.cm3-sidebar-tabs [data-titlebar-tab-link][href="${stressSessionHref(fixture.targetID)}"]`,
+    )
+    await expect(tab).toBeVisible()
+    await expect(page).toHaveURL(new RegExp(`draftId=${draftID}`))
+    await expect(input).toHaveText("Keep my active draft")
+    await expect(toggle).toHaveAttribute("aria-expanded", "true")
+    await recent.click()
+    await expectSessionTitle(page, fixture.expected.targetTitle)
+    await expect(toggle).toHaveAttribute("aria-expanded", "false")
+    await toggle.click()
+    await page.locator(`.cm3-sidebar-tabs [data-titlebar-tab-link][href="/new-session?draftId=${draftID}"]`).click()
+    await expect(input).toHaveText("Keep my active draft")
+  })
+}
+
+test("CM3 sidebar search supports arrows, Enter, empty results and composition", async ({ page }) => {
+  await mockStressTimeline(page)
+  await installCm3Sidebar(page)
+  await page.goto(stressSessionHref(fixture.sourceID))
+  await expectSessionTitle(page, fixture.expected.sourceTitle)
+  const sidebar = page.getByRole("complementary", { name: "Projects and sessions", exact: true })
+  const search = sidebar.getByRole("searchbox", { name: "Search threads", exact: true })
+  await search.fill("No matching thread")
+  await expect(sidebar.locator(".cm3-sidebar-task")).toHaveCount(0)
+  await search.press("ArrowDown")
+  await search.press("Enter")
+  await expect(search).toBeFocused()
+  await expect(page).toHaveURL(new RegExp(fixture.sourceID))
+  await search.fill(fixture.expected.targetTitle)
+  const target = sidebar.getByRole("button", { name: fixture.expected.targetTitle, exact: true })
+  await expect(target).toBeVisible()
+  await search.dispatchEvent("keydown", { key: "ArrowDown", isComposing: true })
+  await search.dispatchEvent("keydown", { key: "Enter", isComposing: true })
+  await expect(search).toBeFocused()
+  await expect(page).toHaveURL(new RegExp(fixture.sourceID))
+  await search.press("ArrowUp")
+  await expect(target).toBeFocused()
+  await target.press("ArrowDown")
+  await expect(target).toBeFocused()
+  await target.press("Enter")
+  await expectSessionTitle(page, fixture.expected.targetTitle)
+  await search.fill(fixture.expected.sourceTitle)
+  await search.press("Enter")
+  await expectSessionTitle(page, fixture.expected.sourceTitle)
+  await search.fill("")
+  await expect(sidebar.locator(".cm3-sidebar-task")).toHaveCount(2)
+  const source = sidebar.getByRole("button", { name: fixture.expected.sourceTitle, exact: true })
+  await search.press("ArrowDown")
+  await expect(target).toBeFocused()
+  await target.press("ArrowDown")
+  await expect(source).toBeFocused()
+  await source.press("ArrowDown")
+  await expect(target).toBeFocused()
+  await target.press("ArrowUp")
+  await expect(source).toBeFocused()
+  await source.press("Enter")
+  await expectSessionTitle(page, fixture.expected.sourceTitle)
+})
+
+for (const control of ["link", "close"] as const) {
+  test(`CM3 mobile Escape closes the drawer from a portaled tab ${control}`, async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 800 })
+    await mockStressTimeline(page)
+    await installCm3Sidebar(page)
+    await page.goto(stressSessionHref(fixture.sourceID))
+    await expectSessionTitle(page, fixture.expected.sourceTitle)
+    const toggle = page.getByRole("button", { name: "Toggle sidebar", exact: true })
+    await toggle.click()
+    const slot = page.locator(
+      `.cm3-sidebar-tabs [data-titlebar-tab-slot]:has([data-titlebar-tab-link][href="${stressSessionHref(fixture.sourceID)}"])`,
+    )
+    const target =
+      control === "link"
+        ? slot.locator("[data-titlebar-tab-link]")
+        : slot.getByRole("button", { name: "Close tab", exact: true })
+    await expect(target).toBeVisible()
+    await target.focus()
+    await expect(target).toBeFocused()
+    await page.keyboard.press("Escape")
+    await expect(toggle).toHaveAttribute("aria-expanded", "false")
+    await expect(toggle).toBeFocused()
+  })
+}
+
+test("CM3 mobile focus stays in the drawer and Escape cancels tab rename first", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 800 })
+  await mockStressTimeline(page)
+  await installCm3Sidebar(page)
+  await page.goto(stressSessionHref(fixture.sourceID))
+  await expectSessionTitle(page, fixture.expected.sourceTitle)
+  const toggle = page.getByRole("button", { name: "Toggle sidebar", exact: true })
+  await toggle.click()
+  const sidebar = page.getByRole("complementary", { name: "Projects and sessions", exact: true })
+  const close = sidebar.getByRole("button", { name: "Close navigation", exact: true })
+  const settings = sidebar.getByRole("button", { name: "Settings", exact: true })
+  await expect(close).toBeFocused()
+  await close.press("Shift+Tab")
+  await expect(settings).toBeFocused()
+  await settings.press("Tab")
+  await expect(close).toBeFocused()
+  const search = sidebar.getByRole("searchbox", { name: "Search threads", exact: true })
+  await search.focus()
+  await search.press("Tab")
+  await expect(sidebar.locator(`[data-titlebar-tab-link][href="${stressSessionHref(fixture.sourceID)}"]`)).toBeFocused()
+  const title = sidebar.locator(
+    `[data-titlebar-tab-link][href="${stressSessionHref(fixture.sourceID)}"] [data-titlebar-tab-title]`,
+  )
+  await title.dblclick()
+  await expect(title).toHaveAttribute("contenteditable", "true")
+  await title.fill("Cancel this rename")
+  await title.press("Escape")
+  await expect(title).toHaveText(fixture.expected.sourceTitle)
+  await expect(title).not.toHaveAttribute("contenteditable", "true")
+  await expect(toggle).toHaveAttribute("aria-expanded", "true")
+  await close.focus()
+  await close.press("Escape")
+  await expect(toggle).toHaveAttribute("aria-expanded", "false")
+})
+
+test("CM3 Help opens the original feedback destination", async ({ page, context }) => {
+  await mockStressTimeline(page)
+  await installCm3Sidebar(page)
+  await context.route("https://opencode.ai/desktop-feedback", (route) =>
+    route.fulfill({ status: 200, contentType: "text/html", body: "Help destination" }),
+  )
+  await page.goto("/")
+  const help = page.locator(".cm3-sidebar-footer").getByRole("button", { name: "Help", exact: true })
+  await expect(help).toBeVisible()
+  const opened = context.waitForEvent("page")
+  await help.click()
+  const feedback = await opened
+  await expect(feedback).toHaveURL("https://opencode.ai/desktop-feedback")
+  await feedback.close()
+})
+
+for (const width of [1280, 390]) {
+  for (const direction of ["ltr", "rtl"]) {
+    test(`CM3 sidebar archives open and closed sessions at ${width}px ${direction}`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 800 })
+      await mockStressTimeline(page)
+      await installCm3Sidebar(page, { sessionIDs: [fixture.sourceID] })
+      const archived = new Set<string>()
+      await page.route("**/*", async (route) => {
+        const path = new URL(route.request().url()).pathname
+        if (path === "/session" && route.request().method() === "GET")
+          return route.fulfill({ json: fixture.sessions.filter((session) => !archived.has(session.id)) })
+        const session = fixture.sessions.find((session) => path === `/session/${session.id}`)
+        if (!session || route.request().method() !== "PATCH") return route.fallback()
+        const body = route.request().postDataJSON()
+        expect(body.time.archived).toBeGreaterThan(0)
+        archived.add(session.id)
+        return route.fulfill({ json: { ...session, time: { ...session.time, archived: body.time.archived } } })
+      })
+      await page.goto(stressSessionHref(fixture.sourceID))
+      const input = page.locator('[data-component="prompt-input"][contenteditable="true"]')
+      await expect(input).toBeVisible()
+      await page.locator("html").evaluate((element, dir) => element.setAttribute("dir", dir), direction)
+      const toggle = page.getByRole("button", { name: "Toggle sidebar", exact: true })
+      if (width === 390) await toggle.click()
+      const recent = page.getByRole("region", { name: "Recent sessions", exact: true })
+      const source = recent.getByRole("group", { name: fixture.expected.sourceTitle, exact: true })
+      const target = recent.getByRole("group", { name: fixture.expected.targetTitle, exact: true })
+      const archive = target.getByRole("button", { name: "Archive", exact: true })
+      await expect(source.getByRole("button", { name: "Archive", exact: true })).toBeVisible()
+      await expect(archive).toBeVisible()
+      await source.locator('[data-action="recent-session"]').hover()
+      await expect(archive).toHaveCSS("opacity", "0")
+      await target.locator('[data-action="recent-session"]').hover()
+      await expect(archive).toHaveCSS("opacity", "1")
+      await source.locator('[data-action="recent-session"]').hover()
+      await expect(archive).toHaveCSS("opacity", "0")
+      const bounds = await target.evaluate((element) => {
+        const row = element.getBoundingClientRect()
+        const button = element.querySelector(".cm3-sidebar-session-archive")!.getBoundingClientRect()
+        const open = element.querySelector(".cm3-sidebar-task")!.getBoundingClientRect()
+        return {
+          row: { x: row.x, right: row.right },
+          button: { x: button.x, right: button.right },
+          open: { x: open.x, right: open.right },
+        }
+      })
+      expect(bounds.button.x).toBeGreaterThanOrEqual(bounds.row.x)
+      expect(bounds.button.right).toBeLessThanOrEqual(bounds.row.right)
+      if (direction === "ltr") expect(bounds.button.x).toBeGreaterThanOrEqual(bounds.open.right)
+      if (direction === "rtl") expect(bounds.button.right).toBeLessThanOrEqual(bounds.open.x)
+      await archive.press("Enter")
+      await expect(target).toHaveCount(0)
+      expect(archived.has(fixture.targetID)).toBe(true)
+      await expect(page).toHaveURL(stressSessionHref(fixture.sourceID))
+      if (width === 390) await expect(toggle).toHaveAttribute("aria-expanded", "true")
+
+      await source.locator('[data-action="recent-session"]').hover()
+      await source.getByRole("button", { name: "Archive", exact: true }).click()
+      await expect(source).toHaveCount(0)
+      await expect(page).toHaveURL("/")
+      if (width === 390) await toggle.click()
+      await expect(target).toHaveCount(0)
+      expect([...archived]).toEqual([fixture.targetID, fixture.sourceID])
+      await expect
+        .poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("opencode.window.browser.dat:tabs") ?? "[]")))
+        .toEqual([])
+    })
+  }
+}
+
+async function installCm3Sidebar(page: Page, input?: Parameters<typeof installStressSessionTabs>[1]) {
+  await installStressSessionTabs(page, input)
+  await page.addInitScript(() => {
+    localStorage.setItem("settings.v3", JSON.stringify({ general: { newLayoutDesigns: true, quietCompanion: true } }))
+  })
+}
+
+for (const width of [1280, 390]) {
+  for (const direction of ["ltr", "rtl"]) {
+    test(`CM3 session pins persist and share state with project chats at ${width}px ${direction}`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 800 })
+      await mockStressTimeline(page)
+      await page.addInitScript(
+        ({ directory, sessionID }) => {
+          if (!localStorage.getItem("settings.v3"))
+            localStorage.setItem(
+              "settings.v3",
+              JSON.stringify({ general: { newLayoutDesigns: true, quietCompanion: true } }),
+            )
+          if (!localStorage.getItem("opencode.global.dat:server"))
+            localStorage.setItem(
+              "opencode.global.dat:server",
+              JSON.stringify({
+                projects: { local: [{ worktree: directory, expanded: true }] },
+                lastProject: { local: directory },
+                pinnedSessions: { "https://other-server.example": [sessionID] },
+              }),
+            )
+        },
+        { directory: fixture.directory, sessionID: fixture.targetID },
+      )
+      const mutations: string[] = []
+      page.on("request", (request) => {
+        if (["POST", "PATCH", "DELETE"].includes(request.method()) && /\/session\//.test(request.url()))
+          mutations.push(request.method())
+      })
+      await page.goto("/")
+      const toggle = page.getByRole("button", { name: "Toggle sidebar", exact: true })
+      if (width === 390) await toggle.click()
+      await page.locator("html").evaluate((element, dir) => element.setAttribute("dir", dir), direction)
+      const recent = page.getByRole("region", { name: "Recent sessions", exact: true })
+      const pinned = page.getByRole("region", { name: "Pinned sessions", exact: true })
+      const target = recent.getByRole("group", { name: fixture.expected.targetTitle, exact: true })
+      await expect(pinned).toHaveCount(0)
+      await target.hover()
+      const pin = target.getByRole("button", { name: "Pin session", exact: true })
+      await expect(pin).toBeEnabled()
+      await expect(pin.locator("use")).toHaveAttribute("href", "#opencode-v2-icon-push-pin")
+      await pin.press("Enter")
+      const pinnedTarget = pinned.getByRole("group", { name: fixture.expected.targetTitle, exact: true })
+      await expect(pinnedTarget.getByRole("button", { name: "Unpin session", exact: true })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      )
+      await expect(pinnedTarget.getByRole("button", { name: "Unpin session", exact: true })).toBeFocused()
+      await expect(pinnedTarget.locator(".cm3-sidebar-session-pin use")).toHaveAttribute(
+        "href",
+        "#opencode-v2-icon-push-pin-fill",
+      )
+      await expect(target).toHaveCount(0)
+      await expect(recent.getByRole("group")).toHaveCount(1)
+      await expect(page).toHaveURL("/")
+      await expect
+        .poll(() =>
+          page.evaluate(
+            () => JSON.parse(localStorage.getItem("opencode.global.dat:server") ?? "{}").pinnedSessions?.local,
+          ),
+        )
+        .toEqual([fixture.targetID])
+      await page.reload()
+      if (width === 390) await toggle.click()
+      await page.locator("html").evaluate((element, dir) => element.setAttribute("dir", dir), direction)
+      await expect(pinnedTarget).toBeVisible()
+      const search = page.getByRole("searchbox", { name: "Search threads", exact: true })
+      await search.fill("Uncommitted")
+      await expect(pinned).toHaveCount(0)
+      await search.fill("physics")
+      await expect(pinnedTarget).toBeVisible()
+      await expect(recent.getByRole("group")).toHaveCount(0)
+      await search.fill("")
+      const projectCopy = page
+        .getByRole("complementary", { name: "Projects", exact: true })
+        .getByRole("group", { name: fixture.expected.targetTitle, exact: true })
+      await projectCopy.hover()
+      await projectCopy.getByRole("button", { name: "Unpin session", exact: true }).click()
+      await expect(pinned).toHaveCount(0)
+      await expect(recent.getByRole("group")).toHaveCount(2)
+      await target.hover()
+      await pin.click()
+      await pinnedTarget.locator('[data-action="recent-session"]').click()
+      await expect(page).toHaveURL(stressSessionHref(fixture.targetID))
+      await expect(page.locator('[data-component="prompt-input"][contenteditable="true"]')).toBeEditable()
+      if (width === 390) await toggle.click()
+      await expect(pinnedTarget).toBeVisible()
+      expect(mutations).toEqual([])
+      await page.route(`**/session/${fixture.targetID}?**`, (route) => {
+        if (route.request().method() !== "PATCH") return route.fallback()
+        const body = route.request().postDataJSON()
+        return route.fulfill({
+          json: {
+            ...fixture.sessions.find((session) => session.id === fixture.targetID),
+            time: { created: 1, updated: 1, archived: body.time.archived },
+          },
+        })
+      })
+      await pinnedTarget.hover()
+      await pinnedTarget.getByRole("button", { name: "Archive", exact: true }).click()
+      await expect(pinned).toHaveCount(0)
+      await expect(page).toHaveURL("/")
+      await expect
+        .poll(() =>
+          page.evaluate(
+            () => JSON.parse(localStorage.getItem("opencode.global.dat:server") ?? "{}").pinnedSessions?.local,
+          ),
+        )
+        .toEqual([])
+      expect(mutations).toEqual(["PATCH"])
+    })
+  }
+}
+
+test("CM3 reveals project sessions five at a time and retains independent limits", async ({ page }) => {
+  const groups = [
+    { directory: fixture.directory, projectID: fixture.project.id, name: "Primary", count: 12 },
+    { directory: "C:/OpenCode/OtherProject", projectID: "proj_cm3_OtherProject", name: "Secondary", count: 7 },
+    { directory: "C:/OpenCode/ThirdProject", projectID: "proj_cm3_ThirdProject", name: "Small", count: 5 },
+  ]
+  await mockOpenCodeServer(page, {
+    sessions: groups.flatMap((group) =>
+      Array.from({ length: group.count }, (_, index) => ({
+        ...fixture.sessions[0],
+        id: `ses_paging_${group.name}_${index + 1}`,
+        projectID: group.projectID,
+        directory: group.directory,
+        title: `${group.name} session ${index + 1}`,
+        time: { created: 1700000004000 + index, updated: 1700000004000 + index },
+      })),
+    ),
+    provider: fixture.provider,
+    directory: fixture.directory,
+    project: fixture.project,
+    pageMessages,
+  })
+  await mockCm3Projects(page)
+  await page.addInitScript(
+    (directories) => {
+      localStorage.setItem("settings.v3", JSON.stringify({ general: { newLayoutDesigns: true, quietCompanion: true } }))
+      localStorage.setItem(
+        "opencode.global.dat:server",
+        JSON.stringify({
+          projects: { local: directories.map((worktree) => ({ worktree, expanded: true })) },
+        }),
+      )
+    },
+    groups.map((group) => group.directory),
+  )
+  await page.goto("/")
+  const projects = page.getByRole("complementary", { name: "Projects", exact: true })
+  const primary = projects.getByTitle(fixture.directory, { exact: true })
+  const secondary = projects.getByTitle("C:/OpenCode/OtherProject", { exact: true })
+  const small = projects.getByTitle("C:/OpenCode/ThirdProject", { exact: true })
+  await expect(primary).toHaveAttribute("aria-expanded", "true")
+  await expect(primary).toHaveAttribute("aria-controls", /\S+/)
+  const primarySessions = projects.locator(`[id=${JSON.stringify(await primary.getAttribute("aria-controls"))}]`)
+  const secondarySessions = projects.locator(`[id=${JSON.stringify(await secondary.getAttribute("aria-controls"))}]`)
+  const smallSessions = projects.locator(`[id=${JSON.stringify(await small.getAttribute("aria-controls"))}]`)
+  const titles = ".cm3-sidebar-session .cm3-sidebar-task-copy > span:first-child"
+  const more = primarySessions.getByRole("button", { name: "Show more", exact: true })
+  const secondaryMore = secondarySessions.getByRole("button", { name: "Show more", exact: true })
+  const recent = page.getByRole("region", { name: "Recent sessions", exact: true }).locator(titles)
+  await expect(recent).toHaveCount(24)
+  const recentTitles = await recent.allTextContents()
+  await expect(primarySessions.locator(titles)).toHaveText([
+    "Primary session 12",
+    "Primary session 11",
+    "Primary session 10",
+    "Primary session 9",
+    "Primary session 8",
+  ])
+  await expect(secondarySessions.locator(titles)).toHaveText([
+    "Secondary session 7",
+    "Secondary session 6",
+    "Secondary session 5",
+    "Secondary session 4",
+    "Secondary session 3",
+  ])
+  await expect(smallSessions.locator(titles)).toHaveText([
+    "Small session 5",
+    "Small session 4",
+    "Small session 3",
+    "Small session 2",
+    "Small session 1",
+  ])
+  await expect(smallSessions.getByRole("button", { name: "Show more", exact: true })).toHaveCount(0)
+  await more.click()
+  await expect(primarySessions.locator(titles)).toHaveText([
+    "Primary session 12",
+    "Primary session 11",
+    "Primary session 10",
+    "Primary session 9",
+    "Primary session 8",
+    "Primary session 7",
+    "Primary session 6",
+    "Primary session 5",
+    "Primary session 4",
+    "Primary session 3",
+  ])
+  await expect(secondarySessions.locator(titles)).toHaveCount(5)
+  await more.press("Enter")
+  await expect(primarySessions.locator(titles)).toHaveText([
+    "Primary session 12",
+    "Primary session 11",
+    "Primary session 10",
+    "Primary session 9",
+    "Primary session 8",
+    "Primary session 7",
+    "Primary session 6",
+    "Primary session 5",
+    "Primary session 4",
+    "Primary session 3",
+    "Primary session 2",
+    "Primary session 1",
+  ])
+  await expect(more).toHaveCount(0)
+  await secondaryMore.click()
+  await expect(secondarySessions.locator(titles)).toHaveCount(7)
+  await expect(secondaryMore).toHaveCount(0)
+  await expect(primarySessions.locator(titles)).toHaveCount(12)
+  await primary.click()
+  await expect(primary).toHaveAttribute("aria-expanded", "false")
+  await expect(primarySessions).toBeHidden()
+  await primary.press("Enter")
+  await expect(primary).toHaveAttribute("aria-expanded", "true")
+  await expect(primarySessions.locator(titles)).toHaveCount(12)
+  await primary.press("Space")
+  await expect(primary).toHaveAttribute("aria-expanded", "false")
+  await primary.locator("..").locator('[data-action="home-project-expand"]').click()
+  await expect(primarySessions.locator(titles)).toHaveCount(12)
+  await expect(recent).toHaveText(recentTitles)
+  const search = page.getByRole("searchbox", { name: "Search threads", exact: true })
+  await search.fill("Primary session")
+  await expect(primarySessions.locator(titles)).toHaveCount(5)
+  await expect(secondarySessions.locator(titles)).toHaveCount(0)
+  await expect(more).toBeVisible()
+  await more.click()
+  await expect(primarySessions.locator(titles)).toHaveCount(10)
+  await search.fill("")
+  await expect(primarySessions.locator(titles)).toHaveCount(5)
+  await expect(secondarySessions.locator(titles)).toHaveCount(5)
+  await expect(recent).toHaveText(recentTitles)
+})
+
+for (const action of ["sidebar", "command", "failure"] as const) {
+  const failure = action === "failure"
+  test(`CM3 V2 archiving ${failure ? "preserves the session after failure and recovers" : `through ${action} removes open tabs and survives reload`}`, async ({
+    page,
+  }) => {
+    const entries = fixture.sessions.map((session) => ({
+      ...session,
+      time: { ...session.time, archived: undefined as number | undefined },
+    }))
+    await mockOpenCodeServer(page, {
+      protocol: "v2",
+      sessions: entries,
+      provider: fixture.provider,
+      directory: fixture.directory,
+      project: fixture.project,
+      pageMessages,
+    })
+    let fail = failure
+    const requests: string[] = []
+    await page.route(`**/api/session/${fixture.targetID}/archive`, async (route) => {
+      expect(route.request().method()).toBe("POST")
+      requests.push(route.request().url())
+      if (fail) return route.fulfill({ status: 500, json: { message: "Archive failed" } })
+      entries.find((session) => session.id === fixture.targetID)!.time.archived = Date.now()
+      return route.fulfill({ status: 204 })
+    })
+    await installCm3Sidebar(page)
+    await page.goto(action === "command" ? stressSessionHref(fixture.targetID) : "/")
+    if (action === "command") await expectSessionTitle(page, fixture.expected.targetTitle)
+    const row = page
+      .getByRole("region", { name: "Recent sessions", exact: true })
+      .getByRole("group", { name: fixture.expected.targetTitle, exact: true })
+    const archive = row.getByRole("button", { name: "Archive", exact: true })
+    const tab = page.locator(`.cm3-sidebar-tabs [data-titlebar-tab-link][href$="/session/${fixture.targetID}"]`)
+    await expect(archive).toBeEnabled()
+    await expect(tab).toBeVisible()
+    if (action === "command") {
+      await page.keyboard.press("Control+Shift+P")
+      const dialog = page.getByRole("dialog")
+      await expect(dialog).toBeVisible()
+      await dialog.getByRole("textbox").fill("Archive session")
+      await expect(dialog.getByText("Archive session", { exact: true })).toBeVisible()
+      await page.keyboard.press("Enter")
+    }
+    if (action !== "command") {
+      await row.locator('[data-action="recent-session"]').hover()
+      await archive.click()
+    }
+    if (failure) {
+      await expect(page.getByText("Archive failed", { exact: true })).toBeVisible()
+      await expect(row).toBeVisible()
+      await expect(tab).toBeVisible()
+      fail = false
+      await archive.click()
+    }
+    await expect(row).toHaveCount(0)
+    await expect(tab).toHaveCount(0)
+    expect(requests).toHaveLength(failure ? 2 : 1)
+    await page.reload()
+    await expect(page.getByRole("region", { name: "Recent sessions", exact: true }).getByRole("group")).toHaveCount(1)
+    await expect(row).toHaveCount(0)
+  })
+}
+
+test("CM3 applies a V2 archive event before tab metadata has hydrated", async ({ page }) => {
+  await mockOpenCodeServer(page, {
+    protocol: "v2",
+    sessions: fixture.sessions,
+    provider: fixture.provider,
+    directory: fixture.directory,
+    project: fixture.project,
+    pageMessages,
+    events: () => [
+      {
+        id: "evt_external_archive",
+        type: "session.next.archived",
+        location: { directory: fixture.directory },
+        data: { sessionID: fixture.targetID, timestamp: Date.now() },
+      },
+    ],
+  })
+  await installCm3Sidebar(page)
+  await page.goto("/")
+  const recent = page.getByRole("region", { name: "Recent sessions", exact: true })
+  await expect(recent.getByRole("group")).toHaveCount(1)
+  await expect(recent.getByRole("group", { name: fixture.expected.sourceTitle, exact: true })).toBeVisible()
+  await expect(
+    page.locator(`.cm3-sidebar-tabs [data-titlebar-tab-link][href$="/session/${fixture.targetID}"]`),
+  ).toHaveCount(0)
+  await expect(
+    page.locator(`.cm3-sidebar-tabs [data-titlebar-tab-link][href$="/session/${fixture.sourceID}"]`),
+  ).toBeVisible()
+})
+
+test("CM3 expands all 72 older project sessions and searches beyond the recent limit", async ({ page }) => {
+  await mockOpenCodeServer(page, {
+    sessions: Array.from({ length: 72 }, (_, index) => ({
+      ...fixture.sessions[0],
+      id: `ses_full_history_${index + 1}`,
+      title: index === 0 ? "Ancient needle" : `Older session ${index + 1}`,
+      time: { created: 1 + index, updated: 1 + index },
+    })),
+    provider: fixture.provider,
+    directory: fixture.directory,
+    project: fixture.project,
+    pageMessages,
+  })
+  await installCm3Sidebar(page)
+  await page.goto("/")
+  const project = page.locator(".cm3-sidebar-project-sessions")
+  const rows = project.locator('[data-action="project-session"]')
+  const more = project.getByRole("button", { name: "Show more", exact: true })
+  await expect(rows).toHaveCount(5)
+  for (const count of [10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 72]) {
+    await more.click()
+    await expect(rows).toHaveCount(count)
+  }
+  await expect(more).toHaveCount(0)
+  await page.getByRole("searchbox", { name: "Search threads", exact: true }).fill("Ancient needle")
+  await expect(project.getByRole("button", { name: "Ancient needle", exact: true })).toBeVisible()
+  await page.getByRole("switch", { name: "CM3 UI", exact: true }).click()
+  await page.getByRole("textbox", { name: /^Search sessions/ }).fill("Ancient needle")
+  await expect(page.getByRole("option", { name: /Ancient needle/ })).toBeVisible()
+})
+
+test("CM3 keeps saved old session pins beyond the recent-session limit", async ({ page }) => {
+  const sessions = [
+    ...Array.from({ length: 70 }, (_, index) => ({
+      ...fixture.sessions[0],
+      id: `ses_pin_limit_${index}`,
+      title: `Recent session ${index}`,
+      time: { created: 1700000004000 + index, updated: 1700000004000 + index },
+    })),
+    ...fixture.sessions,
+  ]
+  await mockOpenCodeServer(page, {
+    sessions,
+    provider: fixture.provider,
+    directory: fixture.directory,
+    project: fixture.project,
+    pageMessages,
+  })
+  await page.addInitScript(
+    ({ directory, sessionID }) => {
+      localStorage.setItem("settings.v3", JSON.stringify({ general: { newLayoutDesigns: true, quietCompanion: true } }))
+      localStorage.setItem(
+        "opencode.global.dat:server",
+        JSON.stringify({
+          projects: { local: [{ worktree: directory, expanded: true }] },
+          lastProject: { local: directory },
+          pinnedSessions: { local: [sessionID, "ses_missing_pin"] },
+        }),
+      )
+    },
+    { directory: fixture.directory, sessionID: fixture.sourceID },
+  )
+  await page.goto("/")
+  const pinned = page.getByRole("region", { name: "Pinned sessions", exact: true })
+  await expect(pinned.getByRole("group", { name: fixture.expected.sourceTitle, exact: true })).toBeVisible()
+  await expect(pinned.getByRole("group")).toHaveCount(1)
+  await expect(page.getByRole("region", { name: "Recent sessions", exact: true }).getByRole("group")).toHaveCount(64)
+})

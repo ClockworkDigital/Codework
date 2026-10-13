@@ -15,6 +15,43 @@ window[INSTALL_KEY] = true;
 let activeRunId = null;
 let verboseRecorder = false;
 let sequence = 0;
+let generation = 0;
+let expectedPrompt = null;
+let expectedEndpoint = null;
+const pendingRequests = new Set();
+const activity = { version: 0, changedAt: Date.now(), failure: null };
+window.__o1CodeRecorderState = () => ({ ...activity, pending: pendingRequests.size, runId: activeRunId });
+
+function currentRequest(request) {
+  return Boolean(request.runId) && request.runId === activeRunId && request.generation === generation;
+}
+
+function startRequest(request) {
+  pendingRequests.add(request);
+  activity.version += 1;
+  activity.changedAt = Date.now();
+  if (currentRequest(request)) postStatus("request", { runId: request.runId, url: request.url, method: request.method });
+}
+
+function finishRequest(request, error = null) {
+  if (!pendingRequests.delete(request)) return;
+  activity.version += 1;
+  activity.changedAt = Date.now();
+  if (error) activity.failure = String(error.message || error);
+}
+
+window.__o1CodeRecorderControl = (data) => {
+  if (data.requireIdle && (pendingRequests.size || activity.failure)) {
+    throw new Error("o1_code_greeting_not_settled");
+  }
+  generation += 1;
+  activeRunId = data.runId || null;
+  expectedPrompt = typeof data.expectedPrompt === "string" ? data.expectedPrompt : null;
+  expectedEndpoint = typeof data.expectedEndpoint === "string" ? data.expectedEndpoint : null;
+  verboseRecorder = data.verboseRecorder === true;
+  postStatus("reset", { runId: activeRunId });
+  return window.__o1CodeRecorderState();
+};
 
 postStatus("ready");
 
@@ -24,10 +61,7 @@ window.addEventListener("message", (event) => {
   }
 
   if (event.data.type === "O1_CODE_BRIDGE_RECORDER_RESET") {
-    activeRunId = event.data.runId || null;
-    verboseRecorder = event.data.verboseRecorder === true;
-    sequence = 0;
-    postStatus("reset", { runId: activeRunId });
+    window.__o1CodeRecorderControl(event.data);
   }
 });
 
@@ -36,27 +70,36 @@ const originalFetch = window.fetch?.bind(window);
 if (originalFetch) {
   window.fetch = async (...args) => {
     const requestInfo = describeFetchRequest(args);
-    const response = await originalFetch(...args);
-
-    if (activeRunId && verboseRecorder) {
-      emitObservedRequest(requestInfo, response.status);
+    if (activeRunId && expectedPrompt !== null && requestInfo.method === "POST") {
+      const [input, init = {}] = args;
+      const admittedPrompt = expectedPrompt;
+      let body = init.body;
+      if (body === undefined && typeof input?.clone === "function") {
+        try { body = await input.clone().text(); } catch { body = null; }
+      }
+      requestInfo.promptMatched = bodyMatchesPrompt(body, admittedPrompt);
     }
-
-    if (activeRunId && shouldRecordRequest(requestInfo)) {
-      postStatus("request", { runId: activeRunId, url: requestInfo.url, method: requestInfo.method });
-      recordResponse(response, requestInfo).catch((error) => {
-        postRecord({
-          id: requestInfo.id,
-          runId: requestInfo.runId,
-          url: requestInfo.url,
-          method: requestInfo.method,
-          done: true,
-          error: error.message
-        });
-      });
+    const tracked = shouldRecordRequest(requestInfo);
+    if (tracked) startRequest(requestInfo);
+    try {
+      const response = await originalFetch(...args);
+      if (currentRequest(requestInfo) && verboseRecorder) emitObservedRequest(requestInfo, response.status);
+      if (tracked) {
+        recordResponse(response, requestInfo)
+          .then(() => finishRequest(requestInfo, response.ok ? null : new Error(`HTTP ${response.status}`)))
+          .catch((error) => {
+            finishRequest(requestInfo, error);
+            postRecord({ ...requestInfo, done: true, error: error.message });
+          });
+      }
+      return response;
+    } catch (error) {
+      if (tracked) {
+        finishRequest(requestInfo, error);
+        postRecord({ ...requestInfo, done: true, error: error.message });
+      }
+      throw error;
     }
-
-    return response;
   };
 }
 
@@ -86,19 +129,22 @@ if (OriginalXMLHttpRequest?.prototype) {
         method: "GET",
         startedAt: new Date().toISOString()
       }),
-      runId: activeRunId
+      runId: activeRunId,
+      generation,
+      promptMatched: expectedPrompt !== null ? bodyMatchesPrompt(args[0], expectedPrompt) : undefined
     };
 
-    if (activeRunId && verboseRecorder) {
-      observeXhr(this, requestInfo);
+    if (activeRunId && verboseRecorder) observeXhr(this, requestInfo);
+    const tracked = shouldRecordRequest(requestInfo);
+    const cleanup = tracked ? recordXhr(this, requestInfo) : () => {};
+    if (tracked) startRequest(requestInfo);
+    try {
+      return originalSend.apply(this, args);
+    } catch (error) {
+      cleanup();
+      if (tracked) finishRequest(requestInfo, error);
+      throw error;
     }
-
-    if (activeRunId && shouldRecordRequest(requestInfo)) {
-      recordXhr(this, requestInfo);
-      postStatus("request", { runId: activeRunId, url: requestInfo.url, method: requestInfo.method });
-    }
-
-    return originalSend.apply(this, args);
   };
 }
 
@@ -110,6 +156,7 @@ function describeFetchRequest(args) {
   return {
     id: `network_${Date.now()}_${++sequence}`,
     runId: activeRunId,
+    generation,
     url,
     method,
     startedAt: new Date().toISOString()
@@ -117,6 +164,15 @@ function describeFetchRequest(args) {
 }
 
 function shouldRecordRequest(request) {
+  if (request.method !== "POST") return false;
+  const endpoint = safeUrl(request.url);
+  if (activeRunId && expectedPrompt !== null) {
+    if (!request.promptMatched) return false;
+    const expected = expectedEndpoint && safeUrl(expectedEndpoint);
+    if (expected && (endpoint?.origin !== expected.origin || endpoint?.pathname !== expected.pathname)) return false;
+  } else if (!isModelEndpoint(endpoint)) {
+    return false;
+  }
   if (typeof window.__o1CodeShouldRecordRequest === "function") {
     try {
       return window.__o1CodeShouldRecordRequest(request);
@@ -134,12 +190,41 @@ function shouldRecordRequest(request) {
   return !(
     host.includes("datadoghq") ||
     host.startsWith("dataplane.rum.") ||
+    host === "google-analytics.com" ||
+    host.endsWith(".google-analytics.com") ||
+    host === "events.launchdarkly.com" ||
+    url?.pathname.startsWith("/api/az/") ||
     requestUrl.includes("datadoghq") ||
     requestUrl.includes("dataplane.rum.") ||
     requestUrl.includes("/v1/project/") ||
     requestUrl.includes("/v1/tools/") ||
     requestUrl.includes("/v1/oauth/")
   );
+}
+
+function isModelEndpoint(url) {
+  return Boolean(url && (/^\/(?:v1|api)\/chat(?:\/completions)?\/?$/.test(url.pathname)
+    || (url.hostname.endsWith(".lambda-url.eu-west-1.on.aws") && url.pathname === "/")));
+}
+
+// Compare transient request fields with the admitted prompt; never retain the request body.
+function bodyMatchesPrompt(body, prompt) {
+  const normalize = (value) => value.replace(/\r\n/g, "\n");
+  const expected = normalize(prompt);
+  const values = [];
+  if (typeof body === "string") {
+    if (body.length > 2 * 1024 * 1024) return false;
+    try { values.push(JSON.parse(body)); } catch { return normalize(body) === expected; }
+  } else if (body && typeof body.entries === "function") {
+    for (const [, value] of body.entries()) if (typeof value === "string") values.push(value);
+  } else return false;
+  let visited = 0;
+  while (values.length && visited++ < 10000) {
+    const value = values.pop();
+    if (typeof value === "string" && normalize(value) === expected) return true;
+    if (value && typeof value === "object") values.push(...Object.values(value));
+  }
+  return false;
 }
 
 function safeUrl(value) {
@@ -158,8 +243,9 @@ function safeUrl(value) {
 // The HTTP status is carried as `httpStatus` to avoid colliding with the message-level `status`
 // field ("observed") that postStatus sets.
 function emitObservedRequest(requestInfo, httpStatus) {
+  if (!currentRequest(requestInfo)) return;
   postStatus("observed", {
-    runId: requestInfo.runId || activeRunId,
+    runId: requestInfo.runId,
     url: requestInfo.url,
     method: requestInfo.method,
     httpStatus: typeof httpStatus === "number" ? httpStatus : null
@@ -173,6 +259,14 @@ function observeXhr(xhr, requestInfo) {
 }
 
 async function recordResponse(response, requestInfo) {
+  const clone = response.clone();
+  if (!currentRequest(requestInfo)) {
+    const reader = clone.body?.getReader();
+    if (reader) {
+      while (!(await reader.read()).done) {}
+    }
+    return;
+  }
   const record = createRecord(requestInfo, {
     responseStatus: response.status,
     responseHeaders: headersObject(response.headers)
@@ -180,10 +274,9 @@ async function recordResponse(response, requestInfo) {
 
   postRecord(record);
 
-  const clone = response.clone();
   const contentType = clone.headers.get("content-type") || "";
 
-  if (clone.body && (contentType.includes("text/event-stream") || contentType.includes("application/json"))) {
+  if (clone.body && /text\/event-stream|application\/(?:json|x-ndjson)/i.test(contentType)) {
     await readStream(clone.body, record);
   } else {
     const text = await clone.text();
@@ -199,43 +292,42 @@ function recordXhr(xhr, requestInfo) {
   const record = createRecord(requestInfo);
   let parsedLength = 0;
   let pending = "";
-
-  postRecord(record);
-
-  xhr.addEventListener("readystatechange", () => {
+  const read = () => {
+    if (!currentRequest(requestInfo)) return;
     record.responseStatus = xhr.status || record.responseStatus;
     record.responseHeaders = parseResponseHeaders(xhr.getAllResponseHeaders?.() || "");
-
-    if (xhr.readyState >= XMLHttpRequest.LOADING) {
+    if (xhr.readyState >= OriginalXMLHttpRequest.LOADING) {
       const result = readXhrText(xhr, record, parsedLength, pending);
       parsedLength = result.parsedLength;
       pending = result.pending;
     }
-
-    if (xhr.readyState === XMLHttpRequest.DONE) {
-      const result = readXhrText(xhr, record, parsedLength, pending);
-      parsedLength = result.parsedLength;
-      pending = result.pending;
-      if (pending.trim()) {
-        parseDataLine(record, pending.trim());
-        pending = "";
-      }
-      record.done = true;
-      postRecord(record);
-    }
-  });
-
-  xhr.addEventListener("error", () => {
-    record.error = "XMLHttpRequest failed.";
+  };
+  const fail = (event) => {
+    record.error = `XMLHttpRequest ${event.type}.`;
+  };
+  const finish = () => {
+    read();
+    if (pending.trim()) parseDataLine(record, pending.trim());
+    if (xhr.status < 200 || xhr.status >= 400) record.error ||= `HTTP ${xhr.status}`;
     record.done = true;
     postRecord(record);
-  });
-
-  xhr.addEventListener("abort", () => {
-    record.error = "XMLHttpRequest aborted.";
-    record.done = true;
-    postRecord(record);
-  });
+    finishRequest(requestInfo, record.error);
+    cleanup();
+  };
+  const cleanup = () => {
+    xhr.removeEventListener("readystatechange", read);
+    xhr.removeEventListener("loadend", finish);
+    xhr.removeEventListener("error", fail);
+    xhr.removeEventListener("abort", fail);
+    xhr.removeEventListener("timeout", fail);
+  };
+  xhr.addEventListener("readystatechange", read);
+  xhr.addEventListener("loadend", finish);
+  xhr.addEventListener("error", fail);
+  xhr.addEventListener("abort", fail);
+  xhr.addEventListener("timeout", fail);
+  postRecord(record);
+  return cleanup;
 }
 
 function readXhrText(xhr, record, parsedLength, pending) {
@@ -315,8 +407,28 @@ async function readStream(body, record) {
 }
 
 function parseChunk(record, chunk) {
-  if (!chunk.includes("data:")) {
-    parseDataLine(record, chunk.trim());
+  if (!/^(?:data:|event:|id:|retry:|:)/m.test(chunk)) {
+    const text = chunk.trim();
+    if (!text) return "";
+    try {
+      JSON.parse(text);
+    } catch {
+      const lines = chunk.split(/\r?\n/);
+      if (lines.length === 1) return chunk;
+      const trailing = lines.pop() || "";
+      for (let index = 0; index < lines.length; index += 1) {
+        const line = lines[index].trim();
+        if (!line) continue;
+        try {
+          JSON.parse(line);
+        } catch {
+          return [...lines.slice(index), trailing].join("\n");
+        }
+        parseDataLine(record, line);
+      }
+      return trailing;
+    }
+    parseDataLine(record, text);
     return "";
   }
 
@@ -587,6 +699,7 @@ const postThrottleState = new WeakMap();
 // delayed. Interim posts still carry the live finalText so the content script can salvage
 // a partial answer if the stream stalls without a finish reason.
 function postRecord(record) {
+  if (!currentRequest(record)) return;
   if (record.done || record.error) {
     flushRecordPost(record);
     return;
@@ -631,6 +744,7 @@ function flushRecordPost(record) {
 }
 
 function postRecordNow(record) {
+  if (!currentRequest(record)) return;
   record.updatedAt = new Date().toISOString();
   window.postMessage({
     source: PAGE_SOURCE,

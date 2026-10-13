@@ -1,4 +1,4 @@
-import { type Accessor, createMemo, For, type JSX, onCleanup, Show, splitProps } from "solid-js"
+import { type Accessor, createMemo, createUniqueId, For, type JSX, onCleanup, Show, splitProps } from "solid-js"
 import { createStore } from "solid-js/store"
 import { DragDropProvider, PointerSensor } from "@dnd-kit/solid"
 import { isSortable, useSortable } from "@dnd-kit/solid/sortable"
@@ -28,6 +28,8 @@ const projectContextMenuID = (server: ServerConnection.Any, directory: string) =
   `project:${ServerConnection.key(server)}:${directory}`
 
 export type HomeProjectsViewProps = {
+  sidebar?: boolean
+  renderProjectSessions?: (server: ServerConnection.Any, project: LocalProject) => JSX.Element
   language: ReturnType<typeof useLanguage>
   servers: Accessor<ServerConnection.Any[]>
   projects: Accessor<LocalProject[]>
@@ -49,7 +51,10 @@ export type HomeProjectsViewProps = {
   onSetDefaultServer: (server: ServerConnection.Any | undefined) => void
   onRemoveServer: (server: ServerConnection.Any) => void
   onMoveProject: (server: ServerConnection.Any, worktree: string, index: number) => void
+  onPinProject: (server: ServerConnection.Any, project: LocalProject) => void
+  onToggleProjectExpanded: (server: ServerConnection.Any, project: LocalProject) => void
   onSelectProject: (server: ServerConnection.Any, directory: string) => void
+  onActivateProject?: () => void
   onAddProjects: (server: ServerConnection.Any, directories: string[]) => void
   onOpenProjectNewSession: (server: ServerConnection.Any, directory: string) => void
   onEditProject: (server: ServerConnection.Any, project: LocalProject) => void
@@ -68,40 +73,78 @@ export function HomeProjectsView(props: HomeProjectsViewProps) {
   }
   return (
     <aside
-      class={`
+      class={
+        props.sidebar
+          ? "cm3-sidebar-projects"
+          : `
         mt-6 flex min-h-0 min-w-0 flex-col gap-4 overflow-hidden
         lg:sticky lg:top-14 lg:mt-14 lg:h-[calc(100cqh-56px)] lg:self-start lg:pt-[52px]
-      `}
+      `
+      }
       aria-label={props.language.t("home.projects")}
       onWheel={(event) => {
         if (event.target === event.currentTarget) return
         props.onWheel(event)
       }}
     >
-      <div class="flex h-7 min-w-0 shrink-0 items-center justify-between pl-1.5 pr-3">
-        <div class="text-v2-text-text-muted [font-weight:530]">{props.language.t("home.projects")}</div>
+      <Show when={!props.sidebar}>
+        <div class="flex h-7 min-w-0 shrink-0 items-center justify-between ps-1.5 pe-3">
+          <div class="text-v2-text-text-muted [font-weight:530]">{props.language.t("home.projects")}</div>
+          <Show
+            when={props.servers().length === 1 && !(props.projects().length === 0 && props.recentlyClosed().length > 0)}
+          >
+            <TooltipV2 placement="bottom" value={props.language.t("home.project.add")}>
+              <IconButtonV2
+                data-action="home-add-project"
+                variant="ghost-muted"
+                size="large"
+                class="titlebar-icon [&_[data-slot=icon-svg]]:text-v2-icon-icon-muted"
+                icon={<IconV2 name="folder-add-left" />}
+                disabled={props.serverHealth(props.servers()[0])?.healthy === false}
+                onClick={() => props.onChooseProject(props.servers()[0])}
+                aria-label={props.language.t("home.project.add")}
+              />
+            </TooltipV2>
+          </Show>
+        </div>
+      </Show>
+      <ScrollView
+        data-slot={props.sidebar ? "cm3-projects-scroll" : "home-projects-scroll"}
+        class="min-h-0 min-w-0 shrink"
+      >
         <Show
-          when={props.servers().length === 1 && !(props.projects().length === 0 && props.recentlyClosed().length > 0)}
+          when={props.servers().some((server) => props.projectsForServer(server).some((project) => project.pinned))}
         >
-          <TooltipV2 placement="bottom" value={props.language.t("home.project.add")}>
-            <IconButtonV2
-              data-action="home-add-project"
-              variant="ghost-muted"
-              size="large"
-              class="titlebar-icon [&_[data-slot=icon-svg]]:text-v2-icon-icon-muted"
-              icon={<IconV2 name="folder-add-left" />}
-              disabled={props.serverHealth(props.servers()[0])?.healthy === false}
-              onClick={() => props.onChooseProject(props.servers()[0])}
-              aria-label={props.language.t("home.project.add")}
-            />
-          </TooltipV2>
+          <section data-component="pinned-projects" aria-label={props.language.t("quietCompanion.pinned")}>
+            <p class={props.sidebar ? "cm3-sidebar-section" : "mb-2 px-1.5 text-v2-text-text-muted"}>
+              {props.language.t("quietCompanion.pinned")}
+            </p>
+            <For each={props.servers()}>
+              {(server) => {
+                const items = createMemo(() => props.projectsForServer(server).filter((project) => project.pinned))
+                return (
+                  <Show when={items().length > 0}>
+                    <div class="min-w-0 pe-3">
+                      <Show when={props.servers().length > 1}>
+                        <p class="px-1.5 text-v2-text-text-muted" dir="auto">
+                          {server.displayName ?? new URL(server.http.url).host}
+                        </p>
+                      </Show>
+                      <HomeProjectList {...props} {...contextMenuProps} server={server} items={items()} />
+                    </div>
+                  </Show>
+                )
+              }}
+            </For>
+          </section>
         </Show>
-      </div>
-      <ScrollView data-slot="home-projects-scroll" class="min-h-0 min-w-0 shrink">
+        <Show when={props.sidebar}>
+          <p class="cm3-sidebar-section">{props.language.t("quietCompanion.projects")}</p>
+        </Show>
         <Show
           when={props.servers().length > 1}
           fallback={
-            <div class="pr-3">
+            <div class="pe-3">
               <Show
                 when={props.projects().length > 0}
                 fallback={<HomeProjectEmpty {...props} server={props.servers()[0]} items={props.recentlyClosed()} />}
@@ -110,16 +153,16 @@ export function HomeProjectsView(props: HomeProjectsViewProps) {
                   {...props}
                   {...contextMenuProps}
                   server={props.servers()[0]}
-                  items={props.projects()}
+                  items={props.projects().filter((project) => !project.pinned)}
                 />
               </Show>
             </div>
           }
         >
-          <div class="flex min-w-0 flex-col gap-4 pr-3">
+          <div class="flex min-w-0 flex-col gap-4 pe-3">
             <For each={props.servers()}>
               {(item) => {
-                const projects = () => props.projectsForServer(item)
+                const projects = () => props.projectsForServer(item).filter((project) => !project.pinned)
                 const healthy = () => !!props.serverHealth(item)?.healthy
                 const hasProjects = () => projects().length > 0
                 const collapsed = () => props.collapsed(item)
@@ -144,12 +187,14 @@ export function HomeProjectsView(props: HomeProjectsViewProps) {
           </div>
         </Show>
       </ScrollView>
-      <HomeUtilityNav
-        class="mb-8 mt-4 hidden shrink-0 lg:flex"
-        onOpenSettings={props.onOpenSettings}
-        onOpenHelp={props.onOpenHelp}
-        language={props.language}
-      />
+      <Show when={!props.sidebar}>
+        <HomeUtilityNav
+          class="mb-8 mt-4 hidden shrink-0 lg:flex"
+          onOpenSettings={props.onOpenSettings}
+          onOpenHelp={props.onOpenHelp}
+          language={props.language}
+        />
+      </Show>
     </aside>
   )
 }
@@ -161,7 +206,7 @@ export function HomeUtilityNav(props: {
   language: ReturnType<typeof useLanguage>
 }) {
   return (
-    <div class={`${props.class ?? ""} min-w-0 flex-col gap-1 pr-3`}>
+    <div class={`${props.class ?? ""} min-w-0 flex-col gap-1 pe-3`}>
       <HomeProjectNavButton
         type="button"
         class="text-v2-text-text-faint [&>[data-slot=icon-svg]]:text-v2-icon-icon-muted"
@@ -211,7 +256,7 @@ function HomeServerRow(props: {
     <div class="group/server relative flex h-7 min-w-0 items-center rounded-[6px]">
       <HomeProjectNavButton
         type="button"
-        class="pr-16 disabled:opacity-60"
+        class="pe-16 disabled:opacity-60"
         data-selected={props.selected ? "" : undefined}
         disabled={!healthy()}
         onClick={() => props.onFocusServer(props.server)}
@@ -267,7 +312,7 @@ function HomeServerRow(props: {
       </HomeProjectNavButton>
       <div
         class={`
-          hover-reveal absolute right-1 top-1/2 flex -translate-y-1/2 items-center gap-1
+          hover-reveal absolute end-1 top-1/2 flex -translate-y-1/2 items-center gap-1
           group-hover/server:opacity-100 focus-within:opacity-100 data-[menu=true]:opacity-100
         `}
         data-menu={props.contextMenuOpen(contextMenuID())}
@@ -335,7 +380,14 @@ function HomeProjectList(props: HomeProjectListProps) {
       onDragEnd={(event) => {
         const source = event.operation.source
         if (event.canceled || !isSortable(source)) return
-        if (source.initialIndex !== source.index) props.onMoveProject(props.server, source.id.toString(), source.index)
+        if (source.initialIndex !== source.index) {
+          // Sortable indices belong to this section, not the full persisted list.
+          const target = props.items[source.index]
+          const index = props
+            .projectsForServer(props.server)
+            .findIndex((project) => project.worktree === target?.worktree)
+          if (index !== -1) props.onMoveProject(props.server, source.id.toString(), index)
+        }
         if (props.selection().server !== ServerConnection.key(props.server))
           props.onSelectProject(props.server, source.id.toString())
       }}
@@ -361,25 +413,36 @@ function HomeProjectSlot(
   },
 ) {
   const initial = props.items.find((item) => item.worktree === props.worktree)
-  if (!initial) return
+  if (!initial) return null
+  const sessionsID = createUniqueId()
   const project = createMemo<LocalProject>(
     (previous) => props.items.find((item) => item.worktree === props.worktree) ?? previous,
     initial,
   )
 
   return (
-    <HomeProjectRow
-      {...props}
-      project={project()}
-      server={props.server}
-      index={props.index}
-      serverSelected={props.selection().server === ServerConnection.key(props.server)}
-      selected={
-        props.selection().server === ServerConnection.key(props.server) &&
-        props.selection().directory === props.worktree
-      }
-      unseen={props.unseenCount(props.server, project())}
-    />
+    <>
+      <HomeProjectRow
+        {...props}
+        project={project()}
+        server={props.server}
+        index={props.index}
+        serverSelected={props.selection().server === ServerConnection.key(props.server)}
+        selected={
+          props.selection().server === ServerConnection.key(props.server) &&
+          props.selection().directory === props.worktree
+        }
+        unseen={props.unseenCount(props.server, project())}
+        sessionsID={sessionsID}
+      />
+      <Show when={props.renderProjectSessions}>
+        <div id={sessionsID} hidden={props.sidebar && !project().expanded}>
+          <Show when={!props.sidebar || project().expanded}>
+            {props.renderProjectSessions?.(props.server, project())}
+          </Show>
+        </div>
+      </Show>
+    </>
   )
 }
 
@@ -403,7 +466,7 @@ function HomeProjectEmpty(
         <span class={HOME_PROJECT_NAV_LABEL}>{props.language.t("home.project.add")}</span>
       </HomeProjectNavButton>
       <Show when={props.items.length > 0}>
-        <div class="mt-3 flex h-7 min-w-0 shrink-0 items-center pl-1.5 pr-3">
+        <div class="mt-3 flex h-7 min-w-0 shrink-0 items-center ps-1.5 pe-3">
           <div class="text-v2-text-text-faint [font-weight:530]">{props.language.t("home.recentlyClosed")}</div>
         </div>
         <For each={props.items}>
@@ -436,7 +499,9 @@ function HomeRecentlyClosedRow(
         disabled={unreachable()}
         onClick={() => props.onAddProjects(props.server, [props.project.worktree])}
       >
-        <HomeProjectAvatar project={props.project} outline />
+        <Show when={props.sidebar} fallback={<HomeProjectAvatar project={props.project} outline />}>
+          <IconV2 name="folder" class="shrink-0" />
+        </Show>
         <span class={HOME_PROJECT_NAV_LABEL}>{displayName(props.project)}</span>
       </HomeProjectNavButton>
     </TooltipV2>
@@ -452,6 +517,7 @@ function HomeProjectRow(
       serverSelected: boolean
       selected: boolean
       unseen: number
+      sessionsID: string
     },
 ) {
   const platform = usePlatform()
@@ -474,21 +540,44 @@ function HomeProjectRow(
     <div
       ref={sortable.ref}
       class="group/project relative flex h-7 min-w-0 items-center rounded-[6px]"
-      classList={{ "z-10": sortable.isDragSource() }}
+      classList={{ "z-10": sortable.isDragSource(), "cm3-sidebar-project-slot": props.sidebar }}
       onContextMenu={(event) => {
         event.preventDefault()
         props.onSetContextMenuOpen(contextMenuID(), true)
       }}
     >
+      <Show when={props.sidebar}>
+        <button
+          type="button"
+          data-action="home-project-expand"
+          class="cm3-sidebar-project-toggle"
+          aria-expanded={props.project.expanded}
+          aria-controls={props.renderProjectSessions ? props.sessionsID : undefined}
+          aria-label={props.language.t(props.project.expanded ? "sidebar.project.collapse" : "sidebar.project.expand", {
+            project: displayName(props.project),
+          })}
+          title={props.language.t(props.project.expanded ? "sidebar.project.collapse" : "sidebar.project.expand", {
+            project: displayName(props.project),
+          })}
+          onClick={() => props.onToggleProjectExpanded(props.server, props.project)}
+        >
+          <IconV2 name={props.project.expanded ? "folder-open" : "folder"} />
+        </button>
+      </Show>
       <HomeProjectNavButton
         type="button"
         data-component="home-project-row"
-        class="pr-16 disabled:opacity-60"
+        class="pe-20 disabled:opacity-60"
         classList={{
           "bg-v2-background-bg-layer-01 text-v2-text-text-base": sortable.isDragSource(),
+          "cm3-sidebar-project": props.sidebar,
         }}
+        title={props.sidebar ? props.project.worktree : undefined}
+        data-active={props.sidebar ? props.selected : undefined}
         data-selected={props.selected ? "" : undefined}
         aria-current={props.selected ? "page" : undefined}
+        aria-expanded={props.sidebar ? props.project.expanded : undefined}
+        aria-controls={props.sidebar && props.renderProjectSessions ? props.sessionsID : undefined}
         disabled={serverUnreachable()}
         onPointerDown={(event) => {
           // Same-server mouse selection happens on pointerdown (like tabs),
@@ -505,8 +594,11 @@ function HomeProjectRow(
         }}
         onClick={(event) => {
           // The drag sensor calls preventDefault on post-drag clicks; never
-          // toggle selection as part of a reorder.
+          // toggle selection or expansion as part of a reorder.
           if (event.defaultPrevented) return
+          if (props.sidebar) props.onToggleProjectExpanded(props.server, props.project)
+          // Pointer-down selection must leave the mobile drawer open until the click or drag settles.
+          props.onActivateProject?.()
           // Keyboard activation and touch taps keep the original toggle.
           if (event.detail === 0 || pointerDownSelected === undefined) {
             props.onSelectProject(props.server, props.project.worktree)
@@ -518,12 +610,16 @@ function HomeProjectRow(
           pointerDownSelected = undefined
         }}
       >
-        <HomeProjectAvatar project={props.project} />
-        <span class={HOME_PROJECT_NAV_LABEL}>{displayName(props.project)}</span>
+        <Show when={!props.sidebar}>
+          <HomeProjectAvatar project={props.project} />
+        </Show>
+        <span class={HOME_PROJECT_NAV_LABEL} dir="auto">
+          {displayName(props.project)}
+        </span>
       </HomeProjectNavButton>
       <div
         class={`
-          hover-reveal absolute right-1 top-1/2 flex -translate-y-1/2 items-center gap-1
+          hover-reveal absolute end-1 top-1/2 flex -translate-y-1/2 items-center gap-1
           group-hover/project:opacity-100 focus-within:opacity-100 data-[menu=true]:opacity-100
         `}
         data-menu={props.contextMenuOpen(contextMenuID())}
@@ -551,6 +647,12 @@ function HomeProjectRow(
               <MenuV2.Item onSelect={() => props.onEditProject(props.server, props.project)}>
                 {props.language.t("dialog.project.edit.title")}
               </MenuV2.Item>
+              <MenuV2.Item
+                data-action="home-project-pin"
+                onSelect={() => props.onPinProject(props.server, props.project)}
+              >
+                {props.language.t(props.project.pinned ? "sidebar.project.unpin" : "sidebar.project.pin")}
+              </MenuV2.Item>
               <Show when={props.canRevealProject(props.server)}>
                 <MenuV2.Item onSelect={() => props.onRevealProject(props.server, props.project)}>
                   {props.language.t(
@@ -572,6 +674,25 @@ function HomeProjectRow(
             </MenuV2.Content>
           </MenuV2.Portal>
         </MenuV2>
+        <TooltipV2
+          placement="bottom"
+          value={props.language.t(props.project.pinned ? "sidebar.project.unpin" : "sidebar.project.pin")}
+        >
+          <IconButtonV2
+            data-action="home-project-pin-toggle"
+            variant={props.project.pinned ? "ghost" : "ghost-muted"}
+            size="small"
+            aria-pressed={!!props.project.pinned}
+            aria-label={props.language.t(props.project.pinned ? "sidebar.project.unpin" : "sidebar.project.pin")}
+            onClick={() => props.onPinProject(props.server, props.project)}
+            icon={
+              <IconV2
+                name={props.project.pinned ? "push-pin-fill" : "push-pin"}
+                style={{ width: "12.8px", height: "12.8px" }}
+              />
+            }
+          />
+        </TooltipV2>
         <IconButtonV2
           data-action="home-project-new-session"
           variant="ghost-muted"
@@ -591,7 +712,7 @@ function HomeProjectNavButton(props: JSX.ButtonHTMLAttributes<HTMLButtonElement>
     <button
       {...rest}
       class={`
-        flex h-7 min-w-0 w-full shrink-0 cursor-default items-center gap-2 rounded-[6px] bg-transparent px-1.5 text-left
+        flex h-7 min-w-0 w-full shrink-0 cursor-default items-center gap-2 rounded-[6px] bg-transparent px-1.5 text-start
         text-v2-text-text-muted [font-weight:440] transition-[background-color,color,box-shadow] duration-[120ms] ease-in-out
         hover:bg-v2-background-bg-layer-01 hover:text-v2-text-text-base
         data-[selected]:bg-v2-background-bg-layer-03 data-[selected]:text-v2-text-text-base

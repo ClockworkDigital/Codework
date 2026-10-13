@@ -6,14 +6,10 @@ import { DateTime } from "luxon"
 import { type Accessor, createEffect, createMemo, createRoot, type JSX, startTransition } from "solid-js"
 import { produce } from "solid-js/store"
 import { useCommand } from "@/context/command"
-import {
-  loadHomeSessionIndex,
-  retainHomeSessions,
-  type HomeSessionEvents,
-} from "@/context/global-sync/home-session-index"
+import { loadHomeSessionIndex, type HomeSessionEvents } from "@/context/global-sync/home-session-index"
 import type { LocalProject } from "@/context/layout"
 import { useLanguage } from "@/context/language"
-import { ServerConnection } from "@/context/server"
+import { ServerConnection, useServer } from "@/context/server"
 import { sessionHasOpenTab, useTabs } from "@/context/tabs"
 import { compareSessionTime, displayName, errorMessage, projectForSession } from "@/pages/layout/helpers"
 import { useSessionTabAvatarState } from "@/pages/layout/project-avatar-state"
@@ -38,13 +34,21 @@ export type HomeSessionGroup = {
 
 export type OpenSessionOptions = { background?: boolean }
 
-export function createHomeSessionsController(home: HomeController) {
+export function createHomeSessionsController(
+  home: HomeController,
+  options?: { registerPalette?: boolean; allProjects?: boolean },
+) {
   const tabs = useTabs()
   const command = useCommand()
   const dialog = useDialog()
   const language = useLanguage()
+  const server = useServer()
+  const pinnedIDs = createMemo(() => {
+    const conn = home.server.focused()
+    return new Set(conn ? server.sessionPins.list(ServerConnection.key(conn)) : [])
+  })
   const projectDirectories = createMemo(() => {
-    const project = home.project.selected()
+    const project = options?.allProjects ? undefined : home.project.selected()
     if (!project) return home.project.list().flatMap(directories)
     return directories(project)
   })
@@ -52,40 +56,41 @@ export function createHomeSessionsController(home: HomeController) {
     () => new Map(home.project.list().flatMap((project) => (project.id ? [[project.id, project] as const] : []))),
   )
   const homeSessions = () => home.server.focusedSync().homeSessions
-  const sessionEventLoad = useQuery(() => ({
-    queryKey: homeSessions().eventsKey,
-    queryFn: async (): Promise<HomeSessionEvents> => ({ sequence: 0, entries: [] }),
-    initialData: { sequence: 0, entries: [] } satisfies HomeSessionEvents,
-    enabled: false,
-  }))
-  const sessionLoad = useQuery(() => ({
-    queryKey: homeSessions().indexKey,
-    enabled: !!home.server.focusedContext(),
-    queryFn: async ({ signal }) => {
-      const ctx = home.server.focusedContext()
-      if (!ctx) return { sessions: [], eventSequence: 0 }
-      const cache = homeSessions()
-      const eventSequence = cache.eventSequence()
-      const index = await loadHomeSessionIndex(
-        (input, options) => ctx.sdk.client.v2.session.list(input, options),
-        eventSequence,
-        signal,
-      )
-      cache.complete(eventSequence)
-      return index
-    },
-    retry: false,
-    staleTime: 30_000,
-    refetchOnMount: true,
-    refetchOnReconnect: true,
-  }))
-  const indexedSessions = createMemo(() =>
-    retainHomeSessions(
-      homeSessions().sessions(sessionLoad.data, sessionEventLoad.data),
-      HOME_SESSION_LIMIT,
-      Date.now(),
-    ),
+  // The visual shell has its own query provider; live events belong to the server sync cache.
+  const sessionEventLoad = useQuery(
+    () => ({
+      queryKey: homeSessions().eventsKey,
+      queryFn: async (): Promise<HomeSessionEvents> => ({ sequence: 0, entries: [] }),
+      initialData: { sequence: 0, entries: [] } satisfies HomeSessionEvents,
+      enabled: false,
+    }),
+    () => homeSessions().queryClient,
   )
+  const sessionLoad = useQuery(
+    () => ({
+      queryKey: homeSessions().indexKey,
+      enabled: !!home.server.focusedContext(),
+      queryFn: async ({ signal }) => {
+        const ctx = home.server.focusedContext()
+        if (!ctx) return { sessions: [], eventSequence: 0 }
+        const cache = homeSessions()
+        const eventSequence = cache.eventSequence()
+        const index = await loadHomeSessionIndex(
+          (input, options) => ctx.sdk.client.v2.session.list(input, options),
+          eventSequence,
+          signal,
+        )
+        cache.complete(eventSequence)
+        return index
+      },
+      retry: false,
+      staleTime: 30_000,
+      refetchOnMount: true,
+      refetchOnReconnect: true,
+    }),
+    () => homeSessions().queryClient,
+  )
+  const indexedSessions = createMemo(() => homeSessions().sessions(sessionLoad.data, sessionEventLoad.data))
   const allRecords = createMemo(() =>
     buildHomeSessionRecords({
       sessions: indexedSessions,
@@ -131,37 +136,38 @@ export function createHomeSessionsController(home: HomeController) {
       })
   })
 
-  command.register("home.palette", () => [
-    {
-      id: "command.palette",
-      title: language.t("command.palette"),
-      hidden: true,
-      onSelect: async () => {
-        const conn = home.server.focused()
-        if (!conn) return
-        const ctx = home.server.focusedContext()
-        if (!ctx) return
-        const { DialogHomeCommandPaletteV2 } = await import("@/components/dialog-command-palette-v2")
-        void dialog.show(() => (
-          <DialogHomeCommandPaletteV2
-            server={conn}
-            onSelectSession={(entry) => {
-              if (!entry.sessionID || !entry.directory || !entry.server) return
-              const sessionID = entry.sessionID
-              const server = entry.server
-              const directory = entry.project?.worktree ?? entry.directory
-              ctx.projects.open(directory)
-              ctx.projects.touch(directory)
-              void startTransition(() => {
-                const tab = tabs.addSessionTab({ server, sessionId: sessionID })
-                tabs.select(tab)
-              })
-            }}
-          />
-        ))
+  if (options?.registerPalette !== false)
+    command.register("home.palette", () => [
+      {
+        id: "command.palette",
+        title: language.t("command.palette"),
+        hidden: true,
+        onSelect: async () => {
+          const conn = home.server.focused()
+          if (!conn) return
+          const ctx = home.server.focusedContext()
+          if (!ctx) return
+          const { DialogHomeCommandPaletteV2 } = await import("@/components/dialog-command-palette-v2")
+          void dialog.show(() => (
+            <DialogHomeCommandPaletteV2
+              server={conn}
+              onSelectSession={(entry) => {
+                if (!entry.sessionID || !entry.directory || !entry.server) return
+                const sessionID = entry.sessionID
+                const server = entry.server
+                const directory = entry.project?.worktree ?? entry.directory
+                ctx.projects.open(directory)
+                ctx.projects.touch(directory)
+                void startTransition(() => {
+                  const tab = tabs.addSessionTab({ server, sessionId: sessionID })
+                  tabs.select(tab)
+                })
+              }}
+            />
+          ))
+        },
       },
-    },
-  ])
+    ])
 
   return {
     copy: {
@@ -171,9 +177,18 @@ export function createHomeSessionsController(home: HomeController) {
       records,
       groups,
       loading: () => sessionLoad.isLoading,
+      error: () => sessionLoad.error,
+      retry: () => sessionLoad.refetch(),
       searchRecords: allRecords,
     },
     session: {
+      pinsReady: server.ready,
+      isPinned: (session: Session) => pinnedIDs().has(session.id),
+      pin: (session: Session, pinned: boolean) => {
+        const conn = home.server.focused()
+        if (!conn) return
+        server.sessionPins.set(ServerConnection.key(conn), session.id, pinned)
+      },
       showProjectName: () => !home.project.selected(),
       server: () => home.selection.value().server,
       canCreate: () => !!home.project.newSession(),
@@ -209,24 +224,27 @@ export function createHomeSessionsController(home: HomeController) {
         const ctx = home.server.focusedContext()
         if (!conn || !ctx) return
         const [, setStore] = ctx.sync.child(session.directory)
-        if ((await ctx.sdk.protocol) !== "v1") return
         await archiveHomeSession({
           server: ServerConnection.key(conn),
           session,
-          archive: (sessionID) =>
-            ctx.sdk.client.session.update({
-              sessionID,
-              directory: session.directory,
-              time: { archived: Date.now() },
-            }),
+          archive: async (sessionID) =>
+            (await ctx.sdk.protocol) === "v2"
+              ? ctx.sdk.client.v2.session.archive({ sessionID })
+              : ctx.sdk.client.session.update({
+                  sessionID,
+                  directory: session.directory,
+                  time: { archived: Date.now() },
+                }),
           remove: () => {
+            server.sessionPins.set(ServerConnection.key(conn), session.id, false)
+            ctx.sync.session.evict(session.id)
             setStore(
               produce((draft) => {
                 const match = Binary.search(draft.session, session.id, (item) => item.id)
                 if (match.found) draft.session.splice(match.index, 1)
               }),
             )
-            homeSessions().remove(session.id)
+            ctx.sync.homeSessions.remove(session.id)
           },
           onError: (cause) =>
             showToast({

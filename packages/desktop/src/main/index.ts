@@ -11,10 +11,11 @@ import { app, BrowserWindow } from "electron"
 import { Deferred, Effect, Fiber } from "effect"
 import contextMenu from "electron-context-menu"
 import { browserLinkMenu } from "./browser/tabs"
+import { wppLoginMenu } from "./wpp-bridge/login-controls"
 
 import type { ServerReadyData } from "../preload/types"
 import { checkAppExists, resolveAppPath } from "./apps"
-import { CHANNEL } from "./constants"
+import { APP_IDENTITY } from "./constants"
 import { registerIpcHandlers, sendDeepLinks, sendMenuCommand } from "./ipc"
 import { forwardInitializationFailure } from "./initialization"
 import { exportDebugLogs, initCrashReporter, initLogging, startNetLog, write as writeLog } from "./logging"
@@ -52,20 +53,10 @@ import { cleanupStoreFiles } from "./store-cleanup"
 import { createTray, destroyTray } from "./tray"
 import { startWppBridge } from "./wpp-bridge"
 import { ensureO1CodeProvider } from "./wpp-bridge/proxy/providerConfig.mjs"
-import { openWppLogin } from "./wpp-bridge/session"
+import { openWppLogin, wppAuth } from "./wpp-bridge/session"
 import { startBackgroundCli } from "./background-cli"
 import { setNativeTranslations } from "./native-translations"
 
-const APP_NAMES: Record<string, string> = {
-  dev: "OpenCode Dev",
-  beta: "OpenCode Beta",
-  prod: "OpenCode",
-}
-const APP_IDS: Record<string, string> = {
-  dev: "ai.opencode.desktop.dev",
-  beta: "ai.opencode.desktop.beta",
-  prod: "ai.opencode.desktop",
-}
 const TEST_ONBOARDING = process.env.OPENCODE_TEST_ONBOARDING === "1"
 const SIDECAR_VERSION = process.env.OPENCODE_SIDECAR_V2 === "1" ? "v2" : "v1"
 const jsCallStackFeature = "DocumentPolicyIncludeJSCallStacksInCrashReports"
@@ -134,7 +125,7 @@ const main = Effect.gen(function* () {
     prepend: (_actions, params, target) => {
       const contents =
         "webContents" in target ? target.webContents : "getURL" in target && "session" in target ? target : undefined
-      return contents ? browserLinkMenu(contents, params.linkURL) : []
+      return contents ? [...wppLoginMenu(contents), ...browserLinkMenu(contents, params.linkURL)] : []
     },
   })
 
@@ -145,7 +136,6 @@ const main = Effect.gen(function* () {
 
   process.env.OPENCODE_DISABLE_EMBEDDED_WEB_UI = "true"
 
-  const appId = app.isPackaged ? APP_IDS[CHANNEL] : "ai.opencode.desktop.dev"
   const onboardingTestRoot = ((): string | undefined => {
     if (!TEST_ONBOARDING) return
 
@@ -161,11 +151,11 @@ const main = Effect.gen(function* () {
     process.env.XDG_STATE_HOME = join(root, "state")
     return root
   })()
-  app.setName(app.isPackaged ? APP_NAMES[CHANNEL] : "OpenCode Dev")
-  app.setAppUserModelId(appId)
+  app.setName(APP_IDENTITY.name)
+  app.setAppUserModelId(APP_IDENTITY.appId)
   app.setPath(
     "userData",
-    onboardingTestRoot ? join(onboardingTestRoot, "desktop") : join(app.getPath("appData"), appId),
+    onboardingTestRoot ? join(onboardingTestRoot, "desktop") : join(app.getPath("appData"), APP_IDENTITY.appId),
   )
   if (onboardingTestRoot) app.setPath("sessionData", join(onboardingTestRoot, "session"))
   initializeOldLayoutEligibility(app.getPath("userData"))
@@ -247,7 +237,7 @@ const main = Effect.gen(function* () {
               type: "question",
               title: nativeT("desktop.install.title"),
               message: nativeT("desktop.install.title"),
-              detail: nativeT("desktop.install.detail", { destination }),
+              detail: nativeT("desktop.install.replaceDetail", { destination }),
               buttons: [nativeT("desktop.install.confirm"), nativeT("desktop.recovery.action.quit")],
               defaultId: 0,
               cancelId: 1,
@@ -259,7 +249,7 @@ const main = Effect.gen(function* () {
             await dialog.showMessageBox({
               type: "warning",
               message: nativeT("desktop.install.title"),
-              detail: nativeT("desktop.install.manual"),
+              detail: nativeT("desktop.install.replaceManual"),
               buttons: [nativeT("desktop.recovery.action.quit")],
             })
           },
@@ -267,7 +257,7 @@ const main = Effect.gen(function* () {
             await dialog.showMessageBox({
               type: "error",
               message: nativeT("desktop.install.title"),
-              detail: nativeT("desktop.install.failed", { destination }),
+              detail: nativeT("desktop.install.replaceFailed", { destination }),
               buttons: [nativeT("desktop.recovery.action.quit")],
             })
           },
@@ -392,10 +382,12 @@ const main = Effect.gen(function* () {
   // Fire-and-forget: server.mjs self-handles EADDRINUSE, and a failure here must not block the
   // app from coming up — it surfaces in logs and the renderer's connection panel instead.
   void startWppBridge({
+    checkAuth: () => wppAuth.check(),
     openLogin: () => {
       openWppLogin()
     },
   }).catch((error) => logger.error("wpp bridge proxy failed to start", error))
+  void wppAuth.check()
   // ponytail: one-time Phase-3 gate scaffolding (dev only). WPP_LOGIN=1 opens a visible
   // persist:wpp window for interactive SSO; WPP_RECORDER_URL=<chat url> runs the recorder probe
   // against the now-authenticated partition. Separate runs — log in first, probe on a later

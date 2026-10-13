@@ -82,7 +82,7 @@ type TabHandoff = {
   at: number
 }
 
-export type LocalProject = Partial<Project> & { worktree: string; expanded: boolean }
+export type LocalProject = Partial<Project> & { worktree: string; expanded: boolean; pinned?: boolean }
 export type HomeProjectSelection = { server: ServerConnection.Key; directory?: string }
 
 export type ReviewDiffStyle = "unified" | "split"
@@ -307,6 +307,7 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
       }),
     )
     const [ephemeral, setEphemeral] = createStore({
+      tabStripMount: undefined as HTMLElement | undefined,
       reviewPanelSource: "other" as ReviewPanelSource,
       sessionTabPreview: {} as Record<string, string | undefined>,
     })
@@ -509,6 +510,7 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
           }
 
           if (project.expanded) server.projects.expand(root)
+          if (project.pinned) server.projects.pin(root, true)
         }
       })
     })
@@ -614,6 +616,10 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
     return {
       route,
       ready,
+      tabStrip: {
+        mount: () => ephemeral.tabStripMount,
+        setMount: (element: HTMLElement | undefined) => setEphemeral("tabStripMount", element),
+      },
       home: {
         selection: createMemo(() => store.home.selection),
         setSelection(selection: HomeProjectSelection) {
@@ -654,6 +660,9 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
         },
         collapse(directory: string) {
           server.projects.collapse(directory)
+        },
+        pin(directory: string, pinned: boolean) {
+          server.projects.pin(directory, pinned)
         },
         move(directory: string, toIndex: number) {
           server.projects.move(directory, toIndex)

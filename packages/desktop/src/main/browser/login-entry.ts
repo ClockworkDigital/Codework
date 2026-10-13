@@ -10,7 +10,13 @@ export function loginEntryAvailable() {
 }
 
 export const loginEntry = {
-  async prompt(win: BrowserWindow, origin: string, username: string) {
+  async prompt(
+    win: BrowserWindow,
+    origin: string,
+    username: string,
+    detail = nativeT("desktop.browser.account.entry", { origin }),
+    signal?: AbortSignal,
+  ) {
     const ticket = vaultAccess.require()
     const helper = nativeSecretEntryPath()
     if (
@@ -22,20 +28,32 @@ export const loginEntry = {
     )
       throw new Error("Native account entry unavailable")
     if (win.isDestroyed() || !win.isVisible() || win.isMinimized()) throw new Error("Account window unavailable")
+    if (signal?.aborted) throw new Error("Account entry cancelled")
     return new Promise<ReturnType<typeof requireLogin> | undefined>((resolve, reject) => {
       const child = execFile(
         helper,
-        [
-          nativeSecretEntryWindow(win),
-          origin,
-          nativeT("desktop.browser.account.title"),
-          nativeT("desktop.browser.account.entry", { origin }),
-          // Native entry fields are bounded. Allow explicit replacement, never truncate imported usernames.
-          username.length <= 513 ? username : "",
-          ...(process.platform === "darwin"
-            ? [nativeT("desktop.browser.save"), nativeT("desktop.browser.cancel")]
-            : []),
-        ],
+        process.platform === "linux"
+          ? [
+              "--forms",
+              `--title=${nativeT("desktop.browser.account.title")}`,
+              `--text=${detail}`,
+              `--add-entry=${nativeT("desktop.browser.account.username")}`,
+              `--add-password=${nativeT("desktop.browser.account.password")}`,
+              "--separator=\n",
+              `--ok-label=${nativeT("desktop.browser.save")}`,
+              `--cancel-label=${nativeT("desktop.browser.cancel")}`,
+            ]
+          : [
+              nativeSecretEntryWindow(win),
+              origin,
+              nativeT("desktop.browser.account.title"),
+              detail,
+              // Native entry fields are bounded. Allow explicit replacement, never truncate imported usernames.
+              username.length <= 513 ? username : "",
+              ...(process.platform === "darwin"
+                ? [nativeT("desktop.browser.save"), nativeT("desktop.browser.cancel")]
+                : []),
+            ],
         {
           encoding: "buffer",
           windowsHide: true,
@@ -44,14 +62,16 @@ export const loginEntry = {
         },
         (error, stdout, stderr) => {
           unsubscribe()
+          signal?.removeEventListener("abort", abort)
           try {
             vaultAccess.require(ticket)
+            if (signal?.aborted) throw new Error()
             if (win.isDestroyed() || !win.isVisible() || win.isMinimized()) throw new Error()
             if (error) {
               if (error.code === 1) return resolve(undefined)
               throw new Error()
             }
-            resolve(decodeLoginEntry(origin, stdout))
+            resolve(decodeLoginEntry(origin, stdout, process.platform === "linux"))
           } catch {
             // Child-process errors can carry stdout. Never propagate them across renderer IPC.
             reject(new Error("Native account entry cancelled or unavailable"))
@@ -64,11 +84,20 @@ export const loginEntry = {
       const unsubscribe = vaultAccess.subscribe(() => {
         if (vaultAccess.status() !== "unlocked") child.kill()
       })
+      const abort = () => child.kill()
+      signal?.addEventListener("abort", abort, { once: true })
+      if (signal?.aborted) child.kill()
     })
   },
 }
 
-export function decodeLoginEntry(origin: string, bytes: Buffer) {
+export function decodeLoginEntry(origin: string, bytes: Buffer, linux = false) {
+  if (linux) {
+    const fields = bytes.toString("utf8").replace(/\n$/, "").split("\n")
+    if (fields.length !== 2 || fields[0].length > 513 || !fields[1] || fields[1].length > 256)
+      throw new Error("Invalid native account response")
+    return requireLogin({ origin, username: fields[0], password: fields[1] })
+  }
   if (bytes.length < 8) throw new Error("Invalid native account response")
   const userBytes = bytes.readUInt32LE(0)
   const passwordBytes = bytes.readUInt32LE(4)

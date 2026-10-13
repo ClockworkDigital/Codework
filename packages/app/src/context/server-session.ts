@@ -990,12 +990,21 @@ export function createServerSession(
       if (
         !data.info[eventID] &&
         event.type !== "session.created" &&
+        event.type !== "session.next.archived" &&
         event.type !== "session.updated" &&
         event.type !== "session.deleted"
       )
         void resolve(eventID).catch(() => {})
     }
     switch (event.type) {
+      case "session.next.archived": {
+        const properties = event.properties as { sessionID: string; timestamp: number }
+        const info = data.info[properties.sessionID]
+        if (info)
+          remember({ ...info, time: { ...info.time, archived: properties.timestamp, updated: properties.timestamp } })
+        evict([properties.sessionID])
+        return
+      }
       case "session.created":
         remember((event.properties as { info: Session }).info)
         return

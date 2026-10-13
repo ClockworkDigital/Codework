@@ -288,6 +288,12 @@ async function vaultCapabilitySmoke(win: BrowserWindow) {
 async function run() {
   stage("waiting for Electron ready")
   await app.whenReady()
+  if (process.argv.includes("--wpp-auth")) {
+    const { wppAuthSmoke } = await import("../wpp-bridge/auth-state.fixture")
+    await wppAuthSmoke()
+    stage("PASS WPP authentication")
+    return
+  }
   stage("Electron ready")
   if (process.argv.includes("--drag-regions")) {
     const { dragRegionsSmoke } = await import("./drag-regions.fixture")
@@ -390,6 +396,18 @@ async function run() {
     const { tabLifecycleSmoke } = await import("./tab-lifecycle.fixture")
     await tabLifecycleSmoke()
     stage("PASS tab lifecycle")
+    return
+  }
+  if (process.argv.includes("--desktop-panel")) {
+    const { desktopPanelSmoke } = await import("./desktop-panel.fixture")
+    await desktopPanelSmoke()
+    stage("PASS desktop panel")
+    return
+  }
+  if (process.argv.includes("--autonomous-browser")) {
+    const { autonomousBrowserSmoke } = await import("./autonomous.fixture")
+    await autonomousBrowserSmoke()
+    stage("PASS autonomous browser")
     return
   }
   if (process.argv.includes("--delegation")) {

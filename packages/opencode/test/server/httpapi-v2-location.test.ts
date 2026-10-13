@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { EventV2 } from "@opencode-ai/core/event"
 import { Location } from "@opencode-ai/core/location"
+import { Session } from "@opencode-ai/schema/session"
+import { AbsolutePath } from "@opencode-ai/schema/schema"
 import { Context, Schema } from "effect"
 import { HttpApiApp } from "../../src/server/routes/instance/httpapi/server"
 import { resetDatabase } from "../fixture/db"
@@ -78,6 +80,35 @@ afterEach(async () => {
 })
 
 describe("v2 location HttpApi", () => {
+  test("archives a session through its stored location and keeps durable history", async () => {
+    await using owner = await tmpdir({ git: true })
+    await using caller = await tmpdir({ git: true })
+    const create = await request("/api/session", owner.path, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ location: { directory: owner.path } }),
+    })
+    expect(create.status).toBe(200)
+    const decode = Schema.decodeUnknownSync(Schema.Struct({ data: Session.Info }))
+    const created = decode(await create.json())
+    const route = `/api/session/${created.data.id}`
+    const archive = await request(`${route}/archive`, caller.path, { method: "POST" })
+    expect(archive.status).toBe(204)
+    const get = await request(route, caller.path)
+    expect(get.status).toBe(200)
+    const archived = decode(await get.json())
+    expect(archived.data.location.directory).toBe(AbsolutePath.make(owner.path))
+    expect(archived.data.time.archived).toBeDefined()
+    expect((await request(`${route}/archive`, caller.path, { method: "POST" })).status).toBe(204)
+    expect(decode(await (await request(route, caller.path)).json())).toEqual(archived)
+    const history = Schema.decodeUnknownSync(
+      Schema.Struct({ data: Schema.Array(Schema.Struct({ type: Schema.String })) }),
+    )(await (await request(`${route}/history`, caller.path)).json())
+    expect(history.data.filter((event) => event.type === "session.next.archived")).toHaveLength(1)
+    expect((await request("/api/session/ses_missing_archive/archive", caller.path, { method: "POST" })).status).toBe(
+      404,
+    )
+  })
   test("decodes EventV2 location refs without resolved project metadata", () => {
     expect(
       Schema.decodeUnknownSync(Event)({

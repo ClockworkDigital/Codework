@@ -40,27 +40,34 @@ export function useSessionArchive() {
   }
 
   const archive = async (sessionID: string) => {
-    const session = sync().session.get(sessionID)
+    const currentSync = sync()
+    const currentServerSync = serverSync()
+    const server = params.serverKey ? requireServerKey(params.serverKey) : undefined
+    const session = currentSync.session.get(sessionID)
     if (!session) return
-    if ((await sdk().protocol) !== "v1") return
+    const current = sdk()
 
-    const sessions = sync().data.session ?? []
+    const sessions = currentSync.data.session ?? []
     const index = sessions.findIndex((s) => s.id === sessionID)
     const nextSession = index === -1 ? undefined : (sessions[index + 1] ?? sessions[index - 1])
 
-    await sdk()
-      .client.session.update({ sessionID, directory: sdk().directory, time: { archived: Date.now() } })
+    await current.protocol
+      .then(async (protocol) => {
+        await (protocol === "v2"
+          ? current.client.v2.session.archive({ sessionID })
+          : current.client.session.update({ sessionID, directory: current.directory, time: { archived: Date.now() } }))
+      })
       .then(() => {
-        sync().set(
+        currentSync.set(
           produce((draft) => {
             const index = draft.session.findIndex((s) => s.id === sessionID)
             if (index !== -1) draft.session.splice(index, 1)
           }),
         )
-        sync().session.evict(sessionID)
-        serverSync().homeSessions.remove(sessionID)
-        navigateAfterRemoval(sessionID, session.parentID, nextSession?.id)
-        notifySessionTabsRemoved({ directory: sdk().directory, sessionIDs: [sessionID] })
+        currentSync.session.evict(sessionID)
+        currentServerSync.homeSessions.remove(sessionID)
+        if (sdk() === current) navigateAfterRemoval(sessionID, session.parentID, nextSession?.id)
+        notifySessionTabsRemoved({ server, directory: current.directory, sessionIDs: [sessionID] })
       })
       .catch((err) => {
         showToast({

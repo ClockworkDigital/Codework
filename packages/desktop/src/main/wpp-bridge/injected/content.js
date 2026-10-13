@@ -1,11 +1,10 @@
 (() => {
-const ASSISTANT_HOSTS = new Set([
-  "open-web-assistant-cs.wpp.ai",
-  "open-web-deeplink-cs.wpp.ai"
-]);
+function isAgentChatFrame() {
+  return location.hostname === "open-web-agent-builder-cs.wpp.ai"
+    && /^\/chat\/[^/]+\/foundational\/?$/.test(location.pathname);
+}
 const CONTENT_SCRIPT_VERSION = "2026-06-27-electron-transport-1";
 const INSTALL_KEY = `__o1CodeBridgeContentInstalled_${CONTENT_SCRIPT_VERSION}`;
-const CONTENT_SOURCE = "o1-code-bridge-content";
 const PAGE_SOURCE = "o1-code-bridge-page";
 // Electron transport: jobs arrive from the main process as CONTROLLER_SOURCE frames; results
 // and progress leave as BRIDGE_OUT_SOURCE frames. A main-world relay (installed via the same
@@ -43,6 +42,7 @@ const MESSAGE_CONTAINER_SELECTOR = [
   "[class*='chat-messages']",
   "[data-testid='conversation-layout']"
 ].join(",");
+let activeCaptureRunId = null;
 const networkRecords = new Map();
 const progressDispatchers = new Map();
 const recorderStatus = {
@@ -73,7 +73,7 @@ if (!globalThis[INSTALL_KEY]) {
 
       if (data.type === "O1_CODE_BRIDGE_NETWORK_RECORD") {
         const record = data.record;
-        if (record?.runId && record?.id) {
+        if (record?.runId && record.runId === activeCaptureRunId && record?.id) {
           networkRecords.set(record.id, record);
           forwardProgressRecord(record);
         }
@@ -88,7 +88,7 @@ if (!globalThis[INSTALL_KEY]) {
     }
 
     if (data.source === CONTROLLER_SOURCE) {
-      if (!ASSISTANT_HOSTS.has(location.hostname)) {
+      if (event.source !== window || !isAgentChatFrame()) {
         return;
       }
       handleControllerMessage(data);
@@ -175,12 +175,13 @@ async function runJob(job) {
   try {
     return await runJobWithProgress(job, job?.id);
   } finally {
+    disarmNetworkCapture();
     closeProgressJob(job?.id);
   }
 }
 
 async function runJobWithProgress(job, jobId) {
-  if (!ASSISTANT_HOSTS.has(location.hostname)) {
+  if (!isAgentChatFrame()) {
     throw new Error(`O1-Code bridge content script is in the wrong frame: ${location.href}`);
   }
 
@@ -196,87 +197,40 @@ async function runJobWithProgress(job, jobId) {
     throw new Error("Bridge job prompt is empty.");
   }
 
-  const freshChat = continueThread ? await continueExistingChat() : await startFreshChat();
-  const ignoredAssistantErrorText = inspectAssistantUi().error?.text || null;
-  await dismissAssistantUiErrors();
-  const capture = beginNetworkCapture({ verboseRecorder });
-  registerProgressRun(capture.runId, jobId);
-  await waitForRecorderReset(capture.runId, 1500);
+  disarmNetworkCapture();
   const jobTimeoutMs = Number(job.timeoutMs || SETUP_TIMEOUT_MS);
-  const textarea = await waitForTextarea(SETUP_TIMEOUT_MS);
+  const initialTextarea = await waitForTextarea(SETUP_TIMEOUT_MS);
+  const agentSelection = requireAgentSelected(expectedAgent);
+  await waitForGreetingSettlement(initialTextarea);
+  const freshChat = continueThread ? await continueExistingChat() : await startFreshChat({ expectedAgent });
+  const ignoredAssistantErrorText = inspectAssistantUi().error?.text || null;
+  let textarea = await waitForTextarea(SETUP_TIMEOUT_MS);
   const attachments = await attachImages(job?.payload?.images || [], textarea, SETUP_TIMEOUT_MS);
-
-  // Guarantee the routed CookieMonster agent is selected. "New Chat" can reset the
-  // picker to the default base model, so this must run after startFreshChat and before
-  // submitting. CookieMonster targets are agents (not base models) under the "Agents and Models"
-  // picker — selection state is read from the composer pill label, which is the authoritative
-  // signal (the network model field reports the agent's underlying base model).
-  const agentSelection = continueThread
-    ? { ok: true, label: expectedAgent, skipped: true }
-    : await ensureAgentSelected(expectedAgent, textarea);
-
-  // Trust agentSelection.ok as authoritative: ensureAgentSelected already confirms selection
-  // internally (old UI: pill label matches; new UI: the name-matched option was clicked and the
-  // picker dismissed). Re-checking the pill label here would reject the new UI, whose model button is
-  // icon-only ("(unknown)") even when the correct agent is selected.
-  if (!continueThread && !agentSelection.ok) {
-    const selectedLabel = agentSelection.label || agentSelection.afterLabel || agentSelection.beforeLabel || "(unknown)";
-    // Diagnostic dump: surface what the agent scan actually saw so the next real failure is
-    // self-describing instead of guessed-at (the picker lives in a cross-origin iframe we can't
-    // inspect from outside). `options` is each visible option's text — it reveals whether the
-    // matched node carries the trailing "Assistant" subtitle that trips matchesAgentName's
-    // end-boundary check. ponytail: read-only fields already captured by finish()/captureRosterReadiness.
-    const roster = agentSelection.rosterReadiness || {};
-    const selectionFailure = agentSelection.failureReason
-      ? ` The extension tried to switch agents but failed at: ${agentSelection.failureReason}.`
-        + ` [diag searchFound=${agentSelection.searchFound} groupCount=${agentSelection.groupCount}`
-        + ` groupExpanded=${agentSelection.groupExpanded} toggleOpened=${agentSelection.groupToggleOpened}`
-        + ` optionFound=${agentSelection.optionFound}`
-        + ` drilledModel=${JSON.stringify(agentSelection.drilledModelText || "")}`
-        + ` options=${JSON.stringify(roster.optionSample || [])}`
-        + ` picker="${(roster.subtreeSignature || agentSelection.pickerText || "").slice(0, 200)}"]`
-      : "";
-    const error = new Error(
-      `Wrong model/agent selected: composer shows "${selectedLabel}" but `
-      + `"${expectedAgent}" is required. Select the ${expectedAgent} agent in the Creative Studio `
-      + `chat (it carries the OpenCode harness system prompt) and retry.${selectionFailure}`
-    );
-    // ponytail: 400 so the client treats this as non-retryable. Auto-switch already retries 12x
-    // internally and fresh mode resets the picker each attempt, so an outer retry never self-heals
-    // — it just backs off forever. Flip to a retryable class if the picker is later made transient.
-    error.statusCode = 400;
-    error.type = "o1_code_wrong_agent";
-    error.diagnostics = buildBridgeDiagnostics({
-      phase: "wrong-agent",
-      runId: capture.runId,
+  if (attachments.attached > 0 && !await waitForAttachmentReady(textarea, 15000)) {
+    throw imageAttachmentDesync(new Error("o1_code_image_attachment_desync"));
+  }
+  let capture;
+  let beforeAssistantMessage;
+  let beforeTokenPill;
+  let beforeSubmitDiagnostics;
+  const submitted = await submitPrompt(textarea, prompt, SETUP_TIMEOUT_MS, (currentTextarea) => {
+    if (currentTextarea !== textarea && attachments.attached > 0) throw imageAttachmentDesync(new Error("o1_code_image_attachment_desync"));
+    textarea = currentTextarea;
+    requireAgentSelected(expectedAgent);
+    if (!continueThread && !isTranscriptEmpty()) throw setupError("o1_code_fresh_chat_failed");
+    if (continueThread && isTranscriptEmpty()) throw setupError("o1_code_thread_desync");
+    beforeAssistantMessage = latestAssistantMessageSnapshot(textarea);
+    beforeTokenPill = scrapeTokenPill();
+    beforeSubmitDiagnostics = buildBridgeDiagnostics({
+      phase: "before-submit",
       textarea,
       prompt,
       ignoredAssistantErrorText,
-      expectedAgent,
-      selectedAgent: selectedLabel,
-      agentSelection
+      domMessage: beforeAssistantMessage
     });
-    throw error;
-  }
-  // Gate submission on an actual "upload ready" signal rather than a fixed sleep: submit as soon
-  // as the upload registers (thumbnail decoded / progress cleared), with a timeout fallback.
-  if (attachments.attached > 0) {
-    // ponytail: readiness ceiling is a DOM-poll heuristic. If the composer DOM stops exposing
-    // upload state (thumbnail decode / progress affordance), switch to the pageRecorder network
-    // signal — it already wraps fetch + XHR in the MAIN world and can observe the upload request.
-    await waitForAttachmentReady(textarea, 15000);
-  }
-  const beforeAssistantMessage = latestAssistantMessageSnapshot(textarea);
-  const beforeTokenPill = scrapeTokenPill();
-  const beforeSubmitDiagnostics = buildBridgeDiagnostics({
-    phase: "before-submit",
-    runId: capture.runId,
-    textarea,
-    prompt,
-    ignoredAssistantErrorText,
-    domMessage: beforeAssistantMessage
+    capture = beginNetworkCapture({ verboseRecorder, expectedPrompt: prompt, expectedEndpoint: job?.payload?.expectedEndpoint });
+    registerProgressRun(capture.runId, jobId);
   });
-  const submitted = await submitPrompt(textarea, prompt, SETUP_TIMEOUT_MS);
   const afterSubmitDiagnostics = buildBridgeDiagnostics({
     phase: "after-submit",
     runId: capture.runId,
@@ -293,22 +247,6 @@ async function runJobWithProgress(job, jobId) {
     ignoredAssistantErrorText,
     beforeAssistantMessage
   });
-
-  if (!networkResponse && textareaStillContainsPrompt(textarea, prompt)) {
-    submitWithEnter(textarea);
-    submitted.retry = {
-      reason: "no-network-request-and-prompt-still-in-composer",
-      method: "enter"
-    };
-    networkResponse = await waitForNetworkResponse({
-      runId: capture.runId,
-      timeoutMs: jobTimeoutMs,
-      textarea,
-      prompt,
-      ignoredAssistantErrorText,
-      beforeAssistantMessage
-    });
-  }
 
   // safe-inert: until the retry loop lands, treat a fatal-UI-error signal as "no response"
   // so it follows the existing loud-fail path (502 + toast text via networkCaptureError)
@@ -488,6 +426,8 @@ function updateRecorderStatus(data) {
     return;
   }
 
+  if (!data.runId || data.runId !== activeCaptureRunId) return;
+
   if (data.status === "reset" && data.runId) {
     recorderStatus.ready = true;
     rememberRecorderRun(data.runId);
@@ -534,43 +474,65 @@ function rememberRecorderRun(runId) {
   }
 }
 
-function beginNetworkCapture({ verboseRecorder = false } = {}) {
+function disarmNetworkCapture() {
+  activeCaptureRunId = null;
+  networkRecords.clear();
+  window.__o1CodeRecorderControl?.({ runId: null });
+}
+
+function beginNetworkCapture({ verboseRecorder = false, expectedPrompt, expectedEndpoint } = {}) {
+  if (typeof window.__o1CodeRecorderControl !== "function") throw setupError("o1_code_recorder_not_armed");
   const runId = crypto.randomUUID();
-
-  for (const [id, record] of networkRecords.entries()) {
-    if (record?.done || record?.runId !== runId) {
-      networkRecords.delete(id);
-    }
+  networkRecords.clear();
+  try {
+    window.__o1CodeRecorderControl({ runId, verboseRecorder, expectedPrompt, expectedEndpoint, requireIdle: true });
+  } catch {
+    throw setupError("o1_code_greeting_not_settled");
   }
-
-  window.postMessage({
-    source: CONTENT_SOURCE,
-    type: "O1_CODE_BRIDGE_RECORDER_RESET",
-    runId,
-    verboseRecorder
-  }, "*");
-
+  activeCaptureRunId = runId;
+  updateRecorderStatus({ status: "reset", runId });
   return { runId };
 }
 
-async function waitForRecorderReset(runId, timeoutMs) {
-  const startedAt = Date.now();
+function setupError(type) {
+  const error = new Error(type);
+  error.type = type;
+  error.statusCode = type === "o1_code_wrong_agent" ? 400 : 502;
+  return error;
+}
 
-  while (Date.now() - startedAt < timeoutMs) {
-    if (recorderStatus.resets.has(runId)) {
-      return;
-    }
-
-    await wait(50);
+function requireAgentSelected(expectedAgent) {
+  const buttons = Array.from(document.querySelectorAll("[data-testid='chat-model-button']"));
+  if (!isAgentChatFrame() || buttons.length !== 1 || !isVisible(buttons[0])
+      || buttons[0].textContent?.trim() !== expectedAgent) {
+    throw setupError("o1_code_wrong_agent");
   }
+  return { ok: true, label: expectedAgent };
+}
 
-  // Pre-submit failure: the recorder never acked its reset, so no model request has been sent yet.
-  // Type it so the worker pool discards this (structurally dead) tab and the proxy replays once on a
-  // fresh worker — retrying is duplicate-safe because submitPrompt hasn't run. See worker-pool.run.
-  const error = new Error("Network recorder did not arm before prompt submission. Reload the extension and refresh the O1-Code assistant page.");
-  error.statusCode = 502;
-  error.type = "o1_code_recorder_not_armed";
-  throw error;
+async function waitForGreetingSettlement(textarea, { timeoutMs = 60000 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  let signature = null;
+  let stableSince = Date.now();
+  while (Date.now() < deadline) {
+    const state = window.__o1CodeRecorderState?.();
+    if (!state) throw setupError("o1_code_recorder_not_armed");
+    if (state.failure) throw setupError("o1_code_greeting_not_settled");
+    const root = transcriptRootFor();
+    const assistants = Array.from(root.querySelectorAll(".chat-message--assistant, [data-message-author-role='assistant']"));
+    const next = JSON.stringify([state.version, root.textContent || "", assistants.length]);
+    const busy = state.pending > 0 || !textarea || textarea.disabled || textarea.readOnly || textarea.isConnected === false
+      || !isChatReadyForNextMessage(textarea)
+      || Array.from(root.querySelectorAll("[aria-busy='true'], [role='progressbar']")).some(isVisible);
+    if (busy || signature !== next) stableSince = Date.now();
+    signature = next;
+    if (!busy && Date.now() - Math.max(stableSince, state.changedAt) >= 1000) {
+      return { settled: true, version: state.version };
+    }
+    await wait(100);
+    textarea = findVisibleTextarea();
+  }
+  throw setupError("o1_code_greeting_not_settled");
 }
 
 // Continue the pinned thread instead of starting a new one. The proxy only sends this mode when it
@@ -591,48 +553,42 @@ async function continueExistingChat() {
   return { ok: true, clicked: false, reason: "continue-thread" };
 }
 
-async function startFreshChat() {
-  const directControl = findNewChatControl();
-
-  if (directControl) {
-    directControl.click();
-    await wait(1500);
-    return { ok: true, clicked: true };
+async function startFreshChat({ timeoutMs = 60000, expectedAgent } = {}) {
+  if (!isAgentChatFrame()) throw setupError("o1_code_fresh_chat_failed");
+  if (expectedAgent) requireAgentSelected(expectedAgent);
+  disarmNetworkCapture();
+  const textarea = findVisibleTextarea();
+  const controls = Array.from(document.querySelectorAll("[data-testid='chat-title-menu-trigger']")).filter(isVisible);
+  if (controls.length !== 1 || controls[0].disabled || controls[0].getAttribute("aria-disabled") === "true") {
+    throw setupError("o1_code_fresh_chat_failed");
   }
-
-  // Fresh mode replays the full conversation into a NEW chat. If we cannot start one, we
-  // must not submit that full history into a thread that already holds history — that would
-  // duplicate context. Tolerate a missing control only when the thread is already empty
-  // (e.g. the very first turn); otherwise fail loudly so the failure is visible rather than
-  // silently corrupting the conversation.
-  if (isTranscriptEmpty()) {
-    return { ok: true, clicked: false, reason: "already-empty" };
+  controls[0].click();
+  const deadline = Date.now() + timeoutMs;
+  let clicked = false;
+  while (Date.now() < deadline) {
+    if (expectedAgent) requireAgentSelected(expectedAgent);
+    if (!clicked) {
+      const items = Array.from(document.querySelectorAll("[data-testid='chat-menu-item-new-chat']")).filter(isVisible);
+      if (items.length > 1) throw setupError("o1_code_fresh_chat_failed");
+      if (items.length === 1 && !items[0].disabled && items[0].getAttribute("aria-disabled") !== "true") {
+        items[0].click();
+        clicked = true;
+      }
+    }
+    const next = findVisibleTextarea();
+    const menuClosed = !Array.from(document.querySelectorAll("[data-testid='chat-menu-item-new-chat']")).some(isVisible);
+    if (clicked && menuClosed && next && next.isConnected && isTranscriptEmpty()) {
+      // Reset is observed through closed controls, cleared history and settled network work.
+      // A framework may keep the same connected composer while replacing the conversation.
+      await waitForGreetingSettlement(next, { timeoutMs: Math.max(1, deadline - Date.now()) });
+      if (expectedAgent) requireAgentSelected(expectedAgent);
+      const settled = findVisibleTextarea();
+      const closed = !Array.from(document.querySelectorAll("[data-testid='chat-menu-item-new-chat']")).some(isVisible);
+      if (settled?.isConnected && closed && isTranscriptEmpty()) return { ok: true, clicked: true };
+    }
+    await wait(100);
   }
-
-  // WPP moved New chat out of this cross-origin assistant iframe and into the parent Ogilvy shell.
-  // Ask Electron's main process to operate on the top frame; no selector in this document can see
-  // that menu. Keep the direct-control path above for old/standalone assistant layouts.
-  let shellResult = null;
-  try {
-    shellResult = await requestMainAction("startFreshChat", {}, 5000);
-  } catch (error) {
-    throw new Error(`Unable to start a fresh chat through the WPP shell: ${error.message}`, { cause: error });
-  }
-
-  if (shellResult?.ok && shellResult.clicked) {
-    await wait(1500);
-    return shellResult;
-  }
-
-  throw new Error(
-    "The WPP shell did not expose its New chat action and the existing thread is not empty. "
-    + `Shell result: ${JSON.stringify(shellResult)}`
-  );
-}
-
-function findNewChatControl() {
-  return deepQueryAll("button, [role='button'], [role='menuitem'], a, li", document)
-    .find((el) => isVisible(el) && /new\s+(chat|conversation)/i.test(labelFor(el))) || null;
+  throw setupError("o1_code_fresh_chat_failed");
 }
 
 // Best-effort emptiness check. Scope to the transcript, NOT chatRootFor(textarea): in the WPP
@@ -643,6 +599,11 @@ function findNewChatControl() {
 // node is found is the conservative side for the "already-empty" tolerance above.
 function isTranscriptEmpty() {
   const root = transcriptRootFor();
+  // The dedicated agent chat's automatic greeting is not prior prompt history. A reloaded
+  // greeting-only page cannot accept a continuation delta even though it contains a bubble.
+  if (location.hostname === "open-web-agent-builder-cs.wpp.ai") {
+    return root.querySelectorAll(".chat-message--user, [data-message-author-role='user']").length === 0;
+  }
   const bubbles = Array.from(root.querySelectorAll(MESSAGE_BUBBLE_SELECTOR)).filter(isVisible);
 
   return bubbles.length === 0;
@@ -942,8 +903,7 @@ async function waitForTextarea(timeoutMs) {
   const startedAt = Date.now();
 
   while (Date.now() - startedAt < timeoutMs) {
-    const textarea = Array.from(document.querySelectorAll("textarea"))
-      .find((el) => !el.disabled && !el.readOnly && isVisible(el) && /send|message/i.test(labelFor(el)));
+    const textarea = findVisibleTextarea();
 
     if (textarea) {
       return textarea;
@@ -957,46 +917,33 @@ async function waitForTextarea(timeoutMs) {
 
 const STOP_BUTTON_LABEL = /\b(stop|cancel|abort|pause)\b/i;
 
-async function submitPrompt(textarea, prompt, timeoutMs = 120000) {
-  await waitForChatReady(textarea, submitWaitMs(timeoutMs));
-  assertChatIdleForSubmit(textarea);
-
-  textarea.focus();
-  setNativeValue(textarea, prompt);
-  textarea.dispatchEvent(new InputEvent("beforeinput", {
-    bubbles: true,
-    cancelable: true,
-    inputType: "insertText",
-    data: prompt
-  }));
-  textarea.dispatchEvent(new InputEvent("input", {
-    bubbles: true,
-    inputType: "insertText",
-    data: prompt
-  }));
-  textarea.dispatchEvent(new Event("change", { bubbles: true }));
-
-  const form = textarea.closest("form");
-  const sendButton = await waitForSendButton(textarea, 3000);
-
-  // ponytail: one local Stop button guard prevents duplicate bridge jobs from stomping an active turn.
-  assertChatIdleForSubmit(textarea);
-
-  if (sendButton) {
+async function submitPrompt(textarea, prompt, timeoutMs = 120000, beforeSubmit = () => {}) {
+  const deadline = Date.now() + timeoutMs;
+  for (let attempt = 0; attempt < 2 && Date.now() < deadline; attempt += 1) {
+    textarea = findVisibleTextarea();
+    if (!textarea || textarea.isConnected === false) throw setupError("o1_code_thread_desync");
+    await waitForChatReady(textarea, submitWaitMs(Math.max(1, deadline - Date.now())));
+    assertChatIdleForSubmit(textarea);
+    textarea.focus();
+    setNativeValue(textarea, prompt);
+    textarea.dispatchEvent(new InputEvent("beforeinput", { bubbles: true, cancelable: true, inputType: "insertText", data: prompt }));
+    textarea.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: prompt }));
+    textarea.dispatchEvent(new Event("change", { bubbles: true }));
+    await waitForGreetingSettlement(textarea, { timeoutMs: Math.max(1, deadline - Date.now()) });
+    if (textarea !== findVisibleTextarea() || textarea.isConnected === false) continue;
+    await waitForSendButton(textarea, Math.min(3000, Math.max(1, deadline - Date.now())));
+    if (textarea !== findVisibleTextarea() || textarea.isConnected === false) continue;
+    const recorder = window.__o1CodeRecorderState?.();
+    if (!recorder || recorder.pending > 0 || recorder.failure) throw setupError("o1_code_greeting_not_settled");
+    const sendButton = findSendButton(textarea);
+    if (!sendButton || textarea.value !== prompt || Date.now() >= deadline) throw setupError("o1_code_submission_unverified");
+    assertChatIdleForSubmit(textarea);
+    beforeSubmit(textarea);
+    const at = Date.now();
     sendButton.click();
-  } else if (form?.requestSubmit) {
-    form.requestSubmit();
-  } else {
-    submitWithEnter(textarea);
+    return { href: location.href, at, startedAtMs: at, kind: "textarea", source: "extension-content-script", valueLength: prompt.length, sendButtonFound: true };
   }
-
-  return {
-    href: location.href,
-    kind: "textarea",
-    source: "extension-content-script",
-    valueLength: textarea.value.length,
-    sendButtonFound: Boolean(sendButton)
-  };
+  throw setupError("o1_code_submission_unverified");
 }
 
 function submitWaitMs(timeoutMs) {
@@ -1033,15 +980,14 @@ async function waitForSendButton(textarea, timeoutMs) {
 function findSendAffordance(textarea, { enabledOnly = true } = {}) {
   const root = chatRootFor(textarea);
   const buttons = Array.from(root.querySelectorAll("button, [role='button']"));
-  let candidates = buttons.filter((button) => isVisible(button) && !STOP_BUTTON_LABEL.test(labelFor(button)));
+  let candidates = buttons.filter((button) => button.isConnected !== false && isVisible(button) && !STOP_BUTTON_LABEL.test(labelFor(button)));
 
   if (enabledOnly) {
     candidates = candidates.filter((button) => !button.disabled && button.getAttribute("aria-disabled") !== "true");
   }
 
-  return candidates.find((button) => /send/i.test(labelFor(button)))
-    || candidates.find((button) => button.querySelector("svg, img") && !/add|settings|attach|microphone/i.test(labelFor(button)))
-    || null;
+  const sends = candidates.filter((button) => /\bsend\b/i.test(labelFor(button)));
+  return sends.length === 1 ? sends[0] : null;
 }
 
 function findSendButton(textarea) {
@@ -2126,8 +2072,7 @@ function isChatReadyForNextMessage(textarea) {
 }
 
 function inspectChatState() {
-  const textarea = Array.from(document.querySelectorAll("textarea"))
-    .find((el) => isVisible(el));
+  const textarea = findVisibleTextarea();
 
   if (!textarea) {
     return {
@@ -2937,8 +2882,10 @@ function buildBridgeDiagnostics({
 }
 
 function findVisibleTextarea() {
-  return Array.from(document.querySelectorAll("textarea"))
-    .find((el) => isVisible(el)) || null;
+  const selector = isAgentChatFrame() ? "textarea[data-testid='chat-input']" : "textarea";
+  const inputs = Array.from(document.querySelectorAll(selector))
+    .filter((el) => isVisible(el) && !el.disabled && !el.readOnly);
+  return inputs.length === 1 ? inputs[0] : null;
 }
 
 function summarizeTextarea(textarea) {
@@ -2962,35 +2909,6 @@ function hasIncompleteNetworkRecord(runId = null) {
   return Array.from(networkRecords.values()).some((record) =>
     (!runId || record.runId === runId) && !record.done && !record.error
   );
-}
-
-async function dismissAssistantUiErrors() {
-  const error = findAssistantUiError();
-
-  if (!error) {
-    return false;
-  }
-
-  const controls = Array.from(document.querySelectorAll("button, [role='button']"))
-    .filter(isVisible)
-    .filter((control) => {
-      const label = labelFor(control);
-      const rect = control.getBoundingClientRect();
-
-      return /close|dismiss|cancel|×|x/i.test(label)
-        || (rect.width <= 48 && rect.height <= 48);
-    });
-
-  for (const control of controls.reverse()) {
-    control.click();
-    await wait(100);
-
-    if (!findAssistantUiError()) {
-      return true;
-    }
-  }
-
-  return false;
 }
 
 function findAssistantUiError(text = visiblePageText()) {
@@ -3106,6 +3024,10 @@ function wait(ms) {
 if (globalThis.__O1_CODE_BRIDGE_TEST_HOOKS__ && globalThis.process?.versions?.node) {
   globalThis.__o1CodeBridgeContentTest = {
     startFreshChat,
+    requireAgentSelected,
+    beginNetworkCapture,
+    continueExistingChat,
+    waitForGreetingSettlement,
     recordCanCompleteOnIdle,
     recordLooksLikeIncompleteToolCall,
     shouldReturnCapturedRecord,

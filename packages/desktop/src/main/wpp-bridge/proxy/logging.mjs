@@ -66,6 +66,7 @@ const PAYLOAD_FIELDS = new Set([
   "text",
   "rawText",
   "value",
+  "valuePreview",
   "thinkingText",
   "ignoredAssistantErrorText",
 ])

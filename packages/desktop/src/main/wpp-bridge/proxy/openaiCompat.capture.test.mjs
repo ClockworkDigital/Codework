@@ -1,4 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { MODEL_PROFILES } from "./modelProfiles.mjs";
 
 // openaiCompat -> extensionBridge -> worker-pool -> session.ts imports electron; the shared stub in
 // packages/desktop/test/preload.ts supplies it before any test file links.
@@ -12,10 +16,63 @@ const {
 const { commitThread, resetThread, threadContextUsage } = await import("./sessionThreads.mjs");
 const { estimateTokens } = await import("./tokenEstimate.mjs");
 
-const KEY = "sess-A::CM_Opus5.5-XHigh";
+const IDENTITY = { "x-opencode-client": "cli", "x-opencode-runtime-id": "runtime-A" };
+const KEY = JSON.stringify(["cli", "runtime-A", "sess-A", "CM_Opus5.5-XHigh"]);
 
 afterEach(() => {
   resetThread(KEY);
+});
+
+describe("WPP conversation ownership", () => {
+  test("a late response cannot recreate a retired tab's mirror", async () => {
+    let alive = true;
+    commitThread(KEY, body(user("hello")), assistant("previous"));
+    const bridge = {
+      hasSession: () => alive,
+      run: async () => {
+        alive = false;
+        resetThread(KEY);
+        return bridgeRun("done");
+      },
+    };
+    await withNoRunLogs(() => handleChatCompletions(
+      { headers: { ...IDENTITY, "x-session-affinity": "sess-A" } },
+      fakeResponse(), body(user("hello"), assistant("previous"), user("more")), { bridge },
+    ));
+    expect(threadContextUsage(KEY)).toBeUndefined();
+  });
+  test("keeps GUI and separate CLI runtimes out of an existing conversation", async () => {
+    commitThread(KEY, body(user("hello")), assistant("previous"));
+    const calls = [];
+    const bridge = {
+      hasSession: (key) => key === KEY,
+      run: async (_prompt, options) => {
+        calls.push(options);
+        return bridgeRun("done");
+      },
+    };
+    const identities = [
+      { ...IDENTITY, "x-opencode-client": "desktop" },
+      { ...IDENTITY, "x-opencode-runtime-id": "runtime-B" },
+      {},
+      { "x-opencode-client": "cli" },
+      { "x-opencode-runtime-id": "runtime-A" },
+      { ...IDENTITY, "x-opencode-runtime-id": " " },
+    ];
+    for (const identity of identities) {
+      await withNoRunLogs(() => handleChatCompletions(
+        { headers: { ...identity, "x-session-affinity": "sess-A" } },
+        fakeResponse(),
+        body(user("hello"), assistant("previous"), user("more")),
+        { bridge },
+      ));
+    }
+    expect(calls).toHaveLength(identities.length);
+    expect(calls.every((call) => !call.continueThread && call.sessionKey !== KEY)).toBe(true);
+    expect(calls[0].sessionKey).not.toBe(calls[1].sessionKey);
+    expect(calls.slice(2).every((call) => call.sessionKey === "")).toBe(true);
+    calls.forEach((call) => resetThread(call.sessionKey));
+  });
 });
 
 describe("Opus High routing compatibility", () => {
@@ -32,7 +89,7 @@ describe("Opus High routing compatibility", () => {
       };
       try {
         await withNoRunLogs(() => handleChatCompletions(
-          { headers: { "x-session-affinity": "sess-opus-high" } },
+          { headers: { ...IDENTITY, "x-session-affinity": "sess-opus-high" } },
           response,
           { ...body(user("hello")), model },
           { bridge },
@@ -41,19 +98,94 @@ describe("Opus High routing compatibility", () => {
         expect(response.statusCode).toBe(200);
         expect(calls).toHaveLength(1);
         expect(calls[0].options.model).toBe("CM_Opus5.5-High");
-        expect(calls[0].options.sessionKey).toBe("sess-opus-high::CM_Opus5.5-High");
+        expect(calls[0].options.sessionKey).toBe(JSON.stringify(["cli", "runtime-A", "sess-opus-high", "CM_Opus5.5-High"]));
         expect(calls[0].prompt.toolCallProtocol).toBe("CM_XML_TOOL_CALL_V1");
         expect(JSON.parse(response.body).model).toBe(model);
       } finally {
-        resetThread("sess-opus-high::CM_Opus5.5-High");
-        resetThread("sess-opus-high::CM_GPT-5.6-Sol_High");
+        resetThread(JSON.stringify(["cli", "runtime-A", "sess-opus-high", "CM_Opus5.5-High"]));
+        resetThread(JSON.stringify(["cli", "runtime-A", "sess-opus-high", "CM_GPT-5.6-Sol_High"]));
       }
     });
   }
 });
 
+describe("Family effort routing", () => {
+  for (const [model, profile] of Object.entries(MODEL_PROFILES).filter(([, profile]) => profile.reasoningEfforts)) {
+    test(`dispatches every ${model} effort to distinct agents and threads while retaining the family response ID`, async () => {
+      const calls = [];
+      const bridge = {
+        hasSession: () => false,
+        run: async (prompt, options) => {
+          calls.push({ prompt: JSON.parse(prompt), options });
+          return bridgeRun("Resolved.");
+        },
+      };
+      try {
+        for (const reasoning_effort of [undefined, ...Object.keys(profile.reasoningEfforts)]) {
+          const response = fakeResponse();
+          await withNoRunLogs(() => handleChatCompletions(
+            { headers: {
+              "x-opencode-session-id": "family-routing",
+              "x-session-affinity": "family-routing",
+              "x-opencode-client": "desktop",
+              "x-opencode-runtime-id": "family-test",
+            } },
+            response,
+            {
+              model,
+              ...(reasoning_effort === undefined ? {} : { reasoning_effort }),
+              messages: [user("hello")],
+            },
+            { bridge },
+          ));
+          expect(response.statusCode).toBe(200);
+          expect(JSON.parse(response.body).model).toBe(model);
+        }
+        expect(calls.map((call) => call.options.model)).toEqual([
+          profile.reasoningEfforts.medium,
+          ...Object.values(profile.reasoningEfforts),
+        ]);
+        for (const call of calls) {
+          expect(call.options.sessionKey).toBe(
+            JSON.stringify(["desktop", "family-test", "family-routing", call.options.model]),
+          );
+          expect(call.prompt.toolCallProtocol).toBe("CM_XML_TOOL_CALL_V1");
+        }
+        expect(calls[0].options.sessionKey).toBe(
+          calls[1 + Object.keys(profile.reasoningEfforts).indexOf("medium")].options.sessionKey,
+        );
+        expect(new Set(calls.map((call) => call.options.sessionKey)).size).toBe(Object.keys(profile.reasoningEfforts).length);
+      } finally {
+        for (const call of calls) resetThread(call.options.sessionKey);
+      }
+    });
+
+    test(`rejects an unavailable ${model} effort before any WPP dispatch`, async () => {
+      let calls = 0;
+      await expect(handleChatCompletions(
+        { headers: {} },
+        fakeResponse(),
+        { model, reasoning_effort: "unsupported", messages: [user("hello")] },
+        { bridge: { run: async () => { calls += 1; return bridgeRun("wrong route"); } } },
+      )).rejects.toMatchObject({ statusCode: 400, type: "invalid_reasoning_effort" });
+      expect(calls).toBe(0);
+    });
+  }
+});
+
 describe("handleChatCompletions capture retry", () => {
-  test("retries a capture failure once as a fresh replay", async () => {
+  test("does not replay a possibly submitted request after a capture failure", async () => {
+    const response = fakeResponse();
+    let calls = 0;
+    const bridge = {
+      hasSession: () => false,
+      run: async () => { calls += 1; throw captureError("recorder_parser_miss"); },
+    };
+    await withNoRunLogs(() => handleChatCompletions({ headers: {} }, response, body(user("hello")), { bridge }));
+    expect(calls).toBe(1);
+    expect(response.statusCode).toBe(502);
+  });
+  test("retries a verified pre-submit failure once as a fresh replay", async () => {
     commitThread(KEY, body(user("hello")), assistant("previous"));
     const calls = [];
     const response = fakeResponse();
@@ -61,19 +193,21 @@ describe("handleChatCompletions capture retry", () => {
       hasSession: () => true,
       run: async (_prompt, options) => {
         calls.push(options);
-        if (calls.length === 1) throw captureError("recorder_parser_miss");
+        if (calls.length === 1) throw typedError("o1_code_recorder_not_armed");
         return bridgeRun("done");
       },
     };
 
     await withNoRunLogs(() => handleChatCompletions(
-      { headers: { "x-session-affinity": "sess-A" } },
+      { headers: { ...IDENTITY, "x-session-affinity": "sess-A" } },
       response,
       body(user("hello"), assistant("previous"), user("more")),
       { bridge },
     ));
 
     expect(calls).toHaveLength(2);
+    expect(calls[0].runId).toBe(response.headers["x-o1-code-proxy-run-id"]);
+    expect(calls[1].runId).toBe(calls[0].runId);
     expect(calls[0].continueThread).toBe(true);
     expect(calls[1].continueThread).toBe(false);
     expect(response.statusCode).toBe(200);
@@ -88,7 +222,7 @@ describe("handleChatCompletions capture retry", () => {
       hasSession: () => false,
       run: async (_prompt, options) => {
         calls.push(options);
-        if (calls.length === 1) throw captureError("recorder_parser_miss");
+        if (calls.length === 1) throw typedError("o1_code_recorder_not_armed");
         if (calls.length === 2) return bridgeRun("The workspace looks fine.");
         return bridgeRun(
           '<function_calls><invoke id="call-1" name="bash"><parameter name="command">git status</parameter></invoke></function_calls>',
@@ -109,7 +243,7 @@ describe("handleChatCompletions capture retry", () => {
     expect(JSON.parse(response.body).choices[0].finish_reason).toBe("tool_calls");
   });
 
-  test("surfaces a typed capture failure after one failed retry", async () => {
+  test("surfaces a typed capture failure without repeating an uncertain submission", async () => {
     commitThread(KEY, body(user("hello")), assistant("previous"));
     const response = fakeResponse();
     const bridge = {
@@ -120,7 +254,7 @@ describe("handleChatCompletions capture retry", () => {
     };
 
     await withNoRunLogs(() => handleChatCompletions(
-      { headers: { "x-session-affinity": "sess-A" } },
+      { headers: { ...IDENTITY, "x-session-affinity": "sess-A" } },
       response,
       body(user("hello"), assistant("previous"), user("more")),
       { bridge },
@@ -130,7 +264,7 @@ describe("handleChatCompletions capture retry", () => {
     expect(JSON.parse(response.body).error).toMatchObject({
       type: "o1_code_capture_failure",
       kind: "submit_or_ui_failure",
-      retryCount: 1,
+      retryCount: 0,
     });
   });
 
@@ -153,7 +287,7 @@ describe("handleChatCompletions capture retry", () => {
     };
 
     await withNoRunLogs(() => handleChatCompletions(
-      { headers: { "x-session-affinity": "sess-A" } },
+      { headers: { ...IDENTITY, "x-session-affinity": "sess-A" } },
       response,
       body(user("hello"), assistant("previous"), user("more")),
       { bridge },
@@ -163,7 +297,7 @@ describe("handleChatCompletions capture retry", () => {
     expect(response.statusCode).toBe(401);
     expect(JSON.parse(response.body).error).toMatchObject({
       type: "wpp_auth_required",
-      retryCount: 1,
+      retryCount: 0,
     });
   });
 
@@ -184,7 +318,7 @@ describe("handleChatCompletions capture retry", () => {
     };
 
     await withNoRunLogs(() => handleChatCompletions(
-      { headers: { "x-session-affinity": "sess-A" } },
+      { headers: { ...IDENTITY, "x-session-affinity": "sess-A" } },
       response,
       body(user("hello"), assistant("previous"), user("more")),
       { bridge },
@@ -232,7 +366,7 @@ describe("handleChatCompletions capture retry", () => {
   // Pre-submit worker failures (recorder never armed; pinned thread lost) are duplicate-safe to
   // replay because no model request was sent — the worker pool discards the dead tab and throws,
   // and the proxy replays once on a fresh worker exactly like a capture failure.
-  for (const type of ["o1_code_recorder_not_armed", "o1_code_thread_desync", "o1_code_image_attachment_desync"]) {
+  for (const type of ["o1_code_agent_chat_timeout", "o1_code_greeting_not_settled", "o1_code_fresh_chat_failed", "o1_code_recorder_not_armed", "o1_code_thread_desync", "o1_code_image_attachment_desync"]) {
     test(`retries a ${type} failure once as a fresh replay`, async () => {
       commitThread(KEY, body(user("hello")), assistant("previous"));
       const calls = [];
@@ -247,7 +381,7 @@ describe("handleChatCompletions capture retry", () => {
       };
 
       await withNoRunLogs(() => handleChatCompletions(
-        { headers: { "x-session-affinity": "sess-A" } },
+        { headers: { ...IDENTITY, "x-session-affinity": "sess-A" } },
         response,
         body(user("hello"), assistant("previous"), user("more")),
         { bridge },
@@ -261,16 +395,80 @@ describe("handleChatCompletions capture retry", () => {
   }
 });
 
+describe("persisted agent-chat timeout diagnostics", () => {
+  for (const stream of [false, true]) {
+    for (const scenario of [
+      {
+        name: "valid startup evidence",
+        type: "o1_code_agent_chat_timeout",
+        diagnostics: { phase: "chat-navigation", chatClicks: 1 },
+        expected: { phase: "chat-navigation", chatClicks: 1 },
+      },
+      {
+        name: "invalid diagnostic values",
+        type: "o1_code_agent_chat_timeout",
+        diagnostics: { phase: "https://private-diagnostic.test/?token=private-diagnostic", chatClicks: 1.5 },
+        expected: {},
+      },
+      {
+        name: "an unrelated failure",
+        type: "o1_code_wrong_agent",
+        diagnostics: { phase: "chat-navigation", chatClicks: 1 },
+        expected: undefined,
+      },
+    ]) {
+      test(`${stream ? "streaming" : "nonstreaming"} log allowlists ${scenario.name}`, async () => {
+        const directory = await mkdtemp(join(tmpdir(), "wpp-chat-timeout-log-"));
+        const previous = Object.fromEntries(
+          ["O1_CODE_PROXY_LOGS", "O1_CODE_PROXY_LOG_DIR", "O1_CODE_PROXY_LOG_PAYLOADS"].map((key) => [key, process.env[key]]),
+        );
+        process.env.O1_CODE_PROXY_LOGS = "1";
+        process.env.O1_CODE_PROXY_LOG_DIR = directory;
+        process.env.O1_CODE_PROXY_LOG_PAYLOADS = "0";
+        try {
+          const response = fakeResponse();
+          const bridge = {
+            hasSession: () => false,
+            run: async () => {
+              const error = typedError(scenario.type);
+              error.diagnostics = {
+                ...scenario.diagnostics,
+                tabUrl: "https://private-diagnostic.test/?token=private-diagnostic",
+                rawText: "private-diagnostic payload",
+                nested: { data: "private-diagnostic payload" },
+              };
+              throw error;
+            },
+          };
+          await handleChatCompletions({ headers: {} }, response, { ...body(user("hello")), stream }, { bridge });
+          const files = await readdir(directory);
+          expect(files).toHaveLength(1);
+          const log = await Bun.file(join(directory, files[0])).json();
+          expect(log.error.type).toBe(scenario.type);
+          expect(log.error.diagnostics).toEqual(scenario.expected);
+          expect(JSON.stringify(log)).not.toContain("private-diagnostic");
+          if (!stream) expect(response.headers["x-o1-code-proxy-log"]).toBe(join(directory, files[0]));
+        } finally {
+          for (const [key, value] of Object.entries(previous)) {
+            if (value === undefined) delete process.env[key];
+            else process.env[key] = value;
+          }
+          await rm(directory, { recursive: true, force: true });
+        }
+      });
+    }
+  }
+});
+
 describe("shouldRetryFreshReplay", () => {
   const opts = { streamSession: null, isCompaction: false };
 
   test("retries every fresh-replay-healable failure type", () => {
     for (const type of [
-      "o1_code_capture_failure",
+      "o1_code_agent_chat_timeout", "o1_code_greeting_not_settled", "o1_code_fresh_chat_failed",
       "o1_code_recorder_not_armed",
       "o1_code_thread_desync",
       "o1_code_image_attachment_desync",
-      "o1_code_incomplete_tool_call",
     ]) {
       expect(shouldRetryFreshReplay({ type }, opts)).toBe(true);
     }
@@ -292,7 +490,7 @@ describe("shouldRetryFreshReplay", () => {
 
   test("retries an empty failed attempt even when an earlier attempt streamed prose", () => {
     const streamSession = { hasStreamed: () => true };
-    const error = { type: "o1_code_capture_failure", attemptStreamed: false };
+    const error = { type: "o1_code_recorder_not_armed", attemptStreamed: false };
     expect(shouldRetryFreshReplay(error, { streamSession, isCompaction: false })).toBe(true);
   });
 });
@@ -492,7 +690,7 @@ describe("incomplete task recovery", () => {
     expect(shouldRecoverIncompleteTask(toolBody(user("Prepare the handoff.")), response)).toBe(false);
   });
 
-  test("fresh-replays an incomplete XML call instead of returning it as prose", async () => {
+  test("surfaces an incomplete XML call without repeating the submitted prompt", async () => {
     const response = fakeResponse();
     let calls = 0;
     const bridge = {
@@ -515,8 +713,8 @@ describe("incomplete task recovery", () => {
       { bridge },
     ));
 
-    expect(calls).toBe(2);
-    expect(JSON.parse(response.body).choices[0].finish_reason).toBe("tool_calls");
+    expect(calls).toBe(1);
+    expect(JSON.parse(response.body).error.type).toBe("o1_code_incomplete_tool_call");
   });
 
   test("does not reopen handoff language or optional follow-up", () => {
@@ -546,7 +744,7 @@ describe("incomplete task recovery", () => {
     };
 
     await withNoRunLogs(() => handleChatCompletions(
-      { headers: { "x-session-affinity": "sess-A" } },
+      { headers: { ...IDENTITY, "x-session-affinity": "sess-A" } },
       response,
       toolBody(user("hello"), assistant("previous"), user("Inspect the workspace.")),
       { bridge },
@@ -614,7 +812,7 @@ describe("handleChatCompletions token usage", () => {
 
     await withNoRunLogs(() =>
       handleChatCompletions(
-        { headers: { "x-session-affinity": "sess-A" } },
+        { headers: { ...IDENTITY, "x-session-affinity": "sess-A" } },
         response,
         body(user("hello"), assistant("previous"), user("more")),
         { bridge },
@@ -639,7 +837,7 @@ describe("handleChatCompletions token usage", () => {
 
     await withNoRunLogs(() =>
       handleChatCompletions(
-        { headers: { "x-session-affinity": "sess-A" } },
+        { headers: { ...IDENTITY, "x-session-affinity": "sess-A" } },
         response,
         body(user("hello"), assistant("previous"), user("more")),
         { bridge },
@@ -732,14 +930,14 @@ describe("handleChatCompletions token usage", () => {
     }
     const firstResponse = fakeResponse()
     await withNoRunLogs(() =>
-      handleChatCompletions({ headers: { "x-session-affinity": "sess-A" } }, firstResponse, body(user("hello")), {
+      handleChatCompletions({ headers: { ...IDENTITY, "x-session-affinity": "sess-A" } }, firstResponse, body(user("hello")), {
         bridge,
       }),
     )
     const secondResponse = fakeResponse()
     await withNoRunLogs(() =>
       handleChatCompletions(
-        { headers: { "x-session-affinity": "sess-A" } },
+        { headers: { ...IDENTITY, "x-session-affinity": "sess-A" } },
         secondResponse,
         body(user("hello"), assistant("first"), user("more")),
         { bridge },
@@ -761,14 +959,14 @@ describe("handleChatCompletions token usage", () => {
       hasSession: () => true,
       run: async () => {
         calls++
-        if (calls === 1) throw captureError("recorder_parser_miss")
+        if (calls === 1) throw typedError("o1_code_recorder_not_armed")
         return bridgeRun("done")
       },
     }
 
     await withNoRunLogs(() =>
       handleChatCompletions(
-        { headers: { "x-session-affinity": "sess-A" } },
+        { headers: { ...IDENTITY, "x-session-affinity": "sess-A" } },
         response,
         body(user("hello"), assistant("previous"), user("more")),
         { bridge },
@@ -798,10 +996,11 @@ describe("handleChatCompletions token usage", () => {
           stream_options: { include_usage: true },
         }
         const bridge = {
-          hasSession: () => mode !== "fresh",
+          // A fresh turn spawns the session's pinned tab, so it is live once a run has started.
+          hasSession: () => mode !== "fresh" || calls.length > 0,
           run: async (prompt, options) => {
             calls.push({ prompt, continued: options.continueThread })
-            if (replay && calls.length === 1) throw captureError("recorder_parser_miss")
+            if (replay && calls.length === 1) throw typedError("o1_code_recorder_not_armed")
             if (JSON.parse(prompt).resumeIncomplete) return bridgeRun(`${final}\nCM_TASK_COMPLETE_V1`)
             return bridgeRun(incomplete, mode === "measured-replay" ? {
               usage: { scope: "context", source: "dom-pill", fidelity: "confirmed", totalTokens: 4000 },
@@ -810,7 +1009,7 @@ describe("handleChatCompletions token usage", () => {
         }
 
         await withNoRunLogs(() => handleChatCompletions(
-          { headers: { "x-session-affinity": "sess-A" } },
+          { headers: { ...IDENTITY, "x-session-affinity": "sess-A" } },
           response,
           requestBody,
           { bridge },
@@ -853,7 +1052,7 @@ describe("handleChatCompletions token usage", () => {
     }
 
     await withNoRunLogs(() => handleChatCompletions(
-      { headers: { "x-session-affinity": "sess-A" } },
+      { headers: { ...IDENTITY, "x-session-affinity": "sess-A" } },
       response,
       toolBody(user("hello"), assistant("previous"), user("Summarize the result.")),
       { bridge },
@@ -877,7 +1076,7 @@ describe("handleChatCompletions token usage", () => {
 
     await withNoRunLogs(() =>
       handleChatCompletions(
-        { headers: { "x-session-affinity": "sess-A" } },
+        { headers: { ...IDENTITY, "x-session-affinity": "sess-A" } },
         response,
         body(user("hello"), assistant("previous"), user("more")),
         { bridge },
@@ -950,7 +1149,7 @@ describe("handleChatCompletions session serialization", () => {
     process.env.O1_CODE_PROXY_LOGS = "0";
 
     const first = handleChatCompletions(
-      { headers: { "x-session-affinity": "sess-A" } },
+      { headers: { ...IDENTITY, "x-session-affinity": "sess-A" } },
       firstResponse,
       body(user("hello")),
       { bridge },
@@ -958,7 +1157,7 @@ describe("handleChatCompletions session serialization", () => {
     await firstStarted;
 
     const second = handleChatCompletions(
-      { headers: { "x-session-affinity": "sess-A" } },
+      { headers: { ...IDENTITY, "x-session-affinity": "sess-A" } },
       secondResponse,
       body(user("hello"), assistant("first answer"), user("more")),
       { bridge },

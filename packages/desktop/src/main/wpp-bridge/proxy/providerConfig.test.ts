@@ -2,7 +2,7 @@ import { expect, test } from "bun:test"
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { MODEL_IDS, RENAMED_MODEL_IDS } from "./modelProfiles.mjs"
+import { MODEL_IDS, MODEL_PROFILES, RENAMED_MODEL_IDS, resolveRequestModelProfile } from "./modelProfiles.mjs"
 import {
   COOKIE_MONSTER_PROVIDER,
   ensureO1CodeProvider,
@@ -49,6 +49,152 @@ test("creates opencode.json with the exact CookieMonster project roster", async 
   expect(config.lsp).toBe(true)
   await rm(dir, { recursive: true, force: true })
 })
+
+test("advertises only the Sol 6.1 family with explicit native variants and a medium default", () => {
+  const models = JSON.parse(o1CodeConfigContent()).provider.cookiemonster.models
+  const family = models["CM_GPT6.1_Sol"]
+  expect(Object.keys(models).filter((id) => id.startsWith("CM_GPT6.1"))).toEqual(["CM_GPT6.1_Sol"])
+  expect(family.name).toBe("CM_GPT6.1_Sol")
+  expect(family.options).toEqual({ reasoningEffort: "medium" })
+  expect(family.variants).toEqual({
+    low: { reasoningEffort: "low" },
+    medium: { reasoningEffort: "medium" },
+    high: { reasoningEffort: "high" },
+    xhigh: { reasoningEffort: "xhigh" },
+    max: { reasoningEffort: "max" },
+  })
+  expect(Object.keys(family.variants)).toEqual(["low", "medium", "high", "xhigh", "max"])
+  expect(family.reasoning).toBeUndefined()
+  expect(
+    resolveRequestModelProfile({ model: family.name, reasoning_effort: family.options.reasoningEffort }),
+  ).toMatchObject({
+    agentName: "CM_GPT6.1_Sol_Medium",
+  })
+  for (const [effort, agentName] of [
+    ["low", "CM_GPT6.1_Sol_Low"],
+    ["medium", "CM_GPT6.1_Sol_Medium"],
+    ["high", "CM_GPT6.1_Sol_High"],
+    ["xhigh", "CM_GPT6.1_Sol_XHigh"],
+    ["max", "CM_GPT6.1_Sol_Max"],
+  ]) {
+    expect(
+      resolveRequestModelProfile({ model: family.name, reasoning_effort: family.variants[effort].reasoningEffort }),
+    ).toMatchObject({ agentName })
+  }
+  for (const id of MODEL_IDS.filter((id) => !Object.hasOwn(MODEL_PROFILES[id], "reasoningEfforts"))) {
+    expect(models[id].variants).toBeUndefined()
+    expect(models[id].options).toBeUndefined()
+    expect(models[id].reasoning).toBeUndefined()
+  }
+})
+
+test("seeds every family selector while retaining saved fixed-effort selections", async () => {
+  const { dir, file } = await tmpFile()
+  try {
+    const models = Object.fromEntries(
+      Object.entries(COOKIE_MONSTER_PROVIDER.models).filter(
+        ([id]) => !Object.hasOwn(MODEL_PROFILES[id], "reasoningEfforts"),
+      ),
+    )
+    const user = {
+      model: "cookiemonster/CM_GPT-5.6-Sol_High",
+      small_model: "cookiemonster/CM_Gemini-3.7-Flash_Low",
+      agent: { review: { model: "cookiemonster/CM_Opus5.5-Max" } },
+    }
+    await writeFile(
+      file,
+      JSON.stringify({ ...user, provider: { cookiemonster: { ...COOKIE_MONSTER_PROVIDER, models } } }),
+    )
+    await ensureO1CodeProvider(file)
+    const first = await readFile(file, "utf8")
+    const config = JSON.parse(first)
+    expect(config).toMatchObject(user)
+    expect(config.provider.cookiemonster.models).toEqual(COOKIE_MONSTER_PROVIDER.models)
+    const injected = JSON.parse(o1CodeConfigContent()).provider.cookiemonster.models
+    for (const id of MODEL_IDS.filter((id) => Object.hasOwn(MODEL_PROFILES[id], "reasoningEfforts"))) {
+      const profile = MODEL_PROFILES[id]
+      const family = injected[id]
+      expect(family.options).toEqual({ reasoningEffort: profile.defaultReasoningEffort })
+      expect(Object.keys(family.variants)).toEqual(Object.keys(profile.reasoningEfforts))
+      expect(family.reasoning).toBeUndefined()
+      for (const [effort, agentName] of Object.entries(profile.reasoningEfforts)) {
+        expect(
+          resolveRequestModelProfile({ model: id, reasoning_effort: family.variants[effort].reasoningEffort }),
+        ).toEqual({
+          ...profile,
+          agentName,
+        })
+      }
+    }
+    await ensureO1CodeProvider(file)
+    expect(await readFile(file, "utf8")).toBe(first)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+for (const hasFamily of [false, true]) {
+  test(`seeds Sol 6.1 additively with existing family=${hasFamily}`, async () => {
+    const { dir, file } = await tmpFile()
+    try {
+      const custom = {
+        ...COOKIE_MONSTER_PROVIDER.models["CM_GPT6.1_Sol"],
+        name: "My Sol",
+        options: { reasoningEffort: "high", temperature: 0.2 },
+        variants: { medium: { disabled: true }, high: { reasoningEffort: "high", temperature: 0.4 } },
+        limit: { context: 100000, output: 16000 },
+        cost: { input: 9, output: 27, cache_read: 1, cache_write: 2 },
+      }
+      const legacy = {
+        ...COOKIE_MONSTER_PROVIDER.models["CM_GPT6_Sol_High"],
+        name: "My legacy Sol",
+        options: { temperature: 0.5 },
+      }
+      const user = {
+        model: "cookiemonster/CM_GPT6_Sol_High",
+        small_model: "other/small",
+        plugin: ["user-plugin"],
+        permission: { bash: "ask" },
+        lsp: false,
+      }
+      await writeFile(
+        file,
+        JSON.stringify({
+          ...user,
+          provider: {
+            cookiemonster: {
+              ...COOKIE_MONSTER_PROVIDER,
+              models: {
+                ...Object.fromEntries(
+                  Object.entries(COOKIE_MONSTER_PROVIDER.models).filter(([id]) => id !== "CM_GPT6.1_Sol"),
+                ),
+                CM_GPT6_Sol_High: legacy,
+                ...(hasFamily ? { "CM_GPT6.1_Sol": custom } : {}),
+              },
+            },
+            other: { name: "Other" },
+          },
+        }),
+      )
+      await ensureO1CodeProvider(file)
+      const first = await readFile(file, "utf8")
+      const config = JSON.parse(first)
+      const models = config.provider.cookiemonster.models
+      expect(Object.keys(models).sort()).toEqual([...MODEL_IDS].sort())
+      expect(models["CM_GPT6.1_Sol"]).toEqual(hasFamily ? custom : COOKIE_MONSTER_PROVIDER.models["CM_GPT6.1_Sol"])
+      expect(models["CM_GPT6_Sol_High"]).toEqual(legacy)
+      for (const id of MODEL_IDS.filter((id) => id !== "CM_GPT6.1_Sol" && id !== "CM_GPT6_Sol_High")) {
+        expect(models[id]).toEqual(COOKIE_MONSTER_PROVIDER.models[id])
+      }
+      expect(config).toMatchObject(user)
+      expect(config.provider.other).toEqual({ name: "Other" })
+      await ensureO1CodeProvider(file)
+      expect(await readFile(file, "utf8")).toBe(first)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+}
 
 test("removes only the legacy seeded aliases while adding the project provider", async () => {
   const { dir, file } = await tmpFile()
@@ -412,7 +558,7 @@ test("injected config is self-contained for a clean bundled OpenCode install", (
   const models = config.provider.cookiemonster.models
 
   expect(config.provider).toEqual({ cookiemonster: COOKIE_MONSTER_PROVIDER })
-  expect(config.mcp).toEqual(O1_CODE_MCP)
+  expect(config.mcp).toEqual({ figma: O1_CODE_MCP.figma })
   expect(config.mcp.figma.oauth).toEqual({
     clientName: "Claude Code",
     scope: "mcp:connect",
@@ -424,9 +570,6 @@ test("injected config is self-contained for a clean bundled OpenCode install", (
     browser_read_state: "allow",
     browser_search_history: "allow",
     browser_open_history: "ask",
-    browser_create_tab: "ask",
-    browser_select_tab: "ask",
-    browser_close_tab: "ask",
     browser_navigate: "allow",
     browser_click: "allow",
     browser_hover: "allow",
@@ -452,5 +595,49 @@ test("injected config is self-contained for a clean bundled OpenCode install", (
   expect(models["CM_Opus 5 - High"]).toBeUndefined()
   for (const agentName of MODEL_IDS) {
     expect(models[agentName]).toEqual(COOKIE_MONSTER_PROVIDER.models[agentName])
+  }
+})
+
+test("Chrome debugging defaults off without overriding existing definitions", async () => {
+  expect(O1_CODE_MCP["chrome-devtools"].enabled).toBe(false)
+  expect(JSON.parse(o1CodeConfigContent(undefined, undefined, true)).mcp["chrome-devtools"].enabled).toBe(true)
+  for (const customized of [false, true]) {
+    const { dir, file } = await tmpFile()
+    try {
+      const chrome = {
+        ...O1_CODE_MCP["chrome-devtools"],
+        enabled: true,
+        ...(customized ? { environment: { DEBUG_BROWSER: "1" } } : {}),
+      }
+      await writeFile(file, JSON.stringify({ mcp: { "chrome-devtools": chrome } }))
+      await ensureO1CodeProvider(file)
+      expect(JSON.parse(await readFile(file, "utf8")).mcp["chrome-devtools"]).toEqual(chrome)
+      const seeded = await readFile(file, "utf8")
+      await ensureO1CodeProvider(file)
+      expect(await readFile(file, "utf8")).toBe(seeded)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  }
+})
+
+test("Chrome re-enablement survives later launches after fresh and existing config seeding", async () => {
+  for (const existing of [false, true]) {
+    const { dir, file } = await tmpFile()
+    try {
+      if (existing) await writeFile(file, JSON.stringify({}))
+      await ensureO1CodeProvider(file)
+      const config = JSON.parse(await readFile(file, "utf8"))
+      expect(config.mcp["chrome-devtools"].enabled).toBe(false)
+      config.mcp["chrome-devtools"].enabled = true
+      const enabled = JSON.stringify(config, null, 2) + "\n"
+      await writeFile(file, enabled)
+      await ensureO1CodeProvider(file)
+      expect(await readFile(file, "utf8")).toBe(enabled)
+      await ensureO1CodeProvider(file)
+      expect(await readFile(file, "utf8")).toBe(enabled)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
   }
 })

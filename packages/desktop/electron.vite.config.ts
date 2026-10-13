@@ -1,7 +1,10 @@
 import { sentryVitePlugin } from "@sentry/vite-plugin"
 import { defineConfig } from "electron-vite"
-import appPlugin from "@opencode-ai/app/vite"
 import * as fs from "node:fs/promises"
+import { fileURLToPath } from "node:url"
+
+// Keep the app's @ alias anchored to this checkout when dependencies are shared across worktrees.
+const { default: appPlugin } = await import(new URL("../app/vite.js", import.meta.url).href)
 
 const OPENCODE_SERVER_DIST = "../opencode/dist/node"
 
@@ -35,6 +38,7 @@ export default defineConfig({
   main: {
     define: {
       "import.meta.env.OPENCODE_CHANNEL": JSON.stringify(channel),
+      "import.meta.env.CM_BRAND": JSON.stringify(process.env.CM_BRAND === "1"),
     },
     build: {
       rollupOptions: {
@@ -92,6 +96,13 @@ const require = __cjs_mod__.createRequire(import.meta.url);
   },
   renderer: {
     plugins: [appPlugin, sentry],
+    // Package exports and the app's @ imports must share one set of context providers.
+    resolve: {
+      alias: [
+        { find: /^@opencode-ai\/app$/, replacement: fileURLToPath(new URL("../app/src/index.ts", import.meta.url)) },
+        { find: "@opencode-ai/app", replacement: fileURLToPath(new URL("../app/src", import.meta.url)) },
+      ],
+    },
     define: {
       "import.meta.env.VITE_CM_BRAND": JSON.stringify(Boolean(process.env.CM_BRAND)),
     },

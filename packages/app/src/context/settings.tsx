@@ -34,6 +34,7 @@ export interface Settings {
     editToolPartsExpanded: boolean
     showCustomAgents: boolean
     mobileTitlebarPosition: "top" | "bottom"
+    quietCompanion: boolean
     newLayoutDesigns?: boolean
     layoutTransitionEligible?: boolean
     agentVisibilityInitialized?: boolean
@@ -195,6 +196,7 @@ const defaultSettings: Settings = {
     editToolPartsExpanded: false,
     showCustomAgents: false,
     mobileTitlebarPosition: "top",
+    quietCompanion: true,
   },
   appearance: {
     fontSize: 14,
@@ -213,11 +215,11 @@ const defaultSettings: Settings = {
   },
   sounds: {
     agentEnabled: true,
-    agent: "staplebops-01",
+    agent: "yup-03",
     permissionsEnabled: true,
-    permissions: "staplebops-02",
+    permissions: "yup-05",
     errorsEnabled: true,
-    errors: "nope-03",
+    errors: "nope-08",
   },
 }
 
@@ -230,7 +232,10 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
   gate: false,
   init: () => {
     const platform = usePlatform()
-    const [store, setStore, settingsInit, ready] = persisted("settings.v3", createStore<Settings>(defaultSettings))
+    const [store, setStore, settingsInit, ready] = persisted(
+      "settings.v3",
+      createStore<Settings>(structuredClone(defaultSettings)),
+    )
     const [launch, setLaunch, , launchReady] = persisted(
       "app-version.v1",
       createStore<{ version?: string }>({ version: undefined }),
@@ -427,6 +432,10 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         ),
         setMobileTitlebarPosition(value: "top" | "bottom") {
           setStore("general", "mobileTitlebarPosition", value)
+        },
+        quietCompanion: withFallback(() => store.general?.quietCompanion, defaultSettings.general.quietCompanion),
+        setQuietCompanion(value: boolean) {
+          setStore("general", "quietCompanion", value)
         },
         newLayoutDesigns,
         setNewLayoutDesigns(value: boolean) {

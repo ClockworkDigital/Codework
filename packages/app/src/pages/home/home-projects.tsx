@@ -1,10 +1,20 @@
 import type { HomeProjectsController } from "./home-projects-controller"
-import { HomeProjectsView } from "./home-projects-view"
+import { HomeProjectsView, type HomeProjectsViewProps } from "./home-projects-view"
 import type { HomeScrollController } from "./home-scroll-controller"
 
-export function HomeProjects(props: { projects: HomeProjectsController; scroll: HomeScrollController }) {
+export function HomeProjects(props: {
+  projects: HomeProjectsController
+  scroll?: HomeScrollController
+  sidebar?: boolean
+  renderProjectSessions?: HomeProjectsViewProps["renderProjectSessions"]
+  onSelectProject?: HomeProjectsViewProps["onSelectProject"]
+  onActivateProject?: HomeProjectsViewProps["onActivateProject"]
+  onOpenProjectNewSession?: HomeProjectsViewProps["onOpenProjectNewSession"]
+}) {
   return (
     <HomeProjectsView
+      sidebar={props.sidebar}
+      renderProjectSessions={props.renderProjectSessions}
       language={props.projects.copy.language}
       servers={props.projects.server.list}
       projects={props.projects.project.list}
@@ -18,7 +28,7 @@ export function HomeProjects(props: { projects: HomeProjectsController; scroll: 
       defaultServerKey={props.projects.server.defaultKey}
       canRevealProject={props.projects.project.canReveal}
       unseenCount={props.projects.project.unseenCount}
-      onWheel={props.scroll.viewport.containWheel}
+      onWheel={(event) => props.scroll?.viewport.containWheel(event)}
       onChooseProject={props.projects.project.choose}
       onFocusServer={props.projects.server.focus}
       onToggleCollapsed={props.projects.server.toggleCollapsed}
@@ -26,9 +36,12 @@ export function HomeProjects(props: { projects: HomeProjectsController; scroll: 
       onSetDefaultServer={props.projects.server.setDefault}
       onRemoveServer={props.projects.server.remove}
       onMoveProject={props.projects.project.move}
-      onSelectProject={props.projects.project.select}
+      onPinProject={props.projects.project.pin}
+      onToggleProjectExpanded={props.projects.project.toggleExpanded}
+      onSelectProject={props.onSelectProject ?? props.projects.project.select}
+      onActivateProject={props.onActivateProject}
       onAddProjects={props.projects.project.add}
-      onOpenProjectNewSession={props.projects.project.openNewSession}
+      onOpenProjectNewSession={props.onOpenProjectNewSession ?? props.projects.project.openNewSession}
       onEditProject={props.projects.project.edit}
       onRevealProject={props.projects.project.reveal}
       onClearNotifications={props.projects.project.clearNotifications}

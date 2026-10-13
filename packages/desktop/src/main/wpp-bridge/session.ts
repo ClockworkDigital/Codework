@@ -7,6 +7,9 @@
 
 import { BrowserWindow, session, type Session } from "electron"
 import { WPP_COOKIE_MONSTER_PROJECT_URL } from "./proxy/wppProject.mjs"
+import { createWppAuthState, wppAuthProbeScript } from "./auth-state"
+import { classifyWppAuthState } from "./worker-startup"
+import { attachWppLoginControls } from "./login-controls"
 
 export const WPP_PARTITION = "persist:wpp"
 
@@ -21,6 +24,21 @@ export const WPP_ASSISTANT_ORIGINS = [
 
 const configuredSessions = new WeakSet<Session>()
 const recoveredWebContents = new Set<number>()
+export const wppAuth = createWppAuthState(async () => {
+  const contents = BrowserWindow.getAllWindows()
+    .map((win) => win.webContents)
+    .find(
+      (contents) =>
+        !contents.isDestroyed() &&
+        contents.session === wppSession() &&
+        contents.getURL().startsWith(`${WPP_WORKSPACE_ORIGIN}/`),
+    )
+  // ponytail: reuse live WPP windows; add a bounded probe window if startup status without one is required.
+  if (!contents) return "unknown"
+  if (classifyWppAuthState({ url: contents.getURL() })) return "signed-out"
+  const status: unknown = await contents.executeJavaScript(wppAuthProbeScript())
+  return status === "signed-in" || status === "signed-out" ? status : "unknown"
+})
 
 export function wppSession(): Session {
   const current = session.fromPartition(WPP_PARTITION)
@@ -28,6 +46,12 @@ export function wppSession(): Session {
   configuredSessions.add(current)
 
   current.webRequest.onResponseStarted((details) => {
+    const url = URL.parse(details.url)
+    if (url?.origin === WPP_WORKSPACE_ORIGIN && url.pathname === "/api/users/me") {
+      if (details.statusCode === 401 && details.webContents) wppAuth.observe("signed-out")
+      // Session.fetch has no page WebContents; don't recursively probe our own checks.
+      if (details.statusCode === 200 && !details.fromCache && details.webContents) void wppAuth.check()
+    }
     if (!isExpiredWppSession(details) || !details.webContents || recoveredWebContents.has(details.webContents.id)) {
       return
     }
@@ -43,6 +67,17 @@ export function wppSession(): Session {
       .catch((error) => console.error("cookiemonster: failed to reset expired WPP session", error))
   })
 
+  current.cookies.on("changed", (_event, cookie, cause, removed) => {
+    const domain = cookie.domain?.replace(/^\./, "") ?? ""
+    if (
+      !cookie.httpOnly ||
+      !(domain === "wpp.com" || domain.endsWith(".wpp.com") || domain === "wpp.ai" || domain.endsWith(".wpp.ai"))
+    )
+      return
+    if (removed && cause !== "overwrite") return wppAuth.invalidate()
+    if (!removed) wppAuth.refresh()
+  })
+
   return current
 }
 
@@ -55,8 +90,17 @@ export function createWorkerWindow({ show = false } = {}): BrowserWindow {
     show,
     width: 1440,
     height: 1000,
+    useContentSize: true,
+    // WPP blocks viewports below 1200 CSS px; leave room for native window borders.
+    minWidth: 1280,
+    enableLargerThanScreen: true,
     webPreferences: {
       session: current,
+      backgroundThrottling: false,
+      // Hidden native windows can lose their compositor frame clock despite disabling
+      // background throttling. Give worker renderers a synthetic clock without changing
+      // the app's display/GPU frame limits or briefly showing the worker window.
+      additionalArguments: show ? [] : ["--disable-frame-rate-limit"],
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
@@ -68,24 +112,35 @@ let loginWindow: BrowserWindow | null = null
 
 export function openWppLogin(url = WPP_COOKIE_MONSTER_PROJECT_URL) {
   if (loginWindow && !loginWindow.isDestroyed()) {
+    loginWindow.show()
     loginWindow.focus()
     return loginWindow
   }
   const win = createWorkerWindow({ show: true })
+  attachWppLoginControls(win)
   win.webContents.setWindowOpenHandler(() => ({
     action: "allow",
     overrideBrowserWindowOptions: { webPreferences: { partition: WPP_PARTITION } },
   }))
-  win.on("closed", () => { if (loginWindow === win) loginWindow = null })
+  win.on("show", () => wppAuth.setLoginVisible(true))
+  win.on("hide", () => wppAuth.setLoginVisible(false))
+  win.on("closed", () => {
+    if (loginWindow !== win) return
+    loginWindow = null
+    wppAuth.setLoginVisible(false)
+    void wppAuth.check()
+  })
+  win.webContents.on("did-finish-load", () => void wppAuth.check())
   void win.loadURL(url)
   loginWindow = win
+  wppAuth.setLoginVisible(true)
   return win
 }
 
-// View-menu toggle: close the login window if it's open, else open it.
+// Preserve an unfinished SSO flow when the login window is hidden.
 export function toggleWppLogin(url = WPP_COOKIE_MONSTER_PROJECT_URL) {
-  if (loginWindow && !loginWindow.isDestroyed()) {
-    loginWindow.close()
+  if (loginWindow && !loginWindow.isDestroyed() && loginWindow.isVisible()) {
+    loginWindow.hide()
     return
   }
   openWppLogin(url)

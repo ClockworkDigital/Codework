@@ -15,13 +15,13 @@ import { createResource } from "solid-js"
 import { createStore } from "solid-js/store"
 import type { HomeController } from "./home-controller"
 
-export function createHomeProjectsController(home: HomeController) {
+export function createHomeProjectsController(home: HomeController, options?: { openSettings?: () => void }) {
   const platform = usePlatform()
   const pickDirectory = useDirectoryPicker()
   const dialog = useDialog()
   const language = useLanguage()
   const notification = useNotification()
-  const openSettings = useSettingsCommand()
+  const openSettings = options?.openSettings ?? useSettingsCommand()
   const serverManagement = useServerManagementController({ navigateOnAdd: false })
   const [_state, setState, _, ready] = persisted(
     Persist.global("home.servers", ["home.servers.v1"]),
@@ -106,6 +106,14 @@ export function createHomeProjectsController(home: HomeController) {
       },
       move: (conn: ServerConnection.Any, worktree: string, index: number) => {
         home.server.context(conn).projects.move(worktree, index)
+      },
+      pin: (conn: ServerConnection.Any, project: LocalProject) => {
+        home.server.context(conn).projects.pin(project.worktree, !project.pinned)
+      },
+      toggleExpanded: (conn: ServerConnection.Any, project: LocalProject) => {
+        const projects = home.server.context(conn).projects
+        if (project.expanded) return projects.collapse(project.worktree)
+        projects.expand(project.worktree)
       },
       canReveal: canRevealProject,
       reveal: (conn: ServerConnection.Any, project: LocalProject) => {

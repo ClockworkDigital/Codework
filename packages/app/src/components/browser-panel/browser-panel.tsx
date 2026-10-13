@@ -42,14 +42,17 @@ import {
   type BrowserToolPanel,
 } from "./browser-tools"
 import { browserSuggestions } from "./browser-suggestions"
-import { BrowserTabStrip } from "./browser-tab-strip"
 import { BrowserOperationStatus } from "./browser-operation-status"
 import "./browser-panel.css"
 import "./browser-toolbar.css"
 import "./browser-controls.css"
 import "./browser-records.css"
 
-export function BrowserPanel(props: { sessionKey: string; sessionID: string }) {
+export function BrowserPanel(props: {
+  sessionKey: string
+  sessionID: string
+  onTabShortcut?: (value: BrowserShortcut) => void
+}) {
   const language = useLanguage()
   const prompt = usePrompt()
   const platform = usePlatform()
@@ -64,22 +67,24 @@ export function BrowserPanel(props: { sessionKey: string; sessionID: string }) {
     tool: undefined as BrowserToolPanel | undefined,
   })
   const active = createMemo(() => state.tabs.tabs.find((tab) => tab.id === state.tabs.activeID))
-  const landing = createMemo(() => !active() || active()?.url === "about:blank")
+  const landing = createMemo(() => !active() || (active()?.url === "about:blank" && !active()?.agentCreated))
   const bookmarked = () => !!active() && !!state.tabs.profile?.bookmarks?.some((row) => row.url === active()?.url)
   // First blocking reason wins; mirrors the pill's disabled condition.
   const agentHint = (tab: BrowserTab) =>
     language.t(
       state.tabs.profile?.preferences?.agentEnabled === false
         ? "browser.access.off"
-        : tab.agentAccess
-          ? "browser.site.agentOn"
-          : !tab.access
-            ? "browser.access.unknown"
-            : tab.access.blank
-              ? "browser.access.blank"
-              : tab.loading
-                ? "browser.access.tabGrantLoading"
-                : "browser.access.tabGrantEligible",
+        : state.tabs.agentPaused
+          ? "browser.agent.paused"
+          : tab.agentAccess
+            ? "browser.site.agentOn"
+            : !tab.access
+              ? "browser.access.unknown"
+              : tab.access.blank
+                ? "browser.access.blank"
+                : tab.loading
+                  ? "browser.access.tabGrantLoading"
+                  : "browser.access.tabGrantEligible",
     )
   const suggestions = createMemo(() => browserSuggestions(state.input, state.tabs))
   const suggestionsID = createUniqueId()
@@ -210,6 +215,8 @@ export function BrowserPanel(props: { sessionKey: string; sessionID: string }) {
       address?.select()
       return
     }
+    if (props.onTabShortcut && (value === "new" || value === "close" || value === "next" || value === "previous"))
+      return props.onTabShortcut(value)
     if (value === "new" || value === "reopen") {
       void command({ op: value })
       return
@@ -478,14 +485,6 @@ export function BrowserPanel(props: { sessionKey: string; sessionID: string }) {
         shortcut(action)
       }}
     >
-      <BrowserTabStrip tabs={state.tabs} command={command}>
-        <BrowserMenu
-          tab={active()}
-          open={(tool) => setState("tool", tool)}
-          command={command}
-          screenshot={(closed) => void screenshot(closed)}
-        />
-      </BrowserTabStrip>
       <form
         data-slot="browser-toolbar"
         class="shrink-0 flex items-center border-b border-border-weaker-base py-2"
@@ -703,6 +702,7 @@ export function BrowserPanel(props: { sessionKey: string; sessionID: string }) {
                   aria-pressed={tab().agentAccess}
                   disabled={
                     state.tabs.profile?.preferences?.agentEnabled === false ||
+                    state.tabs.agentPaused === true ||
                     (!tab().agentAccess && (tab().loading || tab().access?.blank !== false))
                   }
                   aria-description={agentHint(tab())}
@@ -714,6 +714,24 @@ export function BrowserPanel(props: { sessionKey: string; sessionID: string }) {
             </>
           )}
         </Show>
+        <Show when={!state.tabs.agentPaused && state.tabs.tabs.some((tab) => tab.agentAccess)}>
+          <BrowserButton
+            type="button"
+            size="small"
+            class="shrink-0"
+            onClick={() => void command({ op: "agent-pause", paused: true })}
+          >
+            {language.t("browser.agent.takeover")}
+          </BrowserButton>
+        </Show>
+        <div class="flex justify-end shrink-0">
+          <BrowserMenu
+            tab={active()}
+            open={(tool) => setState("tool", tool)}
+            command={command}
+            screenshot={(closed) => void screenshot(closed)}
+          />
+        </div>
       </form>
       <Show when={showSuggestions()}>
         <div
@@ -737,6 +755,7 @@ export function BrowserPanel(props: { sessionKey: string; sessionID: string }) {
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={() => chooseSuggestion(index())}
               >
+                <Icon name={row.kind === "bookmark" ? "star" : row.kind === "tab" ? "globe" : "magnifying-glass"} />
                 <span class="block truncate" dir={row.title ? "auto" : "ltr"}>
                   {row.title || row.url}
                 </span>
@@ -760,19 +779,28 @@ export function BrowserPanel(props: { sessionKey: string; sessionID: string }) {
             <span class="min-w-0 flex-1 truncate text-text-weak" dir="ltr">
               {URL.parse(tab().url)?.host}
             </span>
-            <BrowserButton
-              type="button"
-              size="small"
-              variant="ghost"
-              class="shrink-0"
-              onClick={() => void command({ op: "access", tabID: tab().id, enabled: false })}
-            >
-              {language.t("browser.site.revoke")}
-            </BrowserButton>
           </div>
         )}
       </Show>
       <Show when={active()}>{(tab) => <BrowserOperationStatus tab={tab()} command={command} />}</Show>
+      <Show when={state.tabs.agentPaused}>
+        <div
+          role="status"
+          data-browser-agent-paused
+          class="shrink-0 flex items-center gap-2 border-b border-border-weaker-base px-2 py-1 text-12-regular"
+        >
+          <span class="min-w-0 flex-1">{language.t("browser.agent.paused")}</span>
+          <BrowserButton
+            type="button"
+            size="small"
+            class="shrink-0"
+            disabled={state.tabs.profile?.preferences?.agentEnabled === false}
+            onClick={() => void command({ op: "agent-pause", paused: false })}
+          >
+            {language.t("browser.agent.resume")}
+          </BrowserButton>
+        </div>
+      </Show>
       <Show when={active()?.loadFailed && !active()?.failure}>
         <div role="alert" class="shrink-0 p-2 text-12-regular text-text-base">
           {active()?.loadError ?? language.t("browser.toast.loadFailed")}

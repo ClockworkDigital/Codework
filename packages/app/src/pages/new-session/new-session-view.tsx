@@ -3,6 +3,7 @@ import { Tooltip } from "@opencode-ai/ui/tooltip"
 import { Icon as IconV2 } from "@opencode-ai/ui/v2/icon"
 import { TooltipV2 } from "@opencode-ai/ui/v2/tooltip-v2"
 import { WordmarkV2 } from "@opencode-ai/ui/v2/wordmark-v2"
+import { useTheme } from "@opencode-ai/ui/theme"
 import { Show, createMemo, createSignal, type Accessor } from "solid-js"
 import { createStore } from "solid-js/store"
 import { Portal } from "solid-js/web"
@@ -16,11 +17,15 @@ import {
 } from "@/components/prompt-project-selector"
 import { StatusPopoverV2 } from "@/components/status-popover"
 import { useLanguage } from "@/context/language"
+import { useSettings } from "@/context/settings"
+import { Cm3Starters } from "@/components/cm3-starters"
+import { getFilename } from "@opencode-ai/core/util/path"
 import { useSDK } from "@/context/sdk"
 import { useServerSync } from "@/context/server-sync"
 import { useProviders } from "@/hooks/use-providers"
 import { NEW_SESSION_CONTENT_WIDTH } from "@/pages/session/new-session-layout"
-import ogilvyOneLogo from "@/assets/ogilvy-one.svg"
+import cookieMonsterBannerLight from "@/assets/cookie-monster-banner-light.svg"
+import cookieMonsterBannerDark from "@/assets/cookie-monster-banner-dark.svg"
 import { Persist, persisted } from "@/utils/persist"
 import type { NewSessionDraftController } from "./new-session-draft-controller"
 import type { NewSessionWorkspaceController } from "./new-session-workspace-controller"
@@ -32,6 +37,9 @@ export function NewSessionView(props: {
   project: PromptProjectController
   workspace: NewSessionWorkspaceController
 }) {
+  const settings = useSettings()
+  const language = useLanguage()
+  const theme = useTheme()
   return (
     <div class="@container relative flex flex-col min-h-0 h-full flex-1">
       <div
@@ -41,18 +49,26 @@ export function NewSessionView(props: {
         <div class="absolute inset-x-0 top-[25.375%] flex justify-center px-6">
           <div class={NEW_SESSION_CONTENT_WIDTH}>
             <Show
-              when={import.meta.env.VITE_CM_BRAND}
+              when={settings.general.quietCompanion() || import.meta.env.VITE_CM_BRAND}
               fallback={<WordmarkV2 class="h-auto w-full text-v2-background-bg-inverse" />}
             >
-              <div
-                role="img"
-                aria-label="Ogilvy One"
-                class="h-[110px] w-full bg-v2-background-bg-inverse"
-                style={{
-                  "-webkit-mask": `url("${ogilvyOneLogo}") center / contain no-repeat`,
-                  mask: `url("${ogilvyOneLogo}") center / contain no-repeat`,
-                }}
+              <img
+                data-component="cookie-monster-banner"
+                src={theme.mode() === "dark" ? cookieMonsterBannerDark : cookieMonsterBannerLight}
+                alt={language.t("quietCompanion.brand")}
+                width={720}
+                height={180}
+                class="mx-auto h-auto w-full max-w-[440px]"
               />
+            </Show>
+            <Show when={settings.general.quietCompanion()}>
+              <h1 class="cm3-landing-heading mt-6!" dir="auto">
+                <Show when={props.project.selected()} fallback={language.t("session.new.title")}>
+                  {(project) =>
+                    language.t("quietCompanion.heading", { project: project().name || getFilename(project().worktree) })
+                  }
+                </Show>
+              </h1>
             </Show>
             <div class="mt-8 flex flex-col gap-8">
               <PromptInputV2Composer controller={props.input} />
@@ -78,6 +94,9 @@ export function NewSessionView(props: {
                     />
                   </Show>
                 </div>
+              </Show>
+              <Show when={settings.general.quietCompanion()}>
+                <Cm3Starters onSelect={props.input.restoreFocus} />
               </Show>
             </div>
           </div>
