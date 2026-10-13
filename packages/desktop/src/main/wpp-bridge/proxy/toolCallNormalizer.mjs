@@ -235,7 +235,7 @@ export function parseAnthropicXmlToolCalls(content) {
     const name = attributes.name;
     if (!name) continue;
     const body = match[2];
-    calls.push(normalizeAnthropicInvoke({ id: attributes.id || "", name, args: extractInvokeParameters(body) }));
+    calls.push(normalizeAnthropicInvoke({ id: attributes.id || "", name, args: extractInvokeParameters(body, name) }));
   }
 
   return calls.length > 0 ? calls : null;
@@ -256,7 +256,7 @@ function parseXmlAttributes(text) {
 // emits instead (e.g. </content> for name="content"), or the next <parameter> opening. This
 // tolerates the common Opus failure mode of closing the final/large parameter with the wrong tag or
 // omitting it entirely, which otherwise drops the argument (observed: `write` losing `content`).
-function extractInvokeParameters(body) {
+function extractInvokeParameters(body, toolName) {
   const args = {};
   const openRegex = /<parameter\s+name=(["'])([^"']+)\1\s*>/gi;
   const opens = [];
@@ -271,7 +271,8 @@ function extractInvokeParameters(body) {
     const hardEnd = i + 1 < opens.length ? opens[i + 1].openStart : body.length;
     const slice = body.slice(valueStart, hardEnd);
     const raw = decodeXmlEntities(trimParameterClose(slice, name));
-    args[name] = coerceParameterValue(raw);
+    // Site-tool arguments are JSON text, not a nested transport object.
+    args[name] = toolName === "browser_execute_site_tool" && name === "arguments" ? raw : coerceParameterValue(raw);
   }
 
   return args;
