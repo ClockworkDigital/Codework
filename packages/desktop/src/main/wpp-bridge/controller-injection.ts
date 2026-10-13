@@ -72,9 +72,9 @@ export type Controller = {
   inspectChat: (timeoutMs?: number) => Promise<unknown>
 }
 
-// Attach the debugger, register the outbound binding + relay script, and return a handle that
-// posts job/inspect requests into the page and resolves when their matching reply arrives. Shares
-// the WebContents debugger with installRecorder; attach + Page.enable are idempotent across both.
+// Register the outbound binding + relay + content.js with the shared target hub. Caller must
+// armTargetAttach after all installers are registered. Shares the WebContents debugger with
+// installRecorder; Runtime/Page.enable are idempotent across both.
 export async function installController(contents: WebContents): Promise<Controller> {
   const dbg = contents.debugger
 

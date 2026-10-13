@@ -9,6 +9,7 @@
 
 import type { BrowserWindow } from "electron"
 import { createWorkerWindow } from "./session"
+import { armTargetAttach } from "./cdp-targets"
 import { installController, type Controller, type ProgressFrame } from "./controller-injection"
 import { installRecorder } from "./recorder-injection"
 import { installNetworkWitness, type NetworkWitness } from "./cdp-network-recorder"
@@ -322,9 +323,9 @@ export class WorkerPool {
     this.workers.clear()
   }
 
-  // Recorder + controller must be installed BEFORE the first navigation: both register
-  // Page.addScriptToEvaluateOnNewDocument, the document-start hook that arms the fetch/XHR recorder
-  // and the relay before any page script runs. Navigating after install is what makes that hold.
+  // Recorder + controller + network witness register installers first; armTargetAttach then enables
+  // paused auto-attach so every child iframe gets the full set before page scripts run. Navigating
+  // only after arm is what makes the document-start fetch/XHR patch hold.
   private async spawn(agent: string, sessionKey: string, subagent: boolean): Promise<Worker> {
     const window = createWorkerWindow()
     if (workersVisible) {
@@ -335,6 +336,7 @@ export class WorkerPool {
       await installRecorder(window.webContents)
       const controller = await installController(window.webContents)
       const netWitness = await installNetworkWitness(window.webContents)
+      await armTargetAttach(window.webContents)
       await window.webContents.loadURL(this.chatUrl)
       await throwIfAuthRequired(window.webContents)
       await openAssistantPopover(window.webContents)

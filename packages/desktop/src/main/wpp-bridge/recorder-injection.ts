@@ -41,9 +41,9 @@ const PROBE_SOURCE = `
 
 export type RecorderEvent = { type: string; status?: string | null; runId?: string | null }
 
-// Attach the debugger, register the probe relay, and queue both scripts to run on every new
-// document in the page's main world. Returns once injection is registered; events arrive
-// asynchronously via onEvent as the page loads and the recorder posts "ready"/"reset".
+// Register the probe + recorder scripts with the shared target hub. Caller must armTargetAttach
+// after all installers are registered (and before loadURL) so child iframes stay paused until
+// these scripts land. Events arrive asynchronously via onEvent as the page loads.
 export async function installRecorder(
   contents: WebContents,
   onEvent?: (event: RecorderEvent) => void,

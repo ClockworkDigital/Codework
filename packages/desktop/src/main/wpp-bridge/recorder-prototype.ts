@@ -6,6 +6,7 @@
 // "ready" and/or "reset" frame, the fetch/XHR patch landed before page scripts — the make-or-break
 // guarantee — and we can confidently build the full webview pool on top of it.
 
+import { armTargetAttach } from "./cdp-targets"
 import { createWorkerWindow, openWppLogin } from "./session"
 import { installRecorder, type RecorderEvent } from "./recorder-injection"
 
@@ -21,6 +22,7 @@ export async function runRecorderPrototype(url: string, settleMs = 8000): Promis
 
   try {
     await installRecorder(win.webContents, (event) => events.push(event))
+    await armTargetAttach(win.webContents)
     const settled = new Promise((resolve) => setTimeout(resolve, settleMs))
     // ponytail: WPP entrypoints can keep redirecting/streaming and never resolve loadURL.
     // The probe only needs document-start frames, so bound navigation to the settle window.

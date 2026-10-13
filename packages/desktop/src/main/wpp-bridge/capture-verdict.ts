@@ -74,8 +74,11 @@ export function decideCaptureVerdict(input: CaptureInput): CaptureVerdict {
 // Inline the witness facts that pick between the failure causes — so the operator sees the branch
 // in the OpenCode error itself, without hunting for the run-log JSON. Mirrors content.js's
 // wrong-agent "[diag …]" convention. `recorderSawRequest` vs `cdpTarget` is the key split for
-// recorder_parser_miss: a worker/service_worker target the fetch/XHR patch can't reach (structural
-// miss) vs. a frame it did patch (a parse/DOM-fallback race); `cdpMime` flags a streamed body.
+// recorder_parser_miss:
+//   - worker/service_worker + recorderSawRequest=false → structural miss (patch can't reach)
+//   - iframe/page + recorderSawRequest=false → inject/arm miss (patch never saw the Fetch)
+//   - recorderSawRequest=true → saw the request but failed to parse / fell to DOM
+// `cdpMime` flags a streamed body.
 function captureDiagSuffix(input: CaptureInput): string {
   const w = input.witness
   const host = hostOf(w.url)
@@ -89,8 +92,16 @@ function captureDiagSuffix(input: CaptureInput): string {
     w.mimeType ? `cdpMime=${w.mimeType}` : "",
     w.targetType ? `cdpTarget=${w.targetType}` : "",
     host ? `host=${host}` : "",
+    injectArmHint(input),
   ].filter(Boolean)
   return ` [capture ${parts.join(" ")}]`
+}
+
+function injectArmHint(input: CaptureInput): string {
+  if (input.pageRecorderRequestSeen) return ""
+  const target = input.witness.targetType
+  if (target !== "iframe" && target !== "page") return ""
+  return "cause=inject_arm_miss"
 }
 
 function hostOf(url: string | null | undefined): string {

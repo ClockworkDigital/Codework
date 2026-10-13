@@ -19,8 +19,8 @@ type CdpRecord = {
   // Diagnostics for recorder_parser_miss: the CDP resource type ("Fetch"/"XHR"/"Document"/…), the
   // response mimeType, the request initiator type, and the kind of target that issued it
   // ("page"/"iframe"/"worker"/"service_worker"/…). Together with pageRecorderRequestSeen these tell
-  // whether the page recorder was structurally blind (request issued from a worker the fetch/XHR
-  // patch never reached) or merely failed to parse a body it did see.
+  // whether the page recorder was structurally blind (worker/service_worker), never armed in a
+  // patchable frame (iframe/page + recorderSawRequest=false), or saw the request but failed to parse.
   type: string | null
   mimeType: string | null
   initiatorType: string | null
@@ -33,6 +33,8 @@ export type NetworkWitness = {
   summarizeWindow: (sinceMs: number) => CdpNetworkSummary
 }
 
+// Register Network.enable on the shared target hub. Caller must armTargetAttach after all
+// installers are registered so child iframes get the witness before they run.
 export async function installNetworkWitness(contents: WebContents): Promise<NetworkWitness> {
   const dbg = contents.debugger
   const reducer = createCdpNetworkReducer()
@@ -54,8 +56,8 @@ export function createCdpNetworkReducer(now = () => Date.now()) {
   const records: CdpRecord[] = []
   // sessionId -> target kind ("page"/"iframe"/"worker"/"service_worker"/…), learned from
   // Target.attachedToTarget. Lets a witnessed request report which target issued it, so a
-  // worker-issued model POST (which the page recorder's fetch/XHR patch can never reach) is
-  // distinguishable from one in a frame the recorder did patch.
+  // worker-issued model POST (patch unreachable) is distinguishable from an iframe/page miss
+  // (patchable but not armed) or a parse miss (recorderSawRequest=true).
   const sessionTargets = new Map<string, string>()
 
   return {
