@@ -79,7 +79,7 @@ for (const viewport of [
     if (viewport.width === 390) await page.getByRole("button", { name: "Toggle sidebar", exact: true }).click()
     await draftRow(page, "Plan the audit").getByRole("button", { name: "Plan the audit Draft", exact: true }).click()
     await expect(composer(page)).toHaveText("Plan the audit\nKeep these details")
-    await expect(page.locator(".cm3-sidebar-tabs")).toHaveCount(0)
+    await expect(page.locator(".cm3-sidebar-tabs")).toHaveCount(1)
     await expect(page.getByRole("button", { name: "Dismiss Tabs information", exact: true })).toHaveCount(0)
   })
 }

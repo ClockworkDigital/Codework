@@ -16,6 +16,15 @@ describe("resumeStreamAfterPageShow", () => {
 })
 
 describe("adaptServerEvent", () => {
+  test("adapts durable V2 archive events for the session cache", () => {
+    expect(
+      adaptServerEvent({
+        id: "evt_archive",
+        type: "session.next.archived",
+        data: { sessionID: "ses_1", timestamp: 123 },
+      }),
+    ).toEqual({ id: "evt_archive", type: "session.next.archived", properties: { sessionID: "ses_1", timestamp: 123 } })
+  })
   test("preserves V2 events while adapting permission requests for existing consumers", () => {
     const current = {
       id: "evt_1",

@@ -59,6 +59,7 @@ import type {
 } from "@opencode-ai/client/promise"
 import { toggleMcp } from "./global-sync/mcp"
 import { createServerSession, type ServerSession } from "./server-session"
+import { notifySessionTabsRemoved } from "@/components/titlebar-session-events"
 
 type GlobalStore = {
   ready: boolean
@@ -537,6 +538,21 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
 
     if (event.current) session.applyV2(event.current)
     session.apply(event)
+    if (event.type === "session.next.archived") {
+      const info = session.get(event.properties.sessionID)
+      homeSessions.remove(event.properties.sessionID)
+      const existing = children.children[key]
+      if (existing) {
+        existing[1]("session", (sessions) => sessions.filter((session) => session.id !== event.properties.sessionID))
+      }
+      const archivedDirectory = info?.directory ?? (directory === "global" ? undefined : directory)
+      if (archivedDirectory)
+        notifySessionTabsRemoved({
+          server: ServerConnection.key(serverSDK.server),
+          directory: archivedDirectory,
+          sessionIDs: [event.properties.sessionID],
+        })
+    }
     if (event.type === "session.created" || event.type === "session.updated" || event.type === "session.deleted") {
       homeSessions.apply(event)
     }

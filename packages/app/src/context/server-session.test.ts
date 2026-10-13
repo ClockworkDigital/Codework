@@ -1606,6 +1606,18 @@ describe("server session", () => {
     expect(ctx.get).toEqual([])
   })
 
+  test("archive events evict active content and cancel late hydration", async () => {
+    const pending = deferredResponse()
+    const store = createServerSession(messageClient(pending.promise))
+    store.apply({ type: "session.created", properties: { info: session("child") } })
+    const loading = store.sync("child")
+    store.apply({ type: "session.next.archived", properties: { sessionID: "child", timestamp: 123 } })
+    pending.resolve(response([{ info: userMessage("message-1"), parts: [] }]))
+    await loading
+    expect(store.get("child")?.time.archived).toBe(123)
+    expect(store.data.message.child).toBeUndefined()
+  })
+
   test("preserves pinned session content under server-wide cache pressure", () => {
     const ctx = setup({})
     ctx.store.pin("active")

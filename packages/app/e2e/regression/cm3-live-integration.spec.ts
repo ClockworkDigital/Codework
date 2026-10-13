@@ -21,18 +21,23 @@ test("CM3 keeps draft navigation in project chats across UI switches", async ({ 
   await expect(input).toBeEditable()
   await input.fill("Keep this unsent chat")
   await expect(draft.getByRole("button", { name: "Keep this unsent chat Draft", exact: true })).toBeVisible()
-  await expect(strip).toBeHidden()
+  await expect(strip).toBeVisible()
   await expect(strip.locator("[data-titlebar-tab-slot]")).toHaveCount(3)
-  await expect(page.locator(".cm3-sidebar-tabs")).toHaveCount(0)
-  const originalStrip = await strip.elementHandle()
+  await expect(page.locator(".cm3-sidebar-tabs").locator('[data-slot="titlebar-tabs"]')).toBeVisible()
   await page.getByRole("switch", { name: "CM3 UI", exact: true }).click()
   await expect(strip).toBeVisible()
   await expect(input).toHaveText("Keep this unsent chat")
   await page.getByRole("switch", { name: "CM3 UI", exact: true }).click()
-  await expect(strip).toBeHidden()
+  await expect(strip).toBeVisible()
   await expect(draft.getByRole("button", { name: "Keep this unsent chat Draft", exact: true })).toBeVisible()
   await expect(input).toHaveText("Keep this unsent chat")
-  expect(await strip.evaluate((element, original) => element === original, originalStrip)).toBe(true)
+  await expect(page.locator(".cm3-sidebar-tabs").locator('[data-slot="titlebar-tabs"]')).toBeVisible()
+  const tab = strip
+    .locator("[data-titlebar-tab-slot]")
+    .filter({ has: page.locator('[href="/new-session?draftId=draft_cm3_tabs"]') })
+  await tab.getByRole("button", { name: "Close tab", exact: true }).click()
+  await expect(tab).toHaveCount(0)
+  await expect(draft).toHaveCount(0)
 })
 
 test("cold CM3 sessions hydrate their project before starting a new chat", async ({ page }) => {
@@ -836,6 +841,7 @@ test("CM3 recent threads show running status and unscoped project names", async 
     .locator('[data-action="recent-session"]')
     .filter({ hasText: fixture.expected.targetTitle })
   await expect(recent.locator('[data-component="session-progress-indicator-v2"]')).toBeVisible()
+  await expect(recent).toHaveAccessibleDescription("Running")
   await expect(recent.locator(".cm3-sidebar-task-project")).toHaveText(fixture.project.name)
   await recent.click()
   await expectSessionTitle(page, fixture.expected.targetTitle)
@@ -878,9 +884,13 @@ for (const kind of ["permission", "question"] as const) {
     await installCm3Sidebar(page)
     await page.goto(stressSessionHref(fixture.sourceID))
     await expectSessionTitle(page, fixture.expected.sourceTitle)
-    const recent = page.locator(".cm3-sidebar-task").filter({ hasText: fixture.expected.targetTitle })
+    const recent = page
+      .getByRole("region", { name: "Recent sessions", exact: true })
+      .locator(".cm3-sidebar-task")
+      .filter({ hasText: fixture.expected.targetTitle })
     await expect(recent.locator('[data-slot="project-avatar-unread-dot"]')).toBeVisible()
     await expect(recent.locator('[data-component="session-progress-indicator-v2"]')).toHaveCount(0)
+    await expect(recent).toHaveAccessibleDescription(kind === "question" ? "Pending question" : "Permission required")
   })
 }
 
@@ -898,11 +908,16 @@ test("CM3 recent threads show unread completion notifications", async ({ page })
   )
   await page.goto(stressSessionHref(fixture.sourceID))
   await expectSessionTitle(page, fixture.expected.sourceTitle)
-  const recent = page.locator(".cm3-sidebar-task").filter({ hasText: fixture.expected.targetTitle })
+  const recent = page
+    .getByRole("region", { name: "Recent sessions", exact: true })
+    .locator(".cm3-sidebar-task")
+    .filter({ hasText: fixture.expected.targetTitle })
   await expect(recent.locator('[data-slot="project-avatar-unread-dot"]')).toBeVisible()
+  await expect(recent).toHaveAccessibleDescription("Unread response")
   await recent.click()
   await expectSessionTitle(page, fixture.expected.targetTitle)
   await expect(recent.locator('[data-slot="project-avatar-unread-dot"]')).toHaveCount(0)
+  await expect(recent).toHaveAccessibleDescription("")
 })
 
 for (const gesture of ["Control", "Meta", "middle"] as const) {
@@ -1380,6 +1395,131 @@ test("CM3 reveals project sessions five at a time and retains independent limits
   await expect(primarySessions.locator(titles)).toHaveCount(5)
   await expect(secondarySessions.locator(titles)).toHaveCount(5)
   await expect(recent).toHaveText(recentTitles)
+})
+
+for (const action of ["sidebar", "command", "failure"] as const) {
+  const failure = action === "failure"
+  test(`CM3 V2 archiving ${failure ? "preserves the session after failure and recovers" : `through ${action} removes open tabs and survives reload`}`, async ({
+    page,
+  }) => {
+    const entries = fixture.sessions.map((session) => ({
+      ...session,
+      time: { ...session.time, archived: undefined as number | undefined },
+    }))
+    await mockOpenCodeServer(page, {
+      protocol: "v2",
+      sessions: entries,
+      provider: fixture.provider,
+      directory: fixture.directory,
+      project: fixture.project,
+      pageMessages,
+    })
+    let fail = failure
+    const requests: string[] = []
+    await page.route(`**/api/session/${fixture.targetID}/archive`, async (route) => {
+      expect(route.request().method()).toBe("POST")
+      requests.push(route.request().url())
+      if (fail) return route.fulfill({ status: 500, json: { message: "Archive failed" } })
+      entries.find((session) => session.id === fixture.targetID)!.time.archived = Date.now()
+      return route.fulfill({ status: 204 })
+    })
+    await installCm3Sidebar(page)
+    await page.goto(action === "command" ? stressSessionHref(fixture.targetID) : "/")
+    if (action === "command") await expectSessionTitle(page, fixture.expected.targetTitle)
+    const row = page
+      .getByRole("region", { name: "Recent sessions", exact: true })
+      .getByRole("group", { name: fixture.expected.targetTitle, exact: true })
+    const archive = row.getByRole("button", { name: "Archive", exact: true })
+    const tab = page.locator(`.cm3-sidebar-tabs [data-titlebar-tab-link][href$="/session/${fixture.targetID}"]`)
+    await expect(archive).toBeEnabled()
+    await expect(tab).toBeVisible()
+    if (action === "command") {
+      await page.keyboard.press("Control+Shift+P")
+      const dialog = page.getByRole("dialog")
+      await expect(dialog).toBeVisible()
+      await dialog.getByRole("textbox").fill("Archive session")
+      await expect(dialog.getByText("Archive session", { exact: true })).toBeVisible()
+      await page.keyboard.press("Enter")
+    }
+    if (action !== "command") {
+      await row.locator('[data-action="recent-session"]').hover()
+      await archive.click()
+    }
+    if (failure) {
+      await expect(page.getByText("Archive failed", { exact: true })).toBeVisible()
+      await expect(row).toBeVisible()
+      await expect(tab).toBeVisible()
+      fail = false
+      await archive.click()
+    }
+    await expect(row).toHaveCount(0)
+    await expect(tab).toHaveCount(0)
+    expect(requests).toHaveLength(failure ? 2 : 1)
+    await page.reload()
+    await expect(page.getByRole("region", { name: "Recent sessions", exact: true }).getByRole("group")).toHaveCount(1)
+    await expect(row).toHaveCount(0)
+  })
+}
+
+test("CM3 applies a V2 archive event before tab metadata has hydrated", async ({ page }) => {
+  await mockOpenCodeServer(page, {
+    protocol: "v2",
+    sessions: fixture.sessions,
+    provider: fixture.provider,
+    directory: fixture.directory,
+    project: fixture.project,
+    pageMessages,
+    events: () => [
+      {
+        id: "evt_external_archive",
+        type: "session.next.archived",
+        location: { directory: fixture.directory },
+        data: { sessionID: fixture.targetID, timestamp: Date.now() },
+      },
+    ],
+  })
+  await installCm3Sidebar(page)
+  await page.goto("/")
+  const recent = page.getByRole("region", { name: "Recent sessions", exact: true })
+  await expect(recent.getByRole("group")).toHaveCount(1)
+  await expect(recent.getByRole("group", { name: fixture.expected.sourceTitle, exact: true })).toBeVisible()
+  await expect(
+    page.locator(`.cm3-sidebar-tabs [data-titlebar-tab-link][href$="/session/${fixture.targetID}"]`),
+  ).toHaveCount(0)
+  await expect(
+    page.locator(`.cm3-sidebar-tabs [data-titlebar-tab-link][href$="/session/${fixture.sourceID}"]`),
+  ).toBeVisible()
+})
+
+test("CM3 expands all 72 older project sessions and searches beyond the recent limit", async ({ page }) => {
+  await mockOpenCodeServer(page, {
+    sessions: Array.from({ length: 72 }, (_, index) => ({
+      ...fixture.sessions[0],
+      id: `ses_full_history_${index + 1}`,
+      title: index === 0 ? "Ancient needle" : `Older session ${index + 1}`,
+      time: { created: 1 + index, updated: 1 + index },
+    })),
+    provider: fixture.provider,
+    directory: fixture.directory,
+    project: fixture.project,
+    pageMessages,
+  })
+  await installCm3Sidebar(page)
+  await page.goto("/")
+  const project = page.locator(".cm3-sidebar-project-sessions")
+  const rows = project.locator('[data-action="project-session"]')
+  const more = project.getByRole("button", { name: "Show more", exact: true })
+  await expect(rows).toHaveCount(5)
+  for (const count of [10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 72]) {
+    await more.click()
+    await expect(rows).toHaveCount(count)
+  }
+  await expect(more).toHaveCount(0)
+  await page.getByRole("searchbox", { name: "Search threads", exact: true }).fill("Ancient needle")
+  await expect(project.getByRole("button", { name: "Ancient needle", exact: true })).toBeVisible()
+  await page.getByRole("switch", { name: "CM3 UI", exact: true }).click()
+  await page.getByRole("textbox", { name: /^Search sessions/ }).fill("Ancient needle")
+  await expect(page.getByRole("option", { name: /Ancient needle/ })).toBeVisible()
 })
 
 test("CM3 keeps saved old session pins beyond the recent-session limit", async ({ page }) => {

@@ -398,7 +398,7 @@ export function Titlebar(props: { update?: TitlebarUpdate; debugTools?: { visibl
                   />
                 </TooltipV2>
 
-                {/* Keep session hydration and tab shortcuts mounted when the project sidebar owns navigation. */}
+                {/* CM3 moves this strip to its sidebar while retaining session hydration and shortcuts. */}
                 <div
                   ref={(mount) => setTabStrip("mount", mount)}
                   class="min-w-0"

@@ -11,6 +11,8 @@ import type {
   SessionsActiveOutput,
   SessionsGetInput,
   SessionsGetOutput,
+  SessionsArchiveInput,
+  SessionsArchiveOutput,
   SessionsSwitchAgentInput,
   SessionsSwitchAgentOutput,
   SessionsSwitchModelInput,
@@ -343,6 +345,17 @@ export function make(options: ClientOptions) {
           },
           requestOptions,
         ).then((value) => value.data),
+      archive: (input: SessionsArchiveInput, requestOptions?: RequestOptions) =>
+        request<SessionsArchiveOutput>(
+          {
+            method: "POST",
+            path: `/api/session/${encodeURIComponent(input.sessionID)}/archive`,
+            successStatus: 204,
+            declaredStatuses: [404, 400, 401],
+            empty: true,
+          },
+          requestOptions,
+        ),
       switchAgent: (input: SessionsSwitchAgentInput, requestOptions?: RequestOptions) =>
         request<SessionsSwitchAgentOutput>(
           {
