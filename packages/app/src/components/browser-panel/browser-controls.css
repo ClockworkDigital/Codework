@@ -236,7 +236,7 @@ body[data-new-layout] [data-component="browser-panel"] [data-slot="browser-addre
   height: 40px;
   padding-inline: 10px;
   gap: 6px;
-  border-radius: 24px;
+  border-radius: 8px;
 }
 
 [data-component="browser-panel"] [data-slot="browser-address"] input,

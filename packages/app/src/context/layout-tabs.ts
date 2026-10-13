@@ -42,16 +42,9 @@ export function previewSessionTab(current: SessionTabState, tab: string): Sessio
 
 export function openSessionTab(current: SessionTabState, tab: string): SessionTabState {
   const preview = sessionTabPreview(current)
-  if (tab === "review") {
+  if (tab === "review" || tab === "context" || tab === "browser") {
     return {
-      tabs: { all: current.tabs.all.filter((item) => item !== tab), active: tab },
-      preview,
-    }
-  }
-
-  if (tab === "context" || tab === "browser") {
-    return {
-      tabs: { all: [tab, ...current.tabs.all.filter((item) => item !== tab)], active: tab },
+      tabs: { all: current.tabs.all.includes(tab) ? current.tabs.all : [...current.tabs.all, tab], active: tab },
       preview,
     }
   }
@@ -80,14 +73,6 @@ export function openSessionTab(current: SessionTabState, tab: string): SessionTa
 }
 
 export function closeSessionTab(current: SessionTabState, tab: string): SessionTabState {
-  if (tab === "review") {
-    if (current.tabs.active !== tab) return current
-    return {
-      tabs: { all: current.tabs.all, active: current.tabs.all[0] },
-      preview: current.preview,
-    }
-  }
-
   const all = current.tabs.all.filter((item) => item !== tab)
   const preview = current.preview === tab ? undefined : current.preview
   if (current.tabs.active !== tab) return { tabs: { ...current.tabs, all }, preview }
@@ -107,13 +92,17 @@ export function reconcileBrowserSessionTabs(
   ids: string[],
   activeID?: string,
   previousID?: string,
+  previousIDs?: string[],
 ) {
   const browser = ids.map((id) => `browser:${id}`)
   const retained = current.all.filter(
     (tab) => tab !== "browser" && (!tab.startsWith("browser:") || browser.includes(tab)),
   )
   const order = new Map(retained.filter((tab) => tab.startsWith("browser:")).map((tab, index) => [tab, index]))
-  const existing = browser.filter((tab) => order.has(tab))
+  const existing =
+    previousIDs?.length === ids.length && previousIDs.every((id, index) => id === ids[index])
+      ? retained.filter((tab) => tab.startsWith("browser:"))
+      : browser.filter((tab) => order.has(tab))
   const all = [
     ...retained.map((tab) => (order.has(tab) ? existing[order.get(tab)!] : tab)),
     ...browser.filter((tab) => !current.all.includes(tab)),
@@ -122,5 +111,5 @@ export function reconcileBrowserSessionTabs(
     current.active === "browser" ||
     (current.active?.startsWith("browser:") && (!browser.includes(current.active) || previousID !== activeID)) ||
     (previousID && previousID !== activeID && browser.some((tab) => !current.all.includes(tab)))
-  return { all, active: changed ? (activeID ? `browser:${activeID}` : "review") : current.active }
+  return { all, active: changed ? (activeID ? `browser:${activeID}` : all[0]) : current.active }
 }

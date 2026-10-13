@@ -60,13 +60,13 @@ describe("openSessionTab", () => {
 
   test("keeps the preview when switching to Review", () => {
     expect(openSessionTab(state(["file://a.ts"], "file://a.ts", "file://a.ts"), "review")).toEqual(
-      state(["file://a.ts"], "review", "file://a.ts"),
+      state(["file://a.ts", "review"], "review", "file://a.ts"),
     )
   })
 
-  test("opens the desktop browser as a pinned special tab", () => {
+  test("opens the desktop browser beside existing tabs", () => {
     expect(openSessionTab(state(["file://a.ts"], "file://a.ts", "file://a.ts"), "browser")).toEqual(
-      state(["browser", "file://a.ts"], "browser", "file://a.ts"),
+      state(["file://a.ts", "browser"], "browser", "file://a.ts"),
     )
   })
 
@@ -78,6 +78,12 @@ describe("openSessionTab", () => {
 })
 
 describe("closeSessionTab", () => {
+  test("closes Review and selects its neighbor", () => {
+    expect(closeSessionTab(state(["browser:a", "review", "context"], "review"), "review")).toEqual(
+      state(["browser:a", "context"], "browser:a"),
+    )
+    expect(closeSessionTab(state(["review"], "review"), "review")).toEqual(state([], undefined))
+  })
   test("clears preview metadata and selects the left neighbor", () => {
     expect(
       closeSessionTab(
@@ -89,6 +95,16 @@ describe("closeSessionTab", () => {
 })
 
 describe("reconcileBrowserSessionTabs", () => {
+  test("keeps the mixed tab order during passive browser updates", () => {
+    const current = { all: ["browser:b", "review", "browser:a", "context"], active: "review" }
+    expect(reconcileBrowserSessionTabs(current, ["a", "b"], "a", "a", ["a", "b"])).toEqual(current)
+    expect(reconcileBrowserSessionTabs(current, ["a", "b"], "a", "a", ["b", "a"]).all).toEqual([
+      "browser:a",
+      "review",
+      "browser:b",
+      "context",
+    ])
+  })
   test("migrates the Browser wrapper and keeps pages beside files", () => {
     expect(
       reconcileBrowserSessionTabs({ all: ["browser", "file://a.ts"], active: "browser" }, ["a", "b"], "a"),
@@ -107,7 +123,7 @@ describe("reconcileBrowserSessionTabs", () => {
       all: ["file://a.ts", "browser:b"],
       active: "browser:b",
     })
-    expect(reconcileBrowserSessionTabs(current, [], undefined, "a").active).toBe("review")
+    expect(reconcileBrowserSessionTabs(current, [], undefined, "a").active).toBe("file://a.ts")
   })
   test("reflects native pinning and moves without moving file slots", () => {
     expect(

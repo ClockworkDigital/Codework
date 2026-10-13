@@ -65,7 +65,7 @@ export function Cm3Shell() {
   const [sidebar, setSidebar] = persisted(Persist.global("cm3.sidebar"), createStore({ collapsed: false, width: 260 }))
   const refs: { toggle?: HTMLButtonElement; nav?: HTMLElement; search?: HTMLInputElement } = {}
   createEffect(() => {
-    refs.nav?.parentElement?.style.setProperty("--cm3-sidebar-width", `${sidebar.collapsed ? 76 : sidebar.width}px`)
+    refs.nav?.parentElement?.style.setProperty("--cm3-sidebar-width", `${sidebar.collapsed ? 48 : sidebar.width}px`)
   })
   onCleanup(() => {
     refs.nav?.parentElement?.style.removeProperty("--cm3-sidebar-width")
@@ -441,6 +441,7 @@ export function Cm3Shell() {
       <aside
         ref={(element) => (refs.nav = element)}
         class="cm3-sidebar"
+        style={{ "--cm3-sidebar-expanded-width": `${sidebar.width}px` }}
         data-open={state.navigation}
         data-collapsed={sidebar.collapsed}
         aria-label={language.t("sidebar.nav.projectsAndSessions")}
@@ -498,153 +499,155 @@ export function Cm3Shell() {
             <Cm3Icon name="x" />
           </button>
         </div>
-        <button
-          class="cm3-sidebar-action"
-          type="button"
-          onClick={create}
-          disabled={!home.server.focused() || projectPending()}
-        >
-          <Cm3Icon name="note-pencil" />
-          {language.t("quietCompanion.newTask")}
-        </button>
-        <button
-          class="cm3-sidebar-action"
-          type="button"
-          aria-pressed={scheduling.isOpen()}
-          data-action="scheduling"
-          onClick={() => {
-            scheduling.open()
-            setState("navigation", false)
-          }}
-        >
-          <Cm3Icon name="clock" />
-          {language.t("schedules.title")}
-        </button>
-        <label class="cm3-sidebar-search">
-          <Cm3Icon name="magnifying-glass" />
-          <input
-            ref={(element) => (refs.search = element)}
-            type="search"
-            value={state.search}
-            onInput={(event) => setState("search", event.currentTarget.value)}
-            onKeyDown={navigateSearch}
-            placeholder={language.t("quietCompanion.search")}
-            aria-label={language.t("quietCompanion.searchThreads")}
-          />
-        </label>
-        <div class="cm3-sidebar-scroll">
-          <Show when={settings.general.newLayoutDesigns()}>
-            <div class="cm3-sidebar-tabs" ref={(element) => layout.tabStrip.setMount(element)} />
-          </Show>
-          <HomeProjects
-            projects={projects}
-            sidebar
-            onOpenProjectNewSession={openTask}
-            onSelectProject={home.project.select}
-            onActivateProject={closeNavigation}
-            renderProjectSessions={(conn, project) => {
-              const limitKey = () => JSON.stringify([ServerConnection.key(conn), pathKey(project.worktree)])
-              const group = () => projectSessions().get(pathKey(project.worktree)) ?? []
-              const limit = () => sessionLimits[limitKey()] ?? PROJECT_SESSIONS_PAGE
-              const visible = () => {
-                const page = group().slice(0, limit())
-                const active = group().find(activeChat)
-                if (!active || page.includes(active)) return page
-                // Keep the active chat within the page size without advancing Show more.
-                return [...page.slice(0, -1), active]
-              }
-              return (
-                <Show when={ServerConnection.key(conn) === sessions.session.server()}>
-                  <div class="cm3-sidebar-project-sessions">
-                    <For each={visible().map((chat) => chat.key)}>
-                      {(key) => {
-                        const chat = createMemo(() => group().find((chat) => chat.key === key))
-                        const draft = () => {
-                          const value = chat()
-                          return value?.type === "draft" ? value : undefined
-                        }
-                        const record = () => {
-                          const value = chat()
-                          return value?.type === "session" ? value.record : undefined
-                        }
-                        return (
-                          <>
-                            <Show when={draft()}>{renderDraft}</Show>
-                            <Show when={record()}>{(record) => renderSession(record)}</Show>
-                          </>
-                        )
-                      }}
-                    </For>
-                    <Show when={group().length > limit()}>
-                      <button
-                        class="cm3-sidebar-action"
-                        type="button"
-                        data-action="project-sessions-show-more"
-                        onClick={() => setSessionLimits(limitKey(), limit() + PROJECT_SESSIONS_PAGE)}
-                      >
-                        {language.t("common.showMore")}
-                      </button>
-                    </Show>
-                  </div>
-                </Show>
-              )
-            }}
-          />
+        <div class="cm3-sidebar-content">
           <button
             class="cm3-sidebar-action"
             type="button"
+            onClick={create}
+            disabled={!home.server.focused() || projectPending()}
+          >
+            <Cm3Icon name="note-pencil" />
+            {language.t("quietCompanion.newTask")}
+          </button>
+          <button
+            class="cm3-sidebar-action"
+            type="button"
+            aria-pressed={scheduling.isOpen()}
+            data-action="scheduling"
             onClick={() => {
-              const conn = home.server.focused()
-              if (!conn) return
-              pickDirectory({
-                server: conn,
-                onSelect: (result) => {
-                  if (!result) return
-                  const directories = Array.isArray(result) ? result : [result]
-                  home.project.add(conn, directories)
-                  if (directories[0]) openTask(conn, directories[0])
-                },
-              })
+              scheduling.open()
+              setState("navigation", false)
             }}
           >
-            <Cm3Icon name="plus" />
-            {language.t("command.project.open")}
+            <Cm3Icon name="clock" />
+            {language.t("schedules.title")}
           </button>
-          <Show when={pinnedRecords().length > 0}>
-            <section aria-label={language.t("sidebar.session.pinned")}>
-              <p class="cm3-sidebar-section">{language.t("sidebar.session.pinned")}</p>
-              <For each={pinnedRecords()}>{(record) => renderSession(() => record, true)}</For>
-            </section>
-          </Show>
-          <section aria-label={language.t("sidebar.project.recentSessions")}>
-            <p class="cm3-sidebar-section">{language.t("sidebar.project.recentSessions")}</p>
-            <For each={recentRecords()}>{(record) => renderSession(() => record, true)}</For>
-            <Show
-              when={!sessions.data.loading()}
-              fallback={<p role="status">{language.t("quietCompanion.loading")}</p>}
-            >
-              <Show when={sessions.data.error()}>
-                <p role="alert">{language.t("common.requestFailed")}</p>
-                <button type="button" onClick={() => void sessions.data.retry()}>
-                  {language.t("browser.action.reload")}
-                </button>
-              </Show>
-              <Show when={!chats().length && !pinnedRecords().length && !sessions.data.error()}>
-                <p role="status">{language.t("quietCompanion.noThreads")}</p>
-              </Show>
+          <label class="cm3-sidebar-search">
+            <Cm3Icon name="magnifying-glass" />
+            <input
+              ref={(element) => (refs.search = element)}
+              type="search"
+              value={state.search}
+              onInput={(event) => setState("search", event.currentTarget.value)}
+              onKeyDown={navigateSearch}
+              placeholder={language.t("quietCompanion.search")}
+              aria-label={language.t("quietCompanion.searchThreads")}
+            />
+          </label>
+          <div class="cm3-sidebar-scroll">
+            <Show when={settings.general.newLayoutDesigns()}>
+              <div class="cm3-sidebar-tabs" ref={(element) => layout.tabStrip.setMount(element)} />
             </Show>
-          </section>
-        </div>
-        <div class="cm3-sidebar-footer">
-          <WppAuthControl />
-          <button type="button" onClick={projects.utility.help}>
-            <Cm3Icon name="question" />
-            {language.t("sidebar.help")}
-          </button>
-          <button type="button" onClick={openSettings}>
-            <Cm3Icon name="gear" />
-            {language.t("quietCompanion.settings")}
-          </button>
+            <HomeProjects
+              projects={projects}
+              sidebar
+              onOpenProjectNewSession={openTask}
+              onSelectProject={home.project.select}
+              onActivateProject={closeNavigation}
+              renderProjectSessions={(conn, project) => {
+                const limitKey = () => JSON.stringify([ServerConnection.key(conn), pathKey(project.worktree)])
+                const group = () => projectSessions().get(pathKey(project.worktree)) ?? []
+                const limit = () => sessionLimits[limitKey()] ?? PROJECT_SESSIONS_PAGE
+                const visible = () => {
+                  const page = group().slice(0, limit())
+                  const active = group().find(activeChat)
+                  if (!active || page.includes(active)) return page
+                  // Keep the active chat within the page size without advancing Show more.
+                  return [...page.slice(0, -1), active]
+                }
+                return (
+                  <Show when={ServerConnection.key(conn) === sessions.session.server()}>
+                    <div class="cm3-sidebar-project-sessions">
+                      <For each={visible().map((chat) => chat.key)}>
+                        {(key) => {
+                          const chat = createMemo(() => group().find((chat) => chat.key === key))
+                          const draft = () => {
+                            const value = chat()
+                            return value?.type === "draft" ? value : undefined
+                          }
+                          const record = () => {
+                            const value = chat()
+                            return value?.type === "session" ? value.record : undefined
+                          }
+                          return (
+                            <>
+                              <Show when={draft()}>{renderDraft}</Show>
+                              <Show when={record()}>{(record) => renderSession(record)}</Show>
+                            </>
+                          )
+                        }}
+                      </For>
+                      <Show when={group().length > limit()}>
+                        <button
+                          class="cm3-sidebar-action"
+                          type="button"
+                          data-action="project-sessions-show-more"
+                          onClick={() => setSessionLimits(limitKey(), limit() + PROJECT_SESSIONS_PAGE)}
+                        >
+                          {language.t("common.showMore")}
+                        </button>
+                      </Show>
+                    </div>
+                  </Show>
+                )
+              }}
+            />
+            <button
+              class="cm3-sidebar-action"
+              type="button"
+              onClick={() => {
+                const conn = home.server.focused()
+                if (!conn) return
+                pickDirectory({
+                  server: conn,
+                  onSelect: (result) => {
+                    if (!result) return
+                    const directories = Array.isArray(result) ? result : [result]
+                    home.project.add(conn, directories)
+                    if (directories[0]) openTask(conn, directories[0])
+                  },
+                })
+              }}
+            >
+              <Cm3Icon name="plus" />
+              {language.t("command.project.open")}
+            </button>
+            <Show when={pinnedRecords().length > 0}>
+              <section aria-label={language.t("sidebar.session.pinned")}>
+                <p class="cm3-sidebar-section">{language.t("sidebar.session.pinned")}</p>
+                <For each={pinnedRecords()}>{(record) => renderSession(() => record, true)}</For>
+              </section>
+            </Show>
+            <section aria-label={language.t("sidebar.project.recentSessions")}>
+              <p class="cm3-sidebar-section">{language.t("sidebar.project.recentSessions")}</p>
+              <For each={recentRecords()}>{(record) => renderSession(() => record, true)}</For>
+              <Show
+                when={!sessions.data.loading()}
+                fallback={<p role="status">{language.t("quietCompanion.loading")}</p>}
+              >
+                <Show when={sessions.data.error()}>
+                  <p role="alert">{language.t("common.requestFailed")}</p>
+                  <button type="button" onClick={() => void sessions.data.retry()}>
+                    {language.t("browser.action.reload")}
+                  </button>
+                </Show>
+                <Show when={!chats().length && !pinnedRecords().length && !sessions.data.error()}>
+                  <p role="status">{language.t("quietCompanion.noThreads")}</p>
+                </Show>
+              </Show>
+            </section>
+          </div>
+          <div class="cm3-sidebar-footer">
+            <WppAuthControl />
+            <button type="button" onClick={projects.utility.help}>
+              <Cm3Icon name="question" />
+              {language.t("sidebar.help")}
+            </button>
+            <button type="button" onClick={openSettings}>
+              <Cm3Icon name="gear" />
+              {language.t("quietCompanion.settings")}
+            </button>
+          </div>
         </div>
         <ResizeHandle
           class="cm3-sidebar-resize"

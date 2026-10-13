@@ -31,6 +31,7 @@ export function FileVisual(props: { path: string; active?: boolean; temporary?: 
 
 export function SortableTab(props: {
   tab: string
+  trigger?: JSX.Element
   temporary?: boolean
   onTabClose: (tab: string) => void
   onTabDoubleClick?: (tab: string) => void
@@ -48,30 +49,37 @@ export function SortableTab(props: {
   return (
     <div use:sortable class="h-full flex items-center" classList={{ "opacity-0": sortable.isActiveDraggable }}>
       <div class="relative">
-        <Tabs.Trigger
-          value={props.tab}
-          closeButton={
-            <TooltipKeybind
-              title={language.t("common.closeTab")}
-              keybind={command.keybind("tab.close")}
-              placement="bottom"
-              gutter={10}
+        <Show
+          when={props.trigger}
+          fallback={
+            <Tabs.Trigger
+              value={props.tab}
+              closeButton={
+                <TooltipKeybind
+                  title={language.t("common.closeTab")}
+                  keybind={command.keybind("tab.close")}
+                  placement="bottom"
+                  gutter={10}
+                >
+                  <IconButton
+                    icon="close-small"
+                    variant="ghost"
+                    class="h-5 w-5"
+                    onClick={() => props.onTabClose(props.tab)}
+                    aria-label={language.t("common.closeTab")}
+                  />
+                </TooltipKeybind>
+              }
+              hideCloseButton
+              onMiddleClick={() => props.onTabClose(props.tab)}
+              onDblClick={() => props.onTabDoubleClick?.(props.tab)}
             >
-              <IconButton
-                icon="close-small"
-                variant="ghost"
-                class="h-5 w-5"
-                onClick={() => props.onTabClose(props.tab)}
-                aria-label={language.t("common.closeTab")}
-              />
-            </TooltipKeybind>
+              <Show when={content()}>{(value) => value()}</Show>
+            </Tabs.Trigger>
           }
-          hideCloseButton
-          onMiddleClick={() => props.onTabClose(props.tab)}
-          onDblClick={() => props.onTabDoubleClick?.(props.tab)}
         >
-          <Show when={content()}>{(value) => value()}</Show>
-        </Tabs.Trigger>
+          {props.trigger}
+        </Show>
       </div>
     </div>
   )

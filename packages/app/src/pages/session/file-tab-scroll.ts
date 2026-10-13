@@ -9,7 +9,6 @@ type Input = {
 
 export const nextTabListScrollLeft = (input: Input) => {
   if (input.scrollWidth <= input.prevScrollWidth) return
-  if (!input.prevContextOpen && input.contextOpen) return 0
   if (input.scrollWidth <= input.clientWidth) return
   const end = input.scrollWidth - input.clientWidth
   return input.direction === "rtl" ? -end : end

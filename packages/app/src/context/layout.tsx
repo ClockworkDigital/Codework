@@ -1007,19 +1007,32 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
         const normalize = (tab: string) => normalizeSessionTab(path(), tab)
         const normalizeAll = (all: string[]) => normalizeSessionTabList(path(), all)
         const apply = (session: string, next: ReturnType<typeof openSessionTab>) => {
+          const active = next.tabs.active
+          const added = active && !store.sessionTabs[session]?.all.includes(active)
           batch(() => {
             setStore("sessionTabs", session, next.tabs)
             setEphemeral("sessionTabPreview", session, next.preview)
           })
+          // New tab triggers register after the list update; preserve the explicit selection over Kobalte's fallback.
+          if (added)
+            queueMicrotask(() => {
+              if (key() === session && store.sessionTabs[session]?.all.includes(active)) {
+                setStore("sessionTabs", session, "active", active)
+              }
+            })
         }
         return {
           tabs,
           active: createMemo(() => tabs().active),
-          all: createMemo(() => tabs().all.filter((tab) => tab !== "review")),
+          all: createMemo(() => tabs().all),
           preview: createMemo(() => ephemeral.sessionTabPreview[key()]),
           setActive(tab: string | undefined) {
             const session = key()
             const next = tab ? normalize(tab) : tab
+            if ((next === "review" || next === "context" || next === "browser") && !tabs().all.includes(next)) {
+              apply(session, openSessionTab({ tabs: tabs(), preview: ephemeral.sessionTabPreview[session] }, next))
+              return
+            }
             if (!store.sessionTabs[session]) {
               setStore("sessionTabs", session, { all: [], active: next })
             } else {
@@ -1028,7 +1041,7 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
           },
           setAll(all: string[]) {
             const session = key()
-            const next = normalizeAll(all).filter((tab) => tab !== "review")
+            const next = normalizeAll(all)
             batch(() => {
               if (!store.sessionTabs[session]) {
                 setStore("sessionTabs", session, { all: next, active: undefined })

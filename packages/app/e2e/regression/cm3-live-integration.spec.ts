@@ -9,6 +9,168 @@ import { expectSessionTitle } from "../utils/waits"
 import { mockOpenCodeServer } from "../utils/mock-server"
 
 for (const newLayoutDesigns of [false, true]) {
+  test(`CM3 Review opens explicitly and reorders like other tabs in ${newLayoutDesigns ? "new" : "legacy"} layout`, async ({
+    page,
+  }) => {
+    await mockStressTimeline(page)
+    await installStressSessionTabs(page, { sessionIDs: [fixture.sourceID] })
+    await page.addInitScript((newLayoutDesigns) => {
+      localStorage.setItem("settings.v3", JSON.stringify({ general: { newLayoutDesigns, quietCompanion: true } }))
+    }, newLayoutDesigns)
+    await page.goto(stressSessionHref(fixture.sourceID))
+    await expectSessionTitle(page, fixture.expected.sourceTitle)
+    const header = page.locator('[data-cm3-region="header"]')
+    await header.getByRole("button", { name: "Toggle side panel", exact: true }).click()
+    const chooser = page.locator('[data-component="session-new-tab"]')
+    await expect(chooser.getByRole("button", { name: "Review", exact: true })).toBeEnabled()
+    await expect(header.getByRole("tab", { name: /^Review/ })).toHaveCount(0)
+    await chooser.getByRole("button", { name: "Review", exact: true }).click()
+    const review = header.getByRole("tab", { name: /^Review/ })
+    await expect(review).toHaveAttribute("aria-selected", "true")
+    await header.getByRole("button", { name: "New tab", exact: true }).click()
+    await chooser.getByRole("button", { name: "Context", exact: true }).click()
+    const context = header.getByRole("tab", { name: "Context", exact: true })
+    await expect(context).toHaveAttribute("aria-selected", "true")
+    await review.hover()
+    const from = await review.boundingBox()
+    const to = await context.boundingBox()
+    if (!from || !to) throw new Error("Expected visible Review and Context tabs")
+    await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(to.x + to.width / 2, to.y + to.height / 2, { steps: 8 })
+    await page.mouse.up()
+    await expect
+      .poll(() =>
+        header
+          .getByRole("tab")
+          .evaluateAll((elements) => elements.map((element) => element.getAttribute("data-value"))),
+      )
+      .toEqual(["context", "review"])
+    await review.hover()
+    await review.locator("..").getByRole("button", { name: "Close tab", exact: true }).click()
+    await expect(review).toHaveCount(0)
+    await expect(context).toHaveAttribute("aria-selected", "true")
+    await header.getByRole("button", { name: "Toggle side panel", exact: true }).click()
+    await expect(page.locator("#review-panel")).not.toBeVisible()
+    await header.getByRole("button", { name: "Toggle side panel", exact: true }).click()
+    await expect(context).toHaveAttribute("aria-selected", "true")
+    await expect(review).toHaveCount(0)
+    await page.reload()
+    await expectSessionTitle(page, fixture.expected.sourceTitle)
+    await expect(context).toHaveAttribute("aria-selected", "true")
+    await expect(review).toHaveCount(0)
+    await header.getByRole("button", { name: "Toggle review", exact: true }).click()
+    await expect(review).toHaveAttribute("aria-selected", "true")
+  })
+}
+
+for (const newLayoutDesigns of [false, true]) {
+  test(`CM3 new-tab Terminal action opens a terminal in ${newLayoutDesigns ? "new" : "legacy"} layout`, async ({
+    page,
+  }) => {
+    await mockStressTimeline(page)
+    await installStressSessionTabs(page, { sessionIDs: [fixture.sourceID] })
+    await page.route(/\/pty(?:\?.*)?$/, (route) => {
+      const data =
+        route.request().method() === "POST"
+          ? {
+              id: "pty_cm3_chooser",
+              title: "Terminal 1",
+              command: "cmd.exe",
+              args: [],
+              cwd: fixture.directory,
+              status: "running",
+              pid: 1,
+            }
+          : []
+      return route.fulfill({
+        json: new URL(route.request().url()).pathname.startsWith("/api/")
+          ? {
+              location: {
+                directory: fixture.directory,
+                project: { id: fixture.project.id, directory: fixture.directory },
+              },
+              data,
+            }
+          : data,
+      })
+    })
+    await page.routeWebSocket("**/pty/pty_cm3_chooser/connect*", () => undefined)
+    await page.addInitScript((newLayoutDesigns) => {
+      localStorage.setItem("settings.v3", JSON.stringify({ general: { newLayoutDesigns, quietCompanion: true } }))
+    }, newLayoutDesigns)
+    await page.goto(stressSessionHref(fixture.sourceID))
+    await expectSessionTitle(page, fixture.expected.sourceTitle)
+    const header = page.locator('[data-cm3-region="header"]')
+    await header.getByRole("button", { name: "Toggle review", exact: true }).click()
+    await header.getByRole("button", { name: "New tab", exact: true }).click()
+    const created = page.waitForRequest(
+      (request) => request.method() === "POST" && /\/pty$/.test(new URL(request.url()).pathname),
+    )
+    await page
+      .locator('[data-component="session-new-tab"]')
+      .getByRole("button", { name: "Terminal", exact: true })
+      .click()
+    await created
+    await expect(page.locator("#terminal-panel")).toBeVisible()
+    await expect(page.locator("#terminal-panel").getByRole("tab", { name: /Terminal 1/ })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    )
+    await expect(page.locator('[data-component="session-new-tab"]')).toHaveCount(0)
+  })
+}
+
+test("CM3 new-tab Context action selects the context panel", async ({ page }) => {
+  await mockStressTimeline(page)
+  await installStressSessionTabs(page, { sessionIDs: [fixture.sourceID] })
+  await page.addInitScript(() => {
+    localStorage.setItem("settings.v3", JSON.stringify({ general: { newLayoutDesigns: true, quietCompanion: true } }))
+  })
+  await page.goto(stressSessionHref(fixture.sourceID))
+  await expectSessionTitle(page, fixture.expected.sourceTitle)
+  const header = page.locator('[data-cm3-region="header"]')
+  await header.getByRole("button", { name: "Toggle review", exact: true }).click()
+  await header.getByRole("button", { name: "New tab", exact: true }).click()
+  await page.locator('[data-component="session-new-tab"]').getByRole("button", { name: "Context", exact: true }).click()
+  await expect(header.getByRole("tab", { name: "Context", exact: true })).toHaveAttribute("aria-selected", "true")
+})
+
+for (const direction of ["ltr", "rtl"]) {
+  test(`CM3 previews the collapsed sidebar without shifting chat in ${direction}`, async ({ page }) => {
+    await mockStressTimeline(page)
+    await installStressSessionTabs(page, { sessionIDs: [fixture.sourceID] })
+    await page.addInitScript(() => {
+      localStorage.setItem("settings.v3", JSON.stringify({ general: { newLayoutDesigns: true, quietCompanion: true } }))
+    })
+    await page.goto(stressSessionHref(fixture.sourceID))
+    await expectSessionTitle(page, fixture.expected.sourceTitle)
+    await page.evaluate((direction) => document.documentElement.setAttribute("dir", direction), direction)
+    const sidebar = page.locator(".cm3-sidebar")
+    const toggle = sidebar.getByRole("button", { name: "Toggle sidebar", exact: true })
+    const content = sidebar.locator(".cm3-sidebar-content")
+    const chat = page.locator('[data-cm3-region="session-panel"]')
+    await toggle.click()
+    await chat.hover()
+    await expect(content).not.toBeVisible()
+    await expect(toggle).toHaveAttribute("aria-expanded", "false")
+    await expect(sidebar).toHaveCSS("width", "48px")
+    const bounds = await chat.boundingBox()
+    await sidebar.hover({ position: { x: 20, y: 60 } })
+    await expect(content).toBeVisible()
+    await content.getByRole("searchbox", { name: "Search threads", exact: true }).hover()
+    await expect(content).toBeVisible()
+    await expect.poll(() => chat.boundingBox()).toEqual(bounds)
+    await chat.hover()
+    await expect(content).not.toBeVisible()
+    await expect(toggle).toHaveAttribute("aria-expanded", "false")
+    await page.keyboard.press("Tab")
+    await toggle.focus()
+    await expect(content).toBeVisible()
+  })
+}
+
+for (const newLayoutDesigns of [false, true]) {
   test(`CM3 attaches panel tabs beside the full-height chat in ${newLayoutDesigns ? "new" : "legacy"} layout`, async ({
     page,
   }) => {

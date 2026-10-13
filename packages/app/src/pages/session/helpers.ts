@@ -30,7 +30,6 @@ export function shouldShowFileTree(input: { visible: boolean; opened: boolean })
 
 export const createSessionTabs = (input: TabsInput) => {
   const review = input.review ?? (() => false)
-  const hasReview = input.hasReview ?? (() => false)
   const fileBrowser = input.fileBrowser ?? (() => false)
   const contextOpen = createMemo(() => input.tabs().active() === "context" || input.tabs().all().includes("context"))
   const browserOpen = createMemo(
@@ -53,7 +52,7 @@ export const createSessionTabs = (input: TabsInput) => {
         .tabs()
         .all()
         .flatMap((tab) => {
-          if (tab === "context" || tab === "review" || tab === "browser") return []
+          if (tab === "browser" || (tab === "review" && !review())) return []
           if (tab === SESSION_OPEN_FILE_TAB && !fileBrowser()) return []
           const value = input.pathFromTab(tab) ? input.normalizeTab(tab) : tab
           if (seen.has(value)) return []
@@ -67,7 +66,12 @@ export const createSessionTabs = (input: TabsInput) => {
   const openedTabs = createMemo(
     () =>
       panelTabs().filter(
-        (tab) => tab !== SESSION_OPEN_FILE_TAB && !tab.startsWith("browser:") && !tab.startsWith("new-tab:"),
+        (tab) =>
+          tab !== "review" &&
+          tab !== "context" &&
+          tab !== SESSION_OPEN_FILE_TAB &&
+          !tab.startsWith("browser:") &&
+          !tab.startsWith("new-tab:"),
       ),
     emptyTabs,
     {
@@ -79,14 +83,13 @@ export const createSessionTabs = (input: TabsInput) => {
     if (active === "context") return active
     if (active === "browser" || active?.startsWith("browser:") || active?.startsWith("new-tab:")) return active
     if (active === SESSION_OPEN_FILE_TAB && openFileOpen()) return active
-    if (active === "review" && review()) return active
+    if (active === "review" && review() && panelTabs().includes(active)) return active
     if (active && input.pathFromTab(active)) return input.normalizeTab(active)
 
     const first = panelTabs().find((tab) => tab !== SESSION_OPEN_FILE_TAB)
     if (first) return first
     if (contextOpen()) return "context"
     if (browserOpen()) return "browser"
-    if (review() && hasReview()) return "review"
     return "empty"
   })
   const activeFileTab = createMemo(() => {
@@ -96,6 +99,7 @@ export const createSessionTabs = (input: TabsInput) => {
   })
   const closableTab = createMemo(() => {
     const active = activeTab()
+    if (active === "review" && panelTabs().includes(active)) return active
     if (active === "context") return active
     if (active === "browser" || active?.startsWith("browser:") || active?.startsWith("new-tab:")) return active
     if (active === SESSION_OPEN_FILE_TAB && openFileOpen()) return active

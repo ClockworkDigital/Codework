@@ -14,7 +14,7 @@ describe("nextTabListScrollLeft", () => {
     expect(left).toBeUndefined()
   })
 
-  test("scrolls to start when context tab opens", () => {
+  test("scrolls to the new Context tab at the end", () => {
     const left = nextTabListScrollLeft({
       prevScrollWidth: 400,
       scrollWidth: 500,
@@ -23,7 +23,7 @@ describe("nextTabListScrollLeft", () => {
       contextOpen: true,
     })
 
-    expect(left).toBe(0)
+    expect(left).toBe(180)
   })
 
   test("scrolls to right edge for new file tabs", () => {
