@@ -26,6 +26,7 @@ import { debounce } from "@solid-primitives/scheduled"
 import { useLocal } from "@/context/local"
 import { FileProvider, selectionFromLines, useFile, type FileSelection, type SelectedLineRange } from "@/context/file"
 import { createStore } from "solid-js/store"
+import { Portal } from "solid-js/web"
 import type { SessionReviewLineComment } from "@opencode-ai/session-ui/session-review"
 import { ResizeHandle } from "@opencode-ai/ui/resize-handle"
 import { Select } from "@opencode-ai/ui/select"
@@ -401,6 +402,8 @@ export default function Page() {
   })
 
   const [ui, setUi] = createStore({
+    threadHeaderMount: undefined as HTMLDivElement | undefined,
+    panelHeaderMount: undefined as HTMLDivElement | undefined,
     panelTabsMount: undefined as HTMLDivElement | undefined,
     pendingMessage: undefined as string | undefined,
     reviewSnap: false,
@@ -2280,78 +2283,81 @@ export default function Page() {
     <SessionRouteFrame thread={!!params.id}>
       <SessionHeader />
       <Show when={settings.general.quietCompanion() && params.id}>
-        <header data-cm3-region="header" class="cm3-thread-header" data-panel-tabs={desktopReviewOpen()}>
-          <span class="cm3-thread-project" dir="auto">
-            {sync().project?.name || getFilename(sdk().directory)}
-          </span>
-          <Show when={desktopReviewOpen()}>
+        <div ref={(mount) => setUi("threadHeaderMount", mount)} class="shrink-0" />
+        <Portal mount={ui.panelHeaderMount ?? ui.threadHeaderMount}>
+          <header data-cm3-region="header" class="cm3-thread-header" data-panel-tabs={desktopReviewOpen()}>
+            <span class="cm3-thread-project" dir="auto">
+              {sync().project?.name || getFilename(sdk().directory)}
+            </span>
+            <Show when={desktopReviewOpen()}>
+              <div
+                data-cm3-region="panel-tabs"
+                hidden={schedulingOpen()}
+                inert={schedulingOpen()}
+                style={{ display: schedulingOpen() ? "none" : undefined }}
+                class="cm3-thread-panel-tabs"
+                ref={(mount) => {
+                  setUi("panelTabsMount", mount)
+                  onCleanup(() => setUi("panelTabsMount", undefined))
+                }}
+              />
+            </Show>
             <div
-              data-cm3-region="panel-tabs"
-              hidden={schedulingOpen()}
+              class="cm3-thread-actions"
               inert={schedulingOpen()}
-              style={{ display: schedulingOpen() ? "none" : undefined }}
-              class="cm3-thread-panel-tabs"
-              ref={(mount) => {
-                setUi("panelTabsMount", mount)
-                onCleanup(() => setUi("panelTabsMount", undefined))
-              }}
-            />
-          </Show>
-          <div
-            class="cm3-thread-actions"
-            inert={schedulingOpen()}
-            style={{ visibility: schedulingOpen() ? "hidden" : undefined }}
-          >
-            <button
-              type="button"
-              aria-label={language.t("command.review.toggle")}
-              aria-pressed={isDesktop() ? view().reviewPanel.opened() && activeTab() === "review" : mobileChanges()}
-              onClick={() => {
-                if (!isDesktop()) {
-                  setStore("mobileTab", mobileChanges() ? "session" : "changes")
-                  return
-                }
-                if (view().reviewPanel.opened() && activeTab() === "review") {
-                  view().reviewPanel.close()
-                  return
-                }
-                view().reviewPanel.open()
-                tabs().setActive("review")
-              }}
+              style={{ visibility: schedulingOpen() ? "hidden" : undefined }}
             >
-              <Cm3Icon name="git-diff" />
-              <span>{language.t("session.tab.review")}</span>
-            </button>
-            <Show when={platform.browserPanel && isDesktop()}>
               <button
                 type="button"
-                aria-label={language.t("command.browser.toggle")}
-                aria-pressed={
-                  view().reviewPanel.opened() && (activeTab() === "browser" || activeTab().startsWith("browser:"))
-                }
+                aria-label={language.t("command.review.toggle")}
+                aria-pressed={isDesktop() ? view().reviewPanel.opened() && activeTab() === "review" : mobileChanges()}
                 onClick={() => {
-                  if (
-                    view().reviewPanel.opened() &&
-                    (activeTab() === "browser" || activeTab().startsWith("browser:"))
-                  ) {
+                  if (!isDesktop()) {
+                    setStore("mobileTab", mobileChanges() ? "session" : "changes")
+                    return
+                  }
+                  if (view().reviewPanel.opened() && activeTab() === "review") {
                     view().reviewPanel.close()
                     return
                   }
-                  batch(() => {
-                    view().reviewPanel.open()
-                    void tabs().open("browser")
-                  })
+                  view().reviewPanel.open()
+                  tabs().setActive("review")
                 }}
               >
-                <Cm3Icon name="globe" />
-                <span>{language.t("session.tab.browser")}</span>
+                <Cm3Icon name="git-diff" />
+                <span>{language.t("session.tab.review")}</span>
               </button>
-            </Show>
-            <Show when={isDesktop()}>
-              <SessionSidePanelToggle label={language.t("session.header.toggleSidePanel")} />
-            </Show>
-          </div>
-        </header>
+              <Show when={platform.browserPanel && isDesktop()}>
+                <button
+                  type="button"
+                  aria-label={language.t("command.browser.toggle")}
+                  aria-pressed={
+                    view().reviewPanel.opened() && (activeTab() === "browser" || activeTab().startsWith("browser:"))
+                  }
+                  onClick={() => {
+                    if (
+                      view().reviewPanel.opened() &&
+                      (activeTab() === "browser" || activeTab().startsWith("browser:"))
+                    ) {
+                      view().reviewPanel.close()
+                      return
+                    }
+                    batch(() => {
+                      view().reviewPanel.open()
+                      void tabs().open("browser")
+                    })
+                  }}
+                >
+                  <Cm3Icon name="globe" />
+                  <span>{language.t("session.tab.browser")}</span>
+                </button>
+              </Show>
+              <Show when={isDesktop()}>
+                <SessionSidePanelToggle label={language.t("session.header.toggleSidePanel")} />
+              </Show>
+            </div>
+          </header>
+        </Portal>
       </Show>
       <div
         ref={panelRow}
@@ -2408,6 +2414,7 @@ export default function Page() {
         <Show when={!newSessionDesign() && desktopSidePanelOpen()}>
           <Suspense>
             <SessionSidePanel
+              headerMount={settings.general.quietCompanion() ? (mount) => setUi("panelHeaderMount", mount) : undefined}
               tabsMount={ui.panelTabsMount}
               canReview={canReview}
               diffs={reviewDiffs}
@@ -2431,6 +2438,9 @@ export default function Page() {
                 <div class="min-h-0 flex-1">
                   <Suspense>
                     <SessionSidePanel
+                      headerMount={
+                        settings.general.quietCompanion() ? (mount) => setUi("panelHeaderMount", mount) : undefined
+                      }
                       tabsMount={ui.panelTabsMount}
                       canReview={canReview}
                       diffs={reviewDiffs}

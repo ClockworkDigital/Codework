@@ -8,6 +8,37 @@ import {
 import { expectSessionTitle } from "../utils/waits"
 import { mockOpenCodeServer } from "../utils/mock-server"
 
+for (const newLayoutDesigns of [false, true]) {
+  test(`CM3 attaches panel tabs beside the full-height chat in ${newLayoutDesigns ? "new" : "legacy"} layout`, async ({
+    page,
+  }) => {
+    await mockStressTimeline(page)
+    await installStressSessionTabs(page, { sessionIDs: [fixture.sourceID] })
+    await page.addInitScript((newLayoutDesigns) => {
+      localStorage.setItem("settings.v3", JSON.stringify({ general: { newLayoutDesigns, quietCompanion: true } }))
+    }, newLayoutDesigns)
+    await page.goto(stressSessionHref(fixture.sourceID))
+    await expectSessionTitle(page, fixture.expected.sourceTitle)
+    const header = page.locator('[data-cm3-region="header"]')
+    await header.getByRole("button", { name: "Toggle review", exact: true }).click()
+    const panel = page.locator("#review-panel")
+    await expect(panel.locator('[data-cm3-region="header"]')).toBeVisible()
+    await expect(panel.locator('[data-cm3-region="panel-tabs"] [role="tablist"]')).toBeVisible()
+    await expect
+      .poll(async () => {
+        const chat = await page.locator('[data-cm3-region="session-panel"]').boundingBox()
+        const route = await page.locator('[data-cm3-region="session"]').boundingBox()
+        return chat && route ? chat.y - route.y : Infinity
+      })
+      .toBeLessThanOrEqual(8)
+    await header.getByRole("button", { name: "Toggle review", exact: true }).click()
+    await expect(panel).not.toBeVisible()
+    await expect(header.getByRole("button", { name: "Toggle review", exact: true })).toBeVisible()
+    await header.getByRole("button", { name: "Toggle review", exact: true }).click()
+    await expect(panel.locator('[data-cm3-region="panel-tabs"] [role="tablist"]')).toBeVisible()
+  })
+}
+
 test("CM3 keeps draft navigation in project chats across UI switches", async ({ page }) => {
   await mockStressTimeline(page)
   await installStressSessionTabs(page, { draftID: "draft_cm3_tabs" })

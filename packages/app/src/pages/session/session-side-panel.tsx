@@ -89,6 +89,7 @@ export function SessionSidePanel(props: {
   reviewSnap: boolean
   size: Sizing
   stacked?: boolean
+  headerMount?: (mount: HTMLDivElement | undefined) => void
   tabsMount?: HTMLDivElement
 }) {
   const layout = useLayout()
@@ -510,7 +511,7 @@ export function SessionSidePanel(props: {
         aria-label={language.t("session.panel.reviewAndFiles")}
         aria-hidden={!open() || obscured()}
         inert={!open() || obscured()}
-        class="relative min-w-0 flex overflow-hidden"
+        class="relative min-w-0 flex flex-col overflow-hidden"
         classList={{
           "bg-v2-background-bg-base": settings.general.newLayoutDesigns(),
           "bg-background-base": !settings.general.newLayoutDesigns(),
@@ -525,8 +526,18 @@ export function SessionSidePanel(props: {
         style={{ width: obscured() ? "0px" : panelWidth(), display: obscured() ? "none" : undefined }}
       >
         <Show when={open()}>
+          <Show when={props.headerMount}>
+            <div
+              class="shrink-0"
+              ref={(mount) => {
+                const attach = props.headerMount
+                attach?.(mount)
+                onCleanup(() => attach?.(undefined))
+              }}
+            />
+          </Show>
           <div
-            class="size-full flex"
+            class="w-full min-h-0 flex-1 flex"
             classList={{
               "border-l border-border-weaker-base": !settings.general.newLayoutDesigns(),
             }}
