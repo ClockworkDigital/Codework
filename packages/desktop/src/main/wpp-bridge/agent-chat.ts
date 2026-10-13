@@ -118,7 +118,7 @@ export async function openAgentChat(
   {
     now = Date.now,
     sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
-    timeoutMs = 120000,
+    timeoutMs = 240000,
     signal,
     projectId,
   }: {

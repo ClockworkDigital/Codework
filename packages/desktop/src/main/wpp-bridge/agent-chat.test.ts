@@ -105,6 +105,24 @@ describe("published WPP agent chat", () => {
 })
 
 describe("dedicated chat startup lifecycle", () => {
+  test.each(["slow", "missing"])("allows four minutes by default for a %s chat", async (mode) => {
+    let time = 0
+    const context = readyChatContext(() => mode === "slow" && time >= 180000)
+    const frame = {
+      url: "https://open-web-agent-builder-cs.wpp.ai/chat/project/foundational",
+      executeJavaScript: async (source: string) => vm.runInContext(source, context),
+    }
+    const opening = openAgentChat({ mainFrame: { framesInSubtree: [frame] } }, "CM_Astra", {
+      now: () => time,
+      sleep: async (ms) => {
+        time += ms
+      },
+    })
+    if (mode === "slow") await opening
+    if (mode === "missing") await expect(opening).rejects.toMatchObject({ type: "o1_code_agent_chat_timeout" })
+    expect(time).toBe(mode === "slow" ? 180000 : 240000)
+  })
+
   test.each(["builder-project", "other-project"])("pins Chat to the observed builder roster: %s", async (project) => {
     const h = harness(["CM_Astra"])
     const chat = {
