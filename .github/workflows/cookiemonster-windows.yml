@@ -79,10 +79,11 @@ jobs:
           const packaging = createRequire(builder.resolve('app-builder-lib'))
           const asar = packaging('@electron/asar')
           const fs = require('node:fs')
+          const path = require('node:path')
           const assert = require('node:assert/strict')
           const resources = 'dist/win-unpacked/resources'
           assert.equal(JSON.parse(asar.extractFile(resources+'/app.asar', 'package.json')).version, process.env.CM_VERSION)
-          assert(asar.extractFile(resources+'/app.asar', 'out/main/index.js').toString().includes('protocol === "blob:"'))
+          assert(asar.extractFile(resources+'/app.asar', path.join('out', 'main', 'index.js')).toString().includes('protocol === "blob:"'))
           for (const file of ['opencode-cli.exe', 'cli/opencode.exe', 'cm-browser/plugin.mjs', 'vault-auth/windows-x64.exe', 'vault-auth/windows-entry-x64.exe']) assert(fs.existsSync(resources+'/'+file), file)
           '@ | node
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
