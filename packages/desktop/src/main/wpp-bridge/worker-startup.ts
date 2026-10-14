@@ -1,3 +1,30 @@
+import type { EventEmitter } from "node:events"
+
+export async function loadWorkerProject(
+  contents: EventEmitter & { loadURL(url: string): Promise<void> },
+  url: string,
+  timeoutMs: number,
+  signal?: AbortSignal,
+) {
+  const failure = (type: string, statusCode: number) => Object.assign(new Error(type), { type, statusCode })
+  if (signal?.aborted) throw failure("o1_code_client_aborted", 499)
+  const ready = Promise.withResolvers<void>()
+  const loaded = () => ready.resolve()
+  const abort = () => ready.reject(failure("o1_code_client_aborted", 499))
+  const timer = setTimeout(() => ready.reject(failure("o1_code_project_load_timeout", 502)), timeoutMs)
+  // Background resources can keep loadURL pending after the project DOM is usable.
+  contents.once("dom-ready", loaded)
+  signal?.addEventListener("abort", abort, { once: true })
+  try {
+    contents.loadURL(url).then(loaded, ready.reject)
+    await ready.promise
+  } finally {
+    clearTimeout(timer)
+    contents.removeListener("dom-ready", loaded)
+    signal?.removeEventListener("abort", abort)
+  }
+}
+
 type DestroyableWindow = {
   isDestroyed: () => boolean
   destroy: () => void

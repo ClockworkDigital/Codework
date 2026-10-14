@@ -27,7 +27,7 @@ function agentChatSelectedPage(agent: string, verifyComposer: boolean) {
   const inputs = Array.from(
     document.querySelectorAll<HTMLTextAreaElement>("textarea[data-testid='chat-input']"),
   ).filter(visible)
-  const loaded = document.readyState === "complete"
+  const loaded = document.readyState !== "loading"
   const modelReady = modelMatches && visible(buttons[0])
   const composerReady = inputs.length === 1 && inputs[0].isConnected && !inputs[0].disabled && !inputs[0].readOnly
   return { loaded, modelReady, composerReady, ready: loaded && modelReady && composerReady }
@@ -38,7 +38,7 @@ export function agentChatLaunchExpression(agent: string, action: "inspect" | "ho
 }
 
 function agentChatLaunchPage(agent: string, action: "inspect" | "hover" | "open" | "chat") {
-  if (document.readyState !== "complete") return { state: "loading", acted: false }
+  if (document.readyState === "loading") return { state: "loading", acted: false }
   const visible = (element: Element) => {
     const style = getComputedStyle(element)
     const rect = element.getBoundingClientRect()

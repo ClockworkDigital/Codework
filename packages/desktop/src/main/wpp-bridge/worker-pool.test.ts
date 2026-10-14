@@ -1,10 +1,12 @@
 import { describe, expect, test } from "bun:test"
+import { EventEmitter } from "node:events"
 import {
   cleanupWindowOnFailure,
   classifyWppAuthState,
   classifyWppProjectAccessState,
   classifyWppSessionProbe,
   isWppFrameUrl,
+  loadWorkerProject,
   wppAuthRequiredError,
   wppProjectAccessError,
 } from "./worker-startup"
@@ -710,6 +712,41 @@ describe("submission witness boundary", () => {
 })
 
 describe("worker startup helpers", () => {
+  test("starts from the project DOM without waiting for background resources", async () => {
+    const navigation = Promise.withResolvers<void>()
+    const contents = Object.assign(new EventEmitter(), { loadURL: () => navigation.promise })
+    const loading = loadWorkerProject(contents, "https://example.test/project", 1000)
+    contents.emit("dom-ready")
+    await loading
+    expect(contents.listenerCount("dom-ready")).toBe(0)
+    navigation.reject(new Error("late navigation failure"))
+  })
+
+  test.each(["timeout", "abort", "failure"])("cleans up project load on %s", async (mode) => {
+    const navigation = Promise.withResolvers<void>()
+    const contents = Object.assign(new EventEmitter(), { loadURL: () => navigation.promise })
+    const cancellation = new AbortController()
+    let destroyed = false
+    const window = {
+      isDestroyed: () => destroyed,
+      destroy: () => {
+        destroyed = true
+      },
+    }
+    const loading = cleanupWindowOnFailure(window, () =>
+      loadWorkerProject(contents, "https://example.test/project", 10, cancellation.signal),
+    )
+    if (mode === "abort") cancellation.abort()
+    if (mode === "failure") navigation.reject(new Error("navigation failed"))
+    await expect(loading).rejects.toMatchObject(
+      mode === "failure"
+        ? { message: "navigation failed" }
+        : { type: mode === "abort" ? "o1_code_client_aborted" : "o1_code_project_load_timeout" },
+    )
+    expect(destroyed).toBe(true)
+    expect(contents.listenerCount("dom-ready")).toBe(0)
+  })
+
   test("destroys a created window when startup fails", async () => {
     let destroyed = false
     const window = {

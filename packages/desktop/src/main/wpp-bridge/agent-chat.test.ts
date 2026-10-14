@@ -10,25 +10,30 @@ import {
 } from "./agent-chat"
 
 describe("published WPP agent chat", () => {
-  test.each(["loading", "interactive"])(
-    "does not launch before the roster document is complete at %s",
-    (readyState) => {
-      const h = harness(["CM_Astra"])
-      h.state.readyState = readyState
-      h.launch("CM_Astra", "hover")
-      h.launch("CM_Astra", "open")
-      expect(h.cards[0].button.clicks).toBe(0)
-      expect(h.chat.clicks).toBe(0)
-      h.state.readyState = "complete"
-      h.launch("CM_Astra", "hover")
-      h.state.readyState = readyState
-      h.launch("CM_Astra", "chat")
-      expect(h.chat.clicks).toBe(0)
-      h.state.readyState = "complete"
-      h.launch("CM_Astra", "chat")
-      expect(h.chat.clicks).toBe(1)
-    },
-  )
+  test("does not launch before the roster DOM is ready", () => {
+    const h = harness(["CM_Astra"])
+    h.state.readyState = "loading"
+    h.launch("CM_Astra", "hover")
+    h.launch("CM_Astra", "open")
+    expect(h.cards[0].button.clicks).toBe(0)
+    expect(h.chat.clicks).toBe(0)
+    h.state.readyState = "complete"
+    h.launch("CM_Astra", "hover")
+    h.state.readyState = "loading"
+    h.launch("CM_Astra", "chat")
+    expect(h.chat.clicks).toBe(0)
+    h.state.readyState = "complete"
+    h.launch("CM_Astra", "chat")
+    expect(h.chat.clicks).toBe(1)
+  })
+
+  test("opens the usable roster while background resources are still loading", () => {
+    const h = harness(["CM_Astra"])
+    h.state.readyState = "interactive"
+    h.launch("CM_Astra", "hover")
+    expect(h.launch("CM_Astra", "chat")).toBe("clicked")
+    expect(h.chat.clicks).toBe(1)
+  })
 
   test("recognizes the agent chat, excluding the editor and assistant panel", () => {
     expect(isAgentChatUrl("https://open-web-agent-builder-cs.wpp.ai/chat/project/foundational?model=agent")).toBe(true)
@@ -203,6 +208,7 @@ describe("dedicated chat startup lifecycle", () => {
 
   test("waits for the connected composer after the expected chat and model appear", async () => {
     const h = harness(["CM_Astra"])
+    h.state.readyState = "interactive"
     h.state.selected = "CM_Astra"
     h.state.composerReady = false
     let time = 0
