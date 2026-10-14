@@ -17,6 +17,7 @@ import { installController, type Controller, type ProgressFrame } from "./contro
 import { installRecorder } from "./recorder-injection"
 import { installNetworkWitness, type NetworkWitness } from "./cdp-network-recorder"
 import { captureFailureError, captureHealth, decideCaptureVerdict } from "./capture-verdict"
+import { awaitCdpWitnessSettle, shouldAwaitCdpFinish } from "./cdp-witness-wait"
 import {
   cleanupWindowOnFailure,
   classifyWppAuthState,
@@ -204,10 +205,14 @@ export class WorkerPool {
           diagnostics && typeof diagnostics === "object" && Reflect.get(diagnostics, "phase") === "no-network-response"
         if (!captureTimedOut) return { ...result, worker: correlation }
       }
-      const enriched = attachCaptureVerdict(
-        result,
-        worker.netWitness.summarizeWindow(submissionStartedAt(result, startedAt)),
-      )
+      const sinceMs = submissionStartedAt(result, startedAt)
+      let witness = worker.netWitness.summarizeWindow(sinceMs)
+      // content.js may time out a beat before Network.loadingFinished on a slow stream — wait for
+      // CDP progress before labeling unfinished-stream / capture failure.
+      if (shouldAwaitCdpFinish(result, witness)) {
+        witness = await awaitCdpWitnessSettle(() => worker.netWitness.summarizeWindow(sinceMs))
+      }
+      const enriched = attachCaptureVerdict(result, witness)
       this.record(worker.id, "capture-verdict", {
         accepted: enriched.captureVerdict.accept,
         capture: {

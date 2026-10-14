@@ -417,6 +417,7 @@ describe("WorkerPool capture failures", () => {
   test("classifies a no-network-response worker result for fresh replay", async () => {
     const pool = new WorkerPool({ chatUrl: "https://example.test/chat" })
     let destroyed = false
+    let summarizeCalls = 0
     const worker = {
       id: 2,
       window: {
@@ -433,15 +434,20 @@ describe("WorkerPool capture failures", () => {
         }),
       },
       netWitness: {
-        summarizeWindow: () => ({
-          cdpRequestSeen: true,
-          cdpStatus: 200,
-          cdpBytes: 0,
-          cdpFinished: false,
-          cdpFailed: false,
-          failureText: null,
-          eventSourceMessages: 0,
-        }),
+        // First poll unfinished (triggers await); second finishes so the verdict is parser-miss
+        // rather than an instant unfinished-stream failure.
+        summarizeWindow: () => {
+          summarizeCalls += 1
+          return {
+            cdpRequestSeen: true,
+            cdpStatus: 200,
+            cdpBytes: summarizeCalls >= 2 ? 200 : 125,
+            cdpFinished: summarizeCalls >= 2,
+            cdpFailed: false,
+            failureText: null,
+            eventSourceMessages: 0,
+          }
+        },
       },
       agent: "CM_GPT-5.6 Sol - High",
       protocolAgent: "CM_GPT-5.6 Sol - High",
@@ -468,7 +474,8 @@ describe("WorkerPool capture failures", () => {
       )
 
     expect(Reflect.get(error, "type")).toBe("o1_code_capture_failure")
-    expect(Reflect.get(error, "kind")).toBe("wpp_request_failed")
+    expect(Reflect.get(error, "kind")).toBe("recorder_parser_miss")
+    expect(summarizeCalls).toBeGreaterThan(1)
     expect(destroyed).toBe(true)
     pool.destroy()
   })
