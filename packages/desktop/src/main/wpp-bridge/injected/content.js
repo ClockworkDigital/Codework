@@ -201,7 +201,9 @@ async function runJobWithProgress(job, jobId) {
   const jobTimeoutMs = Number(job.timeoutMs || SETUP_TIMEOUT_MS);
   const initialTextarea = await waitForTextarea(SETUP_TIMEOUT_MS);
   const agentSelection = requireAgentSelected(expectedAgent);
-  await waitForGreetingSettlement(initialTextarea);
+  // Fresh turns wipe the thread in startFreshChat (which settles after New Chat). Settling here
+  // only helps continue turns that must be idle before paste/submit.
+  if (continueThread) await waitForGreetingSettlement(initialTextarea);
   const freshChat = continueThread ? await continueExistingChat() : await startFreshChat({ expectedAgent });
   const ignoredAssistantErrorText = inspectAssistantUi().error?.text || null;
   let textarea = await waitForTextarea(SETUP_TIMEOUT_MS);
@@ -228,9 +230,13 @@ async function runJobWithProgress(job, jobId) {
       ignoredAssistantErrorText,
       domMessage: beforeAssistantMessage
     });
-    capture = beginNetworkCapture({ verboseRecorder, expectedPrompt: prompt, expectedEndpoint: job?.payload?.expectedEndpoint });
+    // Live turns must not pin expectedPrompt/expectedEndpoint: dedicated-chat wire bodies and
+    // lambda URLs often fail that admission gate while CDP still sees the SSE, which ends as
+    // recorderSawRequest=false + unfinished stream. Greeting isolation stays on requireIdle /
+    // waitForGreetingSettlement; the arm-with-prompt API remains for tests.
+    capture = beginNetworkCapture({ verboseRecorder });
     registerProgressRun(capture.runId, jobId);
-  });
+  }, { settleGreeting: continueThread });
   const afterSubmitDiagnostics = buildBridgeDiagnostics({
     phase: "after-submit",
     runId: capture.runId,
@@ -279,7 +285,10 @@ async function runJobWithProgress(job, jobId) {
   const alternateAssistantTexts = Object.values(networkResponse.alternateAssistantTexts || {});
   const wireModel = networkResponse.model || null;
   const assistantUi = inspectAssistantUi();
-  const pill = await waitForUpdatedTokenPill(beforeTokenPill);
+  // Wire usage from the network record is authoritative; the DOM pill wait only fills gaps.
+  const pill = networkResponse.usage
+    ? { measurement: null }
+    : await waitForUpdatedTokenPill(beforeTokenPill);
   const usage = networkResponse.usage || pill.measurement;
 
   return {
@@ -917,7 +926,7 @@ async function waitForTextarea(timeoutMs) {
 
 const STOP_BUTTON_LABEL = /\b(stop|cancel|abort|pause)\b/i;
 
-async function submitPrompt(textarea, prompt, timeoutMs = 120000, beforeSubmit = () => {}) {
+async function submitPrompt(textarea, prompt, timeoutMs = 120000, beforeSubmit = () => {}, { settleGreeting = true } = {}) {
   const deadline = Date.now() + timeoutMs;
   for (let attempt = 0; attempt < 2 && Date.now() < deadline; attempt += 1) {
     textarea = findVisibleTextarea();
@@ -929,9 +938,10 @@ async function submitPrompt(textarea, prompt, timeoutMs = 120000, beforeSubmit =
     textarea.dispatchEvent(new InputEvent("beforeinput", { bubbles: true, cancelable: true, inputType: "insertText", data: prompt }));
     textarea.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: prompt }));
     textarea.dispatchEvent(new Event("change", { bubbles: true }));
-    await waitForGreetingSettlement(textarea, { timeoutMs: Math.max(1, deadline - Date.now()) });
+    // Fresh turns already settled after New Chat; a second 1s-idle wait here only adds latency.
+    if (settleGreeting) await waitForGreetingSettlement(textarea, { timeoutMs: Math.max(1, deadline - Date.now()) });
     if (textarea !== findVisibleTextarea() || textarea.isConnected === false) continue;
-    await waitForSendButton(textarea, Math.min(3000, Math.max(1, deadline - Date.now())));
+    await waitForSendButton(textarea, Math.min(15000, Math.max(1, deadline - Date.now())));
     if (textarea !== findVisibleTextarea() || textarea.isConnected === false) continue;
     const recorder = window.__o1CodeRecorderState?.();
     if (!recorder || recorder.pending > 0 || recorder.failure) throw setupError("o1_code_greeting_not_settled");
@@ -2151,7 +2161,8 @@ function normalizePromptText(value) {
 
 async function waitForNetworkResponse({ runId, timeoutMs, textarea, prompt = "", ignoredAssistantErrorText = null, beforeAssistantMessage = null }) {
   const startedAt = Date.now();
-  const discoveryTimeoutMs = 3000;
+  // Floor for "no request seen yet" bail — slow submit→POST on laggy networks must not 502 at 3s.
+  const discoveryTimeoutMs = 12000;
   const noNetworkDomFallbackMs = 30000;
   const baseTimeoutMs = Math.max(discoveryTimeoutMs, SETUP_TIMEOUT_MS);
   const maxTimeoutMs = Math.max(baseTimeoutMs, Number(timeoutMs || SETUP_TIMEOUT_MS));
@@ -2278,7 +2289,11 @@ async function waitForNetworkResponse({ runId, timeoutMs, textarea, prompt = "",
     }
 
     if (!observedNetwork && nowMs - startedAt > discoveryTimeoutMs) {
-      if (textareaStillContainsPrompt(textarea, prompt) || nowMs - startedAt > noNetworkDomFallbackMs) {
+      // Keep waiting while the turn still looks active: thinking UI, stop control, or recorder
+      // request/observed for this run — only bail when submit never left the composer (or the
+      // hard no-network DOM window expires).
+      if (!thinking && !hasRecorderActivity(runId)
+          && (textareaStillContainsPrompt(textarea, prompt) || nowMs - startedAt > noNetworkDomFallbackMs)) {
         return null;
       }
     }
@@ -2361,6 +2376,11 @@ function shouldReturnDomFallback({ candidate, before, nowMs, stableSinceMs, domS
   }
 
   if (typeof textarea.closest === "function" && findStopButton(textarea)) {
+    return false;
+  }
+
+  // Don't race an open SSE into a rejected DOM complete — wait for network or job timeout.
+  if (record && !record.done && !record.error) {
     return false;
   }
 
@@ -2911,6 +2931,13 @@ function hasIncompleteNetworkRecord(runId = null) {
   );
 }
 
+function hasRecorderActivity(runId = null) {
+  if (!runId) return hasIncompleteNetworkRecord();
+  return (recorderStatus.requests.get(runId)?.length || 0) > 0
+    || (recorderStatus.observed.get(runId)?.length || 0) > 0
+    || hasIncompleteNetworkRecord(runId);
+}
+
 function findAssistantUiError(text = visiblePageText()) {
   const unableMatch = text.match(/Unable to complete the request\.\s*(?:\([^)]+\))?/i);
 
@@ -3058,6 +3085,7 @@ if (globalThis.__O1_CODE_BRIDGE_TEST_HOOKS__ && globalThis.process?.versions?.no
     buildBridgeDiagnostics,
     matchThinkingText,
     hasIncompleteNetworkRecord,
+    hasRecorderActivity,
     findImageFileInput,
     findAttachmentControl,
     fileFromImageInput,

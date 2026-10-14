@@ -56,6 +56,9 @@ export type Controller = {
   inspectChat: (timeoutMs?: number) => Promise<unknown>
 }
 
+// Register the outbound binding + relay + content.js with the shared target hub. Caller must
+// armTargetAttach after all installers are registered. Shares the WebContents debugger with
+// installRecorder; Runtime/Page.enable are idempotent across both.
 export async function installController(contents: WebContents): Promise<Controller> {
   const dbg = contents.debugger
   const pending = new Map<string, Pending>()

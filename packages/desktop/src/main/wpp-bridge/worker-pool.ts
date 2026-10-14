@@ -12,10 +12,12 @@ import { createHash } from "node:crypto"
 import { diagnosticUrl, observeWorkerWindow, writeWorkerLog, type WorkerLogWriter } from "./worker-logging"
 import { createWorkerWindow } from "./session"
 import { agentChatProjectId, openAgentChat } from "./agent-chat"
+import { armTargetAttach } from "./cdp-targets"
 import { installController, type Controller, type ProgressFrame } from "./controller-injection"
 import { installRecorder } from "./recorder-injection"
 import { installNetworkWitness, type NetworkWitness } from "./cdp-network-recorder"
 import { captureFailureError, captureHealth, decideCaptureVerdict } from "./capture-verdict"
+import { awaitCdpWitnessSettle, shouldAwaitCdpFinish } from "./cdp-witness-wait"
 import {
   cleanupWindowOnFailure,
   classifyWppAuthState,
@@ -164,11 +166,9 @@ export class WorkerPool {
       throwIfClientAborted(signal)
       const startedAt = Date.now()
       this.record(worker.id, "protocol-ready", {})
-      const admittedJob = { ...job, payload: { ...job.payload, expectedEndpoint: worker.protocolEndpoint } }
-      const result = await withClientAbort(
-        worker.controller.runJob(admittedJob, onProgress, remainingJobTimeout(job)),
-        signal,
-      )
+      // Do not pin protocolEndpoint onto the job: the probe often learns /v1/chat while the live
+      // turn hits *.lambda-url…/, and pageRecorder's expectedEndpoint gate would drop the Fetch.
+      const result = await withClientAbort(worker.controller.runJob(job, onProgress, remainingJobTimeout(job)), signal)
       this.record(worker.id, "job-result", {
         durationMs: Date.now() - startedAt,
         ok: result && typeof result === "object" ? Reflect.get(result, "ok") : null,
@@ -202,10 +202,17 @@ export class WorkerPool {
           diagnostics && typeof diagnostics === "object" && Reflect.get(diagnostics, "phase") === "no-network-response"
         if (!captureTimedOut) return { ...result, worker: correlation }
       }
-      const enriched = attachCaptureVerdict(
-        result,
-        worker.netWitness.summarizeWindow(submissionStartedAt(result, startedAt)),
-      )
+      const sinceMs = submissionStartedAt(result, startedAt)
+      let witness = worker.netWitness.summarizeWindow(sinceMs)
+      // content.js may time out a beat before Network.loadingFinished on a slow stream — wait for
+      // CDP progress before labeling unfinished-stream / capture failure.
+      if (shouldAwaitCdpFinish(result, witness)) {
+        witness = await withClientAbort(
+          awaitCdpWitnessSettle(() => worker.netWitness.summarizeWindow(sinceMs)),
+          signal,
+        )
+      }
+      const enriched = attachCaptureVerdict(result, witness)
       this.record(worker.id, "capture-verdict", {
         accepted: enriched.captureVerdict.accept,
         capture: {
@@ -405,9 +412,9 @@ export class WorkerPool {
     this.jobs.clear()
   }
 
-  // Recorder + controller must be installed BEFORE the first navigation: both register
-  // Page.addScriptToEvaluateOnNewDocument, the document-start hook that arms the fetch/XHR recorder
-  // and the relay before any page script runs. Navigating after install is what makes that hold.
+  // Recorder + controller + network witness register installers first; armTargetAttach then enables
+  // paused auto-attach so every child iframe gets the full set before page scripts run. Navigating
+  // only after arm is what makes the document-start fetch/XHR patch hold.
   private async spawn(
     agent: string,
     sessionKey: string,
@@ -445,6 +452,8 @@ export class WorkerPool {
       const controller = await withClientAbort(installController(window.webContents), signal)
       stage("installing-network-witness")
       const netWitness = await withClientAbort(installNetworkWitness(window.webContents), signal)
+      stage("arming-targets")
+      await withClientAbort(armTargetAttach(window.webContents), signal)
       stage("loading-project")
       await withClientAbort(window.webContents.loadURL(this.chatUrl), signal)
       stage("checking-auth")

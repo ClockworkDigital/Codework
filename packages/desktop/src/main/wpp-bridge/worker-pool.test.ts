@@ -260,6 +260,66 @@ describe("WorkerPool startup visibility", () => {
 })
 
 describe("WorkerPool cancellation", () => {
+  test("discards the worker immediately when cancellation interrupts CDP settlement", async () => {
+    const pool = new WorkerPool({ chatUrl: "https://example.test/chat" })
+    const settling = Promise.withResolvers<void>()
+    const cancellation = new AbortController()
+    let destroyed = false
+    const worker = {
+      id: 1,
+      window: {
+        isDestroyed: () => destroyed,
+        destroy: () => {
+          destroyed = true
+        },
+      },
+      controller: {
+        runJob: async () => ({ ok: false, diagnostics: { phase: "no-network-response" } }),
+      },
+      netWitness: {
+        summarizeWindow: () => {
+          settling.resolve()
+          return {
+            cdpRequestSeen: true,
+            cdpStatus: 200,
+            cdpBytes: 125,
+            cdpFinished: destroyed,
+            cdpFailed: false,
+            failureText: null,
+            eventSourceMessages: 0,
+          }
+        },
+      },
+      agent: "CM_Opus5.5-High",
+      protocolAgent: "CM_Opus5.5-High",
+      sessionKey: "session",
+      subagent: false,
+      busy: true,
+      lastUsed: Date.now(),
+    }
+    Reflect.get(pool, "workers").set(worker.id, worker)
+    Reflect.set(pool, "acquire", async () => worker)
+    try {
+      const run = pool
+        .run(
+          { id: "job", payload: { model: worker.agent, sessionKey: worker.sessionKey, continueThread: true } },
+          undefined,
+          cancellation.signal,
+        )
+        .catch((error) => error)
+      await settling.promise
+      cancellation.abort()
+      expect(await Promise.race([run, Bun.sleep(50).then(() => null)])).toMatchObject({
+        type: "o1_code_client_aborted",
+        statusCode: 499,
+      })
+      expect(destroyed).toBe(true)
+      expect(pool.hasSession(worker.sessionKey)).toBe(false)
+    } finally {
+      pool.destroy()
+    }
+  })
+
   test("does not start the user job when cancellation follows protocol preparation", async () => {
     const pool = new WorkerPool({ chatUrl: "https://example.test/chat" })
     const probe = Promise.withResolvers<unknown>()
@@ -417,6 +477,7 @@ describe("WorkerPool capture failures", () => {
   test("classifies a no-network-response worker result for fresh replay", async () => {
     const pool = new WorkerPool({ chatUrl: "https://example.test/chat" })
     let destroyed = false
+    let summarizeCalls = 0
     const worker = {
       id: 2,
       window: {
@@ -433,15 +494,20 @@ describe("WorkerPool capture failures", () => {
         }),
       },
       netWitness: {
-        summarizeWindow: () => ({
-          cdpRequestSeen: true,
-          cdpStatus: 200,
-          cdpBytes: 0,
-          cdpFinished: false,
-          cdpFailed: false,
-          failureText: null,
-          eventSourceMessages: 0,
-        }),
+        // First poll unfinished (triggers await); second finishes so the verdict is parser-miss
+        // rather than an instant unfinished-stream failure.
+        summarizeWindow: () => {
+          summarizeCalls += 1
+          return {
+            cdpRequestSeen: true,
+            cdpStatus: 200,
+            cdpBytes: summarizeCalls >= 2 ? 200 : 125,
+            cdpFinished: summarizeCalls >= 2,
+            cdpFailed: false,
+            failureText: null,
+            eventSourceMessages: 0,
+          }
+        },
       },
       agent: "CM_GPT-5.6 Sol - High",
       protocolAgent: "CM_GPT-5.6 Sol - High",
@@ -468,7 +534,8 @@ describe("WorkerPool capture failures", () => {
       )
 
     expect(Reflect.get(error, "type")).toBe("o1_code_capture_failure")
-    expect(Reflect.get(error, "kind")).toBe("wpp_request_failed")
+    expect(Reflect.get(error, "kind")).toBe("recorder_parser_miss")
+    expect(summarizeCalls).toBeGreaterThan(1)
     expect(destroyed).toBe(true)
     pool.destroy()
   })
