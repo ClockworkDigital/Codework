@@ -18,7 +18,8 @@ permissions:
 
 jobs:
   package:
-    runs-on: windows-2025
+    # The C++17 Windows Hello helpers use the VS 2022 C++/WinRT toolchain.
+    runs-on: windows-2022
     timeout-minutes: 60
     defaults:
       run:
