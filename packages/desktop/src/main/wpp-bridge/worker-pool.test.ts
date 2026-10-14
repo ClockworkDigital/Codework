@@ -748,6 +748,12 @@ describe("worker startup helpers", () => {
       type: "EventSource",
     })
     contents.debugger.emit("message", {}, "Network.requestWillBeSent", { requestId: "beacon", type: "Ping" })
+    // WPP's blob worker bootstrap has no matching loadingFinished event.
+    contents.debugger.emit("message", {}, "Network.requestWillBeSent", {
+      requestId: "bootstrap",
+      type: "Script",
+      request: { url: "blob:https://example.test/bootstrap" },
+    })
     contents.debugger.emit("message", {}, "Network.requestWillBeSent", { requestId: "stream", type: "Fetch" })
     contents.debugger.emit("message", {}, "Network.responseReceived", {
       requestId: "stream",

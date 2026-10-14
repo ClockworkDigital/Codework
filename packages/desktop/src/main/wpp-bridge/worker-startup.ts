@@ -36,6 +36,15 @@ export async function loadWorkerProject(
     if (typeof requestId !== "string") return
     const key = `${sessionId}:${requestId}`
     if (method === "Network.requestWillBeSent") {
+      const request = Reflect.get(params, "request")
+      // Blob worker bootstrap scripts do not emit a matching network completion.
+      if (
+        Reflect.get(params, "type") === "Script" &&
+        request &&
+        typeof request === "object" &&
+        URL.parse(Reflect.get(request, "url") ?? "")?.protocol === "blob:"
+      )
+        return
       // Background streams (including LaunchDarkly) outlive page loading; beacons don't gate the UI.
       if (["EventSource", "WebSocket", "Ping"].includes(Reflect.get(params, "type"))) return
       // A cross-process iframe document can start in the parent target and finish in its child target.
