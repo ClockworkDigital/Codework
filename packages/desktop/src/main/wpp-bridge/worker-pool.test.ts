@@ -260,6 +260,52 @@ describe("WorkerPool startup visibility", () => {
 })
 
 describe("WorkerPool cancellation", () => {
+  test("does not start the user job when cancellation follows protocol preparation", async () => {
+    const pool = new WorkerPool({ chatUrl: "https://example.test/chat" })
+    const probe = Promise.withResolvers<unknown>()
+    const started = Promise.withResolvers<void>()
+    const cancellation = new AbortController()
+    let destroyed = false
+    let userJobs = 0
+    const entry = {
+      id: 1,
+      window: {
+        isDestroyed: () => destroyed,
+        destroy: () => {
+          destroyed = true
+        },
+      },
+      controller: {
+        runJob: (job: { id?: string }) => {
+          if (job.id === "user-job") {
+            userJobs += 1
+            return Promise.resolve({ ok: true })
+          }
+          started.resolve()
+          return probe.promise
+        },
+      },
+      netWitness: { summarizeWindow: () => ({}) },
+      agent: "CM_Opus5.5-High",
+      protocolAgent: "",
+      sessionKey: "session",
+      subagent: false,
+      busy: true,
+      lastUsed: Date.now(),
+    }
+    Reflect.get(pool, "workers").set(entry.id, entry)
+    Reflect.set(pool, "acquire", async () => entry)
+    const run = pool
+      .run({ id: "user-job", payload: { model: entry.agent } }, undefined, cancellation.signal)
+      .catch((error) => error)
+    await started.promise
+    probe.resolve({ ok: true, finalText: "CM_CAPABILITY_V1_OK" })
+    queueMicrotask(() => queueMicrotask(() => cancellation.abort()))
+    expect(await run).toMatchObject({ type: "o1_code_client_aborted" })
+    expect(userJobs).toBe(0)
+    expect(destroyed).toBe(true)
+    pool.destroy()
+  })
   test("discards the leased worker when its client aborts", async () => {
     const pool = new WorkerPool({ chatUrl: "https://example.test/chat" })
     let destroyed = false

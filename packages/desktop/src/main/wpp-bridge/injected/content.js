@@ -202,9 +202,9 @@ async function runJobWithProgress(job, jobId) {
   const initialTextarea = await waitForTextarea(SETUP_TIMEOUT_MS);
   const agentSelection = requireAgentSelected(expectedAgent);
   await waitForGreetingSettlement(initialTextarea);
-  const freshChat = continueThread ? await continueExistingChat() : await startFreshChat();
+  const freshChat = continueThread ? await continueExistingChat() : await startFreshChat({ expectedAgent });
   const ignoredAssistantErrorText = inspectAssistantUi().error?.text || null;
-  const textarea = await waitForTextarea(SETUP_TIMEOUT_MS);
+  let textarea = await waitForTextarea(SETUP_TIMEOUT_MS);
   const attachments = await attachImages(job?.payload?.images || [], textarea, SETUP_TIMEOUT_MS);
   if (attachments.attached > 0 && !await waitForAttachmentReady(textarea, 15000)) {
     throw imageAttachmentDesync(new Error("o1_code_image_attachment_desync"));
@@ -213,7 +213,9 @@ async function runJobWithProgress(job, jobId) {
   let beforeAssistantMessage;
   let beforeTokenPill;
   let beforeSubmitDiagnostics;
-  const submitted = await submitPrompt(textarea, prompt, SETUP_TIMEOUT_MS, () => {
+  const submitted = await submitPrompt(textarea, prompt, SETUP_TIMEOUT_MS, (currentTextarea) => {
+    if (currentTextarea !== textarea && attachments.attached > 0) throw imageAttachmentDesync(new Error("o1_code_image_attachment_desync"));
+    textarea = currentTextarea;
     requireAgentSelected(expectedAgent);
     if (!continueThread && !isTranscriptEmpty()) throw setupError("o1_code_fresh_chat_failed");
     if (continueThread && isTranscriptEmpty()) throw setupError("o1_code_thread_desync");
@@ -226,7 +228,7 @@ async function runJobWithProgress(job, jobId) {
       ignoredAssistantErrorText,
       domMessage: beforeAssistantMessage
     });
-    capture = beginNetworkCapture({ verboseRecorder });
+    capture = beginNetworkCapture({ verboseRecorder, expectedPrompt: prompt, expectedEndpoint: job?.payload?.expectedEndpoint });
     registerProgressRun(capture.runId, jobId);
   });
   const afterSubmitDiagnostics = buildBridgeDiagnostics({
@@ -245,22 +247,6 @@ async function runJobWithProgress(job, jobId) {
     ignoredAssistantErrorText,
     beforeAssistantMessage
   });
-
-  if (!networkResponse && textareaStillContainsPrompt(textarea, prompt)) {
-    submitWithEnter(textarea);
-    submitted.retry = {
-      reason: "no-network-request-and-prompt-still-in-composer",
-      method: "enter"
-    };
-    networkResponse = await waitForNetworkResponse({
-      runId: capture.runId,
-      timeoutMs: jobTimeoutMs,
-      textarea,
-      prompt,
-      ignoredAssistantErrorText,
-      beforeAssistantMessage
-    });
-  }
 
   // safe-inert: until the retry loop lands, treat a fatal-UI-error signal as "no response"
   // so it follows the existing loud-fail path (502 + toast text via networkCaptureError)
@@ -494,12 +480,12 @@ function disarmNetworkCapture() {
   window.__o1CodeRecorderControl?.({ runId: null });
 }
 
-function beginNetworkCapture({ verboseRecorder = false } = {}) {
+function beginNetworkCapture({ verboseRecorder = false, expectedPrompt, expectedEndpoint } = {}) {
   if (typeof window.__o1CodeRecorderControl !== "function") throw setupError("o1_code_recorder_not_armed");
   const runId = crypto.randomUUID();
   networkRecords.clear();
   try {
-    window.__o1CodeRecorderControl({ runId, verboseRecorder, requireIdle: true });
+    window.__o1CodeRecorderControl({ runId, verboseRecorder, expectedPrompt, expectedEndpoint, requireIdle: true });
   } catch {
     throw setupError("o1_code_greeting_not_settled");
   }
@@ -567,8 +553,9 @@ async function continueExistingChat() {
   return { ok: true, clicked: false, reason: "continue-thread" };
 }
 
-async function startFreshChat({ timeoutMs = 60000 } = {}) {
+async function startFreshChat({ timeoutMs = 60000, expectedAgent } = {}) {
   if (!isAgentChatFrame()) throw setupError("o1_code_fresh_chat_failed");
+  if (expectedAgent) requireAgentSelected(expectedAgent);
   disarmNetworkCapture();
   const textarea = findVisibleTextarea();
   const controls = Array.from(document.querySelectorAll("[data-testid='chat-title-menu-trigger']")).filter(isVisible);
@@ -579,6 +566,7 @@ async function startFreshChat({ timeoutMs = 60000 } = {}) {
   const deadline = Date.now() + timeoutMs;
   let clicked = false;
   while (Date.now() < deadline) {
+    if (expectedAgent) requireAgentSelected(expectedAgent);
     if (!clicked) {
       const items = Array.from(document.querySelectorAll("[data-testid='chat-menu-item-new-chat']")).filter(isVisible);
       if (items.length > 1) throw setupError("o1_code_fresh_chat_failed");
@@ -588,11 +576,15 @@ async function startFreshChat({ timeoutMs = 60000 } = {}) {
       }
     }
     const next = findVisibleTextarea();
-    if (clicked && next && next !== textarea && isTranscriptEmpty()) {
-      // React can reuse the greeting node across New Chat; the remounted composer and empty
-      // user history prove reset, while recorder activity proves the greeting has finished.
+    const menuClosed = !Array.from(document.querySelectorAll("[data-testid='chat-menu-item-new-chat']")).some(isVisible);
+    if (clicked && menuClosed && next && next.isConnected && isTranscriptEmpty()) {
+      // Reset is observed through closed controls, cleared history and settled network work.
+      // A framework may keep the same connected composer while replacing the conversation.
       await waitForGreetingSettlement(next, { timeoutMs: Math.max(1, deadline - Date.now()) });
-      return { ok: true, clicked: true };
+      if (expectedAgent) requireAgentSelected(expectedAgent);
+      const settled = findVisibleTextarea();
+      const closed = !Array.from(document.querySelectorAll("[data-testid='chat-menu-item-new-chat']")).some(isVisible);
+      if (settled?.isConnected && closed && isTranscriptEmpty()) return { ok: true, clicked: true };
     }
     await wait(100);
   }
@@ -610,7 +602,7 @@ function isTranscriptEmpty() {
   // The dedicated agent chat's automatic greeting is not prior prompt history. A reloaded
   // greeting-only page cannot accept a continuation delta even though it contains a bubble.
   if (location.hostname === "open-web-agent-builder-cs.wpp.ai") {
-    return !Array.from(root.querySelectorAll(".chat-message--user, [data-message-author-role='user']")).some(isVisible);
+    return root.querySelectorAll(".chat-message--user, [data-message-author-role='user']").length === 0;
   }
   const bubbles = Array.from(root.querySelectorAll(MESSAGE_BUBBLE_SELECTOR)).filter(isVisible);
 
@@ -926,50 +918,32 @@ async function waitForTextarea(timeoutMs) {
 const STOP_BUTTON_LABEL = /\b(stop|cancel|abort|pause)\b/i;
 
 async function submitPrompt(textarea, prompt, timeoutMs = 120000, beforeSubmit = () => {}) {
-  await waitForChatReady(textarea, submitWaitMs(timeoutMs));
-  assertChatIdleForSubmit(textarea);
-
-  textarea.focus();
-  setNativeValue(textarea, prompt);
-  textarea.dispatchEvent(new InputEvent("beforeinput", {
-    bubbles: true,
-    cancelable: true,
-    inputType: "insertText",
-    data: prompt
-  }));
-  textarea.dispatchEvent(new InputEvent("input", {
-    bubbles: true,
-    inputType: "insertText",
-    data: prompt
-  }));
-  textarea.dispatchEvent(new Event("change", { bubbles: true }));
-
-  const form = textarea.closest("form");
-  const sendButton = await waitForSendButton(textarea, 3000);
-
-  await waitForGreetingSettlement(textarea);
-  if (textarea.isConnected === false) throw setupError("o1_code_thread_desync");
-  assertChatIdleForSubmit(textarea);
-  beforeSubmit();
-  const at = Date.now();
-
-  if (sendButton) {
+  const deadline = Date.now() + timeoutMs;
+  for (let attempt = 0; attempt < 2 && Date.now() < deadline; attempt += 1) {
+    textarea = findVisibleTextarea();
+    if (!textarea || textarea.isConnected === false) throw setupError("o1_code_thread_desync");
+    await waitForChatReady(textarea, submitWaitMs(Math.max(1, deadline - Date.now())));
+    assertChatIdleForSubmit(textarea);
+    textarea.focus();
+    setNativeValue(textarea, prompt);
+    textarea.dispatchEvent(new InputEvent("beforeinput", { bubbles: true, cancelable: true, inputType: "insertText", data: prompt }));
+    textarea.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: prompt }));
+    textarea.dispatchEvent(new Event("change", { bubbles: true }));
+    await waitForGreetingSettlement(textarea, { timeoutMs: Math.max(1, deadline - Date.now()) });
+    if (textarea !== findVisibleTextarea() || textarea.isConnected === false) continue;
+    await waitForSendButton(textarea, Math.min(3000, Math.max(1, deadline - Date.now())));
+    if (textarea !== findVisibleTextarea() || textarea.isConnected === false) continue;
+    const recorder = window.__o1CodeRecorderState?.();
+    if (!recorder || recorder.pending > 0 || recorder.failure) throw setupError("o1_code_greeting_not_settled");
+    const sendButton = findSendButton(textarea);
+    if (!sendButton || textarea.value !== prompt || Date.now() >= deadline) throw setupError("o1_code_submission_unverified");
+    assertChatIdleForSubmit(textarea);
+    beforeSubmit(textarea);
+    const at = Date.now();
     sendButton.click();
-  } else if (form?.requestSubmit) {
-    form.requestSubmit();
-  } else {
-    submitWithEnter(textarea);
+    return { href: location.href, at, startedAtMs: at, kind: "textarea", source: "extension-content-script", valueLength: prompt.length, sendButtonFound: true };
   }
-
-  return {
-    href: location.href,
-    at,
-    startedAtMs: at,
-    kind: "textarea",
-    source: "extension-content-script",
-    valueLength: textarea.value.length,
-    sendButtonFound: Boolean(sendButton)
-  };
+  throw setupError("o1_code_submission_unverified");
 }
 
 function submitWaitMs(timeoutMs) {
@@ -1006,15 +980,14 @@ async function waitForSendButton(textarea, timeoutMs) {
 function findSendAffordance(textarea, { enabledOnly = true } = {}) {
   const root = chatRootFor(textarea);
   const buttons = Array.from(root.querySelectorAll("button, [role='button']"));
-  let candidates = buttons.filter((button) => isVisible(button) && !STOP_BUTTON_LABEL.test(labelFor(button)));
+  let candidates = buttons.filter((button) => button.isConnected !== false && isVisible(button) && !STOP_BUTTON_LABEL.test(labelFor(button)));
 
   if (enabledOnly) {
     candidates = candidates.filter((button) => !button.disabled && button.getAttribute("aria-disabled") !== "true");
   }
 
-  return candidates.find((button) => /send/i.test(labelFor(button)))
-    || candidates.find((button) => button.querySelector("svg, img") && !/add|settings|attach|microphone/i.test(labelFor(button)))
-    || null;
+  const sends = candidates.filter((button) => /\bsend\b/i.test(labelFor(button)));
+  return sends.length === 1 ? sends[0] : null;
 }
 
 function findSendButton(textarea) {

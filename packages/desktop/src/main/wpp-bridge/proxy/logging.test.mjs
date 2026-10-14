@@ -16,7 +16,7 @@ describe("runLogRecord", () => {
     prompt: "serialized private prompt",
     o1Code: {
       prompt: "nested private prompt",
-      chatContext: { textareas: [{ value: "private composer value" }] },
+      chatContext: { textareas: [{ value: "private composer value", valuePreview: "private composer preview" }] },
       diagnostics: { domMessage: { text: "private DOM response" } },
       response: {
         finalText: "private assistant text",
@@ -58,6 +58,7 @@ describe("runLogRecord", () => {
     expect(JSON.stringify(out)).not.toContain("private unparsed payload")
     expect(JSON.stringify(out)).not.toContain("private normalized response")
     expect(JSON.stringify(out)).not.toContain("private composer value")
+    expect(JSON.stringify(out)).not.toContain("private composer preview")
     expect(JSON.stringify(out)).not.toContain("private DOM response")
   })
 

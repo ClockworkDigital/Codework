@@ -566,21 +566,18 @@ export async function waitForBridgeWithKeepAlive(bridgePromise, response, interv
   }
 }
 
-// Failure types that one fresh replay can heal. These are duplicate-safe to retry: a capture
-// failure means the witness couldn't corroborate a trusted response (no usable answer was returned),
-// recorder-not-armed, thread-desync, and image-attachment-desync are raised PRE-submit (no model
-// request was sent), and a protocol incompatibility only sent the harmless capability probe.
+// Retry only failures raised before the user prompt was submitted. A missing captured response
+// does not prove the model request was rejected, so capture failures cannot authorize a replay.
+// Protocol incompatibility follows the internal capability probe, before the user prompt.
 // The retry path resets thread continuity and replays the full transcript into a fresh worker.
 const FRESH_REPLAY_RETRY_TYPES = new Set([
   "o1_code_agent_chat_timeout",
   "o1_code_greeting_not_settled",
   "o1_code_fresh_chat_failed",
-  "o1_code_capture_failure",
   "o1_code_recorder_not_armed",
   "o1_code_thread_desync",
   "o1_code_image_attachment_desync",
   "o1_code_protocol_incompatible",
-  "o1_code_incomplete_tool_call",
 ]);
 
 export function shouldRetryFreshReplay(error, { streamSession, isCompaction }) {

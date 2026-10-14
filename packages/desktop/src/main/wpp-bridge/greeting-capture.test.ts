@@ -3,6 +3,45 @@ import vm from "node:vm"
 import { join } from "node:path"
 
 describe("WPP greeting capture boundary", () => {
+  test("ignores an unrecognized background POST failure before admission", async () => {
+    const h = await harness()
+    const request = h.fetch("/internal-preferences")
+    h.respond(new Response("failed", { status: 500 }))
+    await request
+    await h.idle()
+    expect(h.state().failure).toBeNull()
+    expect(() => h.arm("prompt", "offline input")).not.toThrow()
+  })
+
+  test("captures only the request carrying the admitted prompt after arming", async () => {
+    const h = await harness()
+    const prompt = 'offline input\n  preserve "spacing"  '
+    h.arm("prompt", prompt)
+    const greeting = h.fetch("/v1/chat", JSON.stringify({ messages: [{ content: "automatic greeting" }] }))
+    h.respond(Response.json(JSON.parse(answer("Automatic answer"))))
+    await greeting
+    await h.idle()
+    expect(h.records()).toEqual([])
+    expect(h.requests()).toEqual([])
+    const request = h.fetch("/v1/chat", JSON.stringify({ messages: [{ content: prompt }] }))
+    h.respond(Response.json(JSON.parse(answer("Admitted answer"))))
+    await request
+    await h.idle()
+    expect(h.records().at(-1)).toMatchObject({ runId: "prompt", finalText: "Admitted answer", done: true })
+    expect(h.requests()).toHaveLength(1)
+    expect(JSON.stringify(h.records())).not.toContain("offline input")
+  })
+
+  test("ignores a matching prompt posted to a different endpoint than the validated model endpoint", async () => {
+    const h = await harness()
+    h.arm("prompt", "offline input", "https://open-web-agent-builder-cs.wpp.ai/v1/chat")
+    const request = h.fetch("/history/save", JSON.stringify({ content: "offline input" }))
+    h.respond(Response.json(JSON.parse(answer("Unrelated response"))))
+    await request
+    await h.idle()
+    expect(h.records()).toEqual([])
+    expect(h.requests()).toEqual([])
+  })
   test.each([
     "https://www.google-analytics.com/g/collect",
     "https://events.launchdarkly.com/events/bulk/flags",
@@ -284,7 +323,12 @@ async function harness() {
       return response.promise
     },
     __o1CodeRecorderState: () => ({ pending: 0, failure: null as string | null, runId: null as string | null }),
-    __o1CodeRecorderControl: (_data: { runId: string | null; requireIdle?: boolean }) => {},
+    __o1CodeRecorderControl: (_data: {
+      runId: string | null
+      requireIdle?: boolean
+      expectedPrompt?: string
+      expectedEndpoint?: string
+    }) => {},
   }
   vm.runInContext(
     await Bun.file(join(import.meta.dir, "injected", "pageRecorder.js")).text(),
@@ -307,8 +351,9 @@ async function harness() {
     Xhr,
     state: () => window.__o1CodeRecorderState(),
     reset: (runId: string | null) => window.__o1CodeRecorderControl({ runId }),
-    arm: (runId: string) => window.__o1CodeRecorderControl({ runId, requireIdle: true }),
-    fetch: (url = "/v1/chat") => window.fetch(url, { method: "POST" }),
+    arm: (runId: string, expectedPrompt?: string, expectedEndpoint?: string) =>
+      window.__o1CodeRecorderControl({ runId, requireIdle: true, expectedPrompt, expectedEndpoint }),
+    fetch: (url = "/v1/chat", body?: string) => window.fetch(url, { method: "POST", body }),
     respond,
     reject: (error: Error) => responses.shift()?.reject(error),
     stream: (contentType: string) => {

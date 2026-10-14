@@ -16,6 +16,8 @@ let activeRunId = null;
 let verboseRecorder = false;
 let sequence = 0;
 let generation = 0;
+let expectedPrompt = null;
+let expectedEndpoint = null;
 const pendingRequests = new Set();
 const activity = { version: 0, changedAt: Date.now(), failure: null };
 window.__o1CodeRecorderState = () => ({ ...activity, pending: pendingRequests.size, runId: activeRunId });
@@ -44,6 +46,8 @@ window.__o1CodeRecorderControl = (data) => {
   }
   generation += 1;
   activeRunId = data.runId || null;
+  expectedPrompt = typeof data.expectedPrompt === "string" ? data.expectedPrompt : null;
+  expectedEndpoint = typeof data.expectedEndpoint === "string" ? data.expectedEndpoint : null;
   verboseRecorder = data.verboseRecorder === true;
   postStatus("reset", { runId: activeRunId });
   return window.__o1CodeRecorderState();
@@ -66,6 +70,15 @@ const originalFetch = window.fetch?.bind(window);
 if (originalFetch) {
   window.fetch = async (...args) => {
     const requestInfo = describeFetchRequest(args);
+    if (activeRunId && expectedPrompt !== null && requestInfo.method === "POST") {
+      const [input, init = {}] = args;
+      const admittedPrompt = expectedPrompt;
+      let body = init.body;
+      if (body === undefined && typeof input?.clone === "function") {
+        try { body = await input.clone().text(); } catch { body = null; }
+      }
+      requestInfo.promptMatched = bodyMatchesPrompt(body, admittedPrompt);
+    }
     const tracked = shouldRecordRequest(requestInfo);
     if (tracked) startRequest(requestInfo);
     try {
@@ -117,7 +130,8 @@ if (OriginalXMLHttpRequest?.prototype) {
         startedAt: new Date().toISOString()
       }),
       runId: activeRunId,
-      generation
+      generation,
+      promptMatched: expectedPrompt !== null ? bodyMatchesPrompt(args[0], expectedPrompt) : undefined
     };
 
     if (activeRunId && verboseRecorder) observeXhr(this, requestInfo);
@@ -150,6 +164,15 @@ function describeFetchRequest(args) {
 }
 
 function shouldRecordRequest(request) {
+  if (request.method !== "POST") return false;
+  const endpoint = safeUrl(request.url);
+  if (activeRunId && expectedPrompt !== null) {
+    if (!request.promptMatched) return false;
+    const expected = expectedEndpoint && safeUrl(expectedEndpoint);
+    if (expected && (endpoint?.origin !== expected.origin || endpoint?.pathname !== expected.pathname)) return false;
+  } else if (!isModelEndpoint(endpoint)) {
+    return false;
+  }
   if (typeof window.__o1CodeShouldRecordRequest === "function") {
     try {
       return window.__o1CodeShouldRecordRequest(request);
@@ -177,6 +200,31 @@ function shouldRecordRequest(request) {
     requestUrl.includes("/v1/tools/") ||
     requestUrl.includes("/v1/oauth/")
   );
+}
+
+function isModelEndpoint(url) {
+  return Boolean(url && (/^\/(?:v1|api)\/chat(?:\/completions)?\/?$/.test(url.pathname)
+    || (url.hostname.endsWith(".lambda-url.eu-west-1.on.aws") && url.pathname === "/")));
+}
+
+// Compare transient request fields with the admitted prompt; never retain the request body.
+function bodyMatchesPrompt(body, prompt) {
+  const normalize = (value) => value.replace(/\r\n/g, "\n");
+  const expected = normalize(prompt);
+  const values = [];
+  if (typeof body === "string") {
+    if (body.length > 2 * 1024 * 1024) return false;
+    try { values.push(JSON.parse(body)); } catch { return normalize(body) === expected; }
+  } else if (body && typeof body.entries === "function") {
+    for (const [, value] of body.entries()) if (typeof value === "string") values.push(value);
+  } else return false;
+  let visited = 0;
+  while (values.length && visited++ < 10000) {
+    const value = values.pop();
+    if (typeof value === "string" && normalize(value) === expected) return true;
+    if (value && typeof value === "object") values.push(...Object.values(value));
+  }
+  return false;
 }
 
 function safeUrl(value) {
