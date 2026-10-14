@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import vm from "node:vm"
 import {
   agentChatFrame,
+  agentRosterStateExpression,
   agentChatProjectId,
   agentChatLaunchExpression,
   agentChatSelectedExpression,
@@ -27,12 +28,26 @@ describe("published WPP agent chat", () => {
     expect(h.chat.clicks).toBe(1)
   })
 
-  test("opens the usable roster while background resources are still loading", () => {
+  test("does not open the roster while background resources are still loading", () => {
     const h = harness(["CM_Astra"])
     h.state.readyState = "interactive"
     h.launch("CM_Astra", "hover")
-    expect(h.launch("CM_Astra", "chat")).toBe("clicked")
-    expect(h.chat.clicks).toBe(1)
+    expect(h.launch("CM_Astra", "chat")).toBe("loading")
+    expect(h.chat.clicks).toBe(0)
+  })
+
+  test("roster readiness includes all cards, loading indicators and images", () => {
+    const h = harness(["CM_Astra", "CM_Lazy"])
+    h.cards[1].button.disabled = true
+    expect(h.execute(agentRosterStateExpression()).ready).toBe(false)
+    h.cards[1].button.disabled = false
+    h.state.rosterBusy = true
+    expect(h.execute(agentRosterStateExpression()).ready).toBe(false)
+    h.state.rosterBusy = false
+    h.state.imagesComplete = false
+    expect(h.execute(agentRosterStateExpression()).ready).toBe(false)
+    h.state.imagesComplete = true
+    expect(h.execute(agentRosterStateExpression())).toEqual({ ready: true, signature: '["CM_Astra","CM_Lazy"]' })
   })
 
   test("recognizes the agent chat, excluding the editor and assistant panel", () => {
@@ -220,7 +235,10 @@ describe("dedicated chat startup lifecycle", () => {
       now: () => time,
       sleep: async (ms) => {
         time += ms
-        if (time >= 750) h.state.composerReady = true
+        if (time >= 750) {
+          h.state.composerReady = true
+          h.state.readyState = "complete"
+        }
       },
       timeoutMs: 2000,
     })
@@ -510,6 +528,8 @@ function harness(names: string[]) {
     readyState: "complete",
     selected: "",
     composerReady: true,
+    rosterBusy: false,
+    imagesComplete: true,
   }
   const control = (textContent = "") => ({
     textContent,
@@ -552,7 +572,11 @@ function harness(names: string[]) {
       get readyState() {
         return state.readyState
       },
+      get images() {
+        return [{ complete: state.imagesComplete }]
+      },
       querySelectorAll: (selector: string) => {
+        if (selector.includes("aria-busy")) return state.rosterBusy ? [control()] : []
         if (selector === ".agent-card") return cards
         if (selector === "button.ant-dropdown-trigger.ant-dropdown-open") {
           return cards.map((card) => card.button).filter((button) => button.classes.has("ant-dropdown-open"))

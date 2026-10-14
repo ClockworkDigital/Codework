@@ -1,27 +1,75 @@
 import type { EventEmitter } from "node:events"
+import { agentRosterStateExpression, navigationWait } from "./agent-chat"
 
 export async function loadWorkerProject(
-  contents: EventEmitter & { loadURL(url: string): Promise<void> },
+  contents: EventEmitter & {
+    loadURL(url: string): Promise<void>
+    getURL(): string
+    debugger: EventEmitter
+    mainFrame: { framesInSubtree: { url: string; executeJavaScript(code: string): Promise<unknown> }[] }
+  },
   url: string,
   timeoutMs: number,
   signal?: AbortSignal,
 ) {
   const failure = (type: string, statusCode: number) => Object.assign(new Error(type), { type, statusCode })
   if (signal?.aborted) throw failure("o1_code_client_aborted", 499)
-  const ready = Promise.withResolvers<void>()
-  const loaded = () => ready.resolve()
-  const abort = () => ready.reject(failure("o1_code_client_aborted", 499))
-  const timer = setTimeout(() => ready.reject(failure("o1_code_project_load_timeout", 502)), timeoutMs)
-  // Background resources can keep loadURL pending after the project DOM is usable.
-  contents.once("dom-ready", loaded)
-  signal?.addEventListener("abort", abort, { once: true })
+  const deadline = Date.now() + timeoutMs
+  const pending = new Set<string>()
+  let lastActivity = Date.now()
+  let rosterSignature = ""
+  let rosterReady = false
+  const network = (_event: unknown, method: string, params: unknown, sessionId = "") => {
+    if (!params || typeof params !== "object") return
+    if (method === "Target.detachedFromTarget") {
+      const detached = Reflect.get(params, "sessionId")
+      if (typeof detached !== "string") return
+      pending.forEach((key) => {
+        if (key.startsWith(`${detached}:`)) pending.delete(key)
+      })
+      lastActivity = Date.now()
+      return
+    }
+    const requestId = Reflect.get(params, "requestId")
+    if (typeof requestId !== "string") return
+    const key = `${sessionId}:${requestId}`
+    // A cross-process iframe document can start in the parent target and finish in its child target.
+    if (method === "Network.requestWillBeSent")
+      pending.add(Reflect.get(params, "type") === "Document" ? `document:${requestId}` : key)
+    if (method === "Network.loadingFinished" || method === "Network.loadingFailed") {
+      pending.delete(key)
+      pending.delete(`document:${requestId}`)
+    }
+    if (["Network.requestWillBeSent", "Network.loadingFinished", "Network.loadingFailed"].includes(method))
+      lastActivity = Date.now()
+  }
+  const observe = <T>(operation: () => Promise<T>) =>
+    navigationWait(operation, deadline - Date.now(), signal, () => failure("o1_code_project_load_timeout", 502))
+  contents.debugger.on("message", network)
   try {
-    contents.loadURL(url).then(loaded, ready.reject)
-    await ready.promise
+    await observe(() => contents.loadURL(url))
+    lastActivity = Date.now()
+    while (true) {
+      // Let the caller classify sign-in redirects before requiring a project roster.
+      if (URL.parse(contents.getURL())?.origin !== URL.parse(url)?.origin) return
+      const frames = contents.mainFrame.framesInSubtree.filter(
+        (frame) => URL.parse(frame.url)?.origin === "https://open-web-agent-builder-cs.wpp.ai",
+      )
+      const roster =
+        frames.length === 1 ? await observe(() => frames[0].executeJavaScript(agentRosterStateExpression())) : undefined
+      const signature = roster && typeof roster === "object" ? Reflect.get(roster, "signature") : undefined
+      const ready = Boolean(roster && typeof roster === "object" && Reflect.get(roster, "ready") === true)
+      if (!ready || ready !== rosterReady || typeof signature !== "string" || signature !== rosterSignature) {
+        rosterSignature = typeof signature === "string" ? signature : ""
+        rosterReady = ready
+        lastActivity = Date.now()
+      }
+      // shortcut: five quiet seconds approximate lazy-load completion; use a WPP completion signal when exposed.
+      if (ready && pending.size === 0 && Date.now() - lastActivity >= 5000) return
+      await observe(() => new Promise<void>((resolve) => setTimeout(resolve, 250)))
+    }
   } finally {
-    clearTimeout(timer)
-    contents.removeListener("dom-ready", loaded)
-    signal?.removeEventListener("abort", abort)
+    contents.debugger.removeListener("message", network)
   }
 }
 

@@ -27,7 +27,7 @@ function agentChatSelectedPage(agent: string, verifyComposer: boolean) {
   const inputs = Array.from(
     document.querySelectorAll<HTMLTextAreaElement>("textarea[data-testid='chat-input']"),
   ).filter(visible)
-  const loaded = document.readyState !== "loading"
+  const loaded = document.readyState === "complete"
   const modelReady = modelMatches && visible(buttons[0])
   const composerReady = inputs.length === 1 && inputs[0].isConnected && !inputs[0].disabled && !inputs[0].readOnly
   return { loaded, modelReady, composerReady, ready: loaded && modelReady && composerReady }
@@ -38,7 +38,7 @@ export function agentChatLaunchExpression(agent: string, action: "inspect" | "ho
 }
 
 function agentChatLaunchPage(agent: string, action: "inspect" | "hover" | "open" | "chat") {
-  if (document.readyState === "loading") return { state: "loading", acted: false }
+  if (document.readyState !== "complete") return { state: "loading", acted: false }
   const visible = (element: Element) => {
     const style = getComputedStyle(element)
     const rect = element.getBoundingClientRect()
@@ -101,6 +101,35 @@ function agentChatLaunchPage(agent: string, action: "inspect" | "hover" | "open"
     return { state: "waiting", acted: true }
   }
   return { state: "waiting", acted: false }
+}
+
+export function agentRosterStateExpression() {
+  return `(${agentRosterStatePage.toString()})()`
+}
+
+function agentRosterStatePage() {
+  const cards = Array.from(document.querySelectorAll(".agent-card"))
+  const names = cards.map((card) => card.querySelector(".agent-card-title__name")?.textContent?.trim() ?? "")
+  const busy = Array.from(
+    document.querySelectorAll("[aria-busy='true'], [role='progressbar'], .ant-spin-spinning"),
+  ).some((element) => {
+    const rect = element.getBoundingClientRect()
+    const style = getComputedStyle(element)
+    return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden"
+  })
+  return {
+    ready:
+      document.readyState === "complete" &&
+      cards.length > 0 &&
+      names.every(Boolean) &&
+      cards.every((card) => {
+        const button = card.querySelector<HTMLButtonElement>("button.agent-card-more-button")
+        return button && !button.disabled
+      }) &&
+      Array.from(document.images).every((image) => image.complete) &&
+      !busy,
+    signature: JSON.stringify(names),
+  }
 }
 
 type ChatFrame = { url: string; executeJavaScript(code: string, userGesture?: boolean): Promise<unknown> }
@@ -213,7 +242,7 @@ function pageLaunchResult(value: unknown) {
   return { state, acted }
 }
 
-function navigationWait<T>(
+export function navigationWait<T>(
   operation: () => Promise<T>,
   remaining: number,
   signal: AbortSignal | undefined,

@@ -712,19 +712,58 @@ describe("submission witness boundary", () => {
 })
 
 describe("worker startup helpers", () => {
-  test("starts from the project DOM without waiting for background resources", async () => {
+  test("waits for full load, late roster cards and network settlement across child frames", async () => {
     const navigation = Promise.withResolvers<void>()
-    const contents = Object.assign(new EventEmitter(), { loadURL: () => navigation.promise })
-    const loading = loadWorkerProject(contents, "https://example.test/project", 1000)
+    let roster = { ready: false, signature: "CM_Astra" }
+    const contents = Object.assign(new EventEmitter(), {
+      loadURL: () => navigation.promise,
+      debugger: new EventEmitter(),
+      getURL: () => "https://example.test/project",
+      mainFrame: {
+        framesInSubtree: [
+          {
+            url: "https://open-web-agent-builder-cs.wpp.ai/project/agents",
+            executeJavaScript: async () => roster,
+          },
+        ],
+      },
+    })
+    let settled = false
+    const loading = loadWorkerProject(contents, "https://example.test/project", 8000).then(() => {
+      settled = true
+    })
     contents.emit("dom-ready")
+    contents.debugger.emit("message", {}, "Network.requestWillBeSent", { requestId: "document", type: "Document" })
+    contents.debugger.emit("message", {}, "Network.loadingFinished", { requestId: "document" }, "child")
+    contents.debugger.emit("message", {}, "Network.requestWillBeSent", { requestId: "same" })
+    contents.debugger.emit("message", {}, "Network.requestWillBeSent", { requestId: "same" }, "child")
+    contents.debugger.emit("message", {}, "Network.loadingFinished", { requestId: "same" })
+    navigation.resolve()
+    await Bun.sleep(25)
+    expect(settled).toBe(false)
+    contents.debugger.emit("message", {}, "Network.loadingFinished", { requestId: "same" }, "child")
+    roster = { ready: true, signature: "CM_Astra,CM_Lazy" }
+    const completedAt = Date.now()
     await loading
-    expect(contents.listenerCount("dom-ready")).toBe(0)
-    navigation.reject(new Error("late navigation failure"))
-  })
+    expect(Date.now() - completedAt).toBeGreaterThanOrEqual(5000)
+    expect(contents.debugger.listenerCount("message")).toBe(0)
+  }, 10000)
 
-  test.each(["timeout", "abort", "failure"])("cleans up project load on %s", async (mode) => {
+  test.each(["timeout", "roster", "abort", "failure"])("cleans up project load on %s", async (mode) => {
     const navigation = Promise.withResolvers<void>()
-    const contents = Object.assign(new EventEmitter(), { loadURL: () => navigation.promise })
+    const contents = Object.assign(new EventEmitter(), {
+      loadURL: () => navigation.promise,
+      debugger: new EventEmitter(),
+      getURL: () => "https://example.test/project",
+      mainFrame: {
+        framesInSubtree: [
+          {
+            url: "https://open-web-agent-builder-cs.wpp.ai/project/agents",
+            executeJavaScript: async () => ({ ready: mode !== "roster", signature: "CM_Astra" }),
+          },
+        ],
+      },
+    })
     const cancellation = new AbortController()
     let destroyed = false
     const window = {
@@ -737,6 +776,7 @@ describe("worker startup helpers", () => {
       loadWorkerProject(contents, "https://example.test/project", 10, cancellation.signal),
     )
     if (mode === "abort") cancellation.abort()
+    if (mode === "roster") navigation.resolve()
     if (mode === "failure") navigation.reject(new Error("navigation failed"))
     await expect(loading).rejects.toMatchObject(
       mode === "failure"
@@ -744,7 +784,7 @@ describe("worker startup helpers", () => {
         : { type: mode === "abort" ? "o1_code_client_aborted" : "o1_code_project_load_timeout" },
     )
     expect(destroyed).toBe(true)
-    expect(contents.listenerCount("dom-ready")).toBe(0)
+    expect(contents.debugger.listenerCount("message")).toBe(0)
   })
 
   test("destroys a created window when startup fails", async () => {

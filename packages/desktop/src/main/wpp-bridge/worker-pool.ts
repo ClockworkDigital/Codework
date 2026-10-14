@@ -456,8 +456,7 @@ export class WorkerPool {
       stage("arming-targets")
       await withClientAbort(armTargetAttach(window.webContents), signal)
       stage("loading-project")
-      const chatDeadline = Date.now() + 240000
-      await loadWorkerProject(window.webContents, this.chatUrl, chatDeadline - Date.now(), signal)
+      await loadWorkerProject(window.webContents, this.chatUrl, 240000, signal)
       stage("checking-auth")
       await withClientAbort(throwIfAuthRequired(window.webContents), signal)
       const target = URL.parse(this.chatUrl)
@@ -476,11 +475,7 @@ export class WorkerPool {
       // Outer placement was verified above; roster navigation pins the builder ID.
       const projectId = agentChatProjectId(this.chatUrl)
       stage("opening-agent-chat")
-      await openAgentChat(window.webContents, agent, {
-        signal,
-        projectId,
-        timeoutMs: Math.max(1, chatDeadline - Date.now()),
-      }).catch(async (error) => {
+      await openAgentChat(window.webContents, agent, { signal, projectId }).catch(async (error) => {
         throwIfClientAborted(signal)
         await withClientAbort(throwIfAuthRequired(window.webContents), signal)
         throw error
