@@ -32,6 +32,7 @@ export class ExtensionBridge {
     this.lastProgress = new Map();
     this.workerPool = null;
     this.workerPoolUrl = null;
+    this.chatMode = "assistant";
     this.auth = { required: false, reason: null, detectedAt: null };
     // Set by the proxy server to openWppLogin; fired once when auth first goes required so a
     // failed job auto-pops the SSO window instead of silently flipping the status banner.
@@ -363,11 +364,23 @@ export class ExtensionBridge {
     return this.workerPool ? this.workerPool.checkAuthState() : Promise.resolve(null);
   }
 
+  setChatMode(mode) {
+    if (mode !== "assistant" && mode !== "agent") throw new Error("Invalid WPP chat mode");
+    if (mode === this.chatMode) return true;
+    // A mode change must never interrupt a submitted model turn or race its continuation mirror.
+    if (this.jobs.size > 0) return false;
+    this.workerPool?.destroy();
+    this.workerPool = null;
+    this.workerPoolUrl = null;
+    this.chatMode = mode;
+    return true;
+  }
+
   poolFor(url) {
     if (this.workerPool && this.workerPoolUrl === url) return this.workerPool;
     this.workerPool?.destroy();
     this.workerPoolUrl = url;
-    this.workerPool = new WorkerPool({ chatUrl: url });
+    this.workerPool = new WorkerPool({ chatUrl: url, chatMode: this.chatMode });
     return this.workerPool;
   }
 }

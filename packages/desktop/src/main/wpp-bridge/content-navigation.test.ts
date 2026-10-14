@@ -2,7 +2,15 @@ import { describe, expect, test } from "bun:test"
 import vm from "node:vm"
 import { join } from "node:path"
 
-describe("WPP dedicated chat navigation", () => {
+describe("WPP Assistant side-panel navigation", () => {
+  test("verifies an icon-only picker from its current-agent row and rejects a different agent", async () => {
+    const h = await harness()
+    h.state.iconOnly = true
+    h.state.modeLabel = "CM_Astra"
+    expect(h.hooks.requireAgentSelected("CM_Astra")).toEqual({ ok: true, label: "CM_Astra" })
+    h.state.modeLabel = "CM_Other"
+    expect(() => h.hooks.requireAgentSelected("CM_Astra")).toThrow("o1_code_wrong_agent")
+  })
   test("retypes a replaced composer and dispatches exactly once on fresh controls", async () => {
     const h = await harness()
     h.state.users = []
@@ -52,8 +60,8 @@ describe("WPP dedicated chat navigation", () => {
     expect(freshSend.clicks).toBe(1)
   })
 
-  test("does not reset a chat whose selected agent differs from the requested agent", async () => {
-    const h = await harness()
+  test("does not reset a dedicated chat whose selected agent differs from the requested agent", async () => {
+    const h = await harness("agent")
     h.state.agent = "CM_Other"
     await expect(h.hooks.startFreshChat({ expectedAgent: "CM_Astra" })).rejects.toMatchObject({
       type: "o1_code_wrong_agent",
@@ -72,18 +80,21 @@ describe("WPP dedicated chat navigation", () => {
     expect(h.state.time).toBeGreaterThanOrEqual(1000)
   })
 
-  test("accepts a proven reset with no greeting and reacquires the composer", async () => {
-    const h = await harness()
-    const before = h.state.composer
-    expect(await h.hooks.startFreshChat()).toEqual({ ok: true, clicked: true })
-    expect(h.state.composer).not.toBe(before)
-    expect(h.state.users).toEqual([])
-    expect(h.state.assistants).toEqual([])
-    expect(h.trigger.clicks).toBe(1)
-    expect(h.item.clicks).toBe(1)
-    expect(h.state.time).toBeGreaterThanOrEqual(1000)
-    expect(h.hooks.requireAgentSelected("CM_Astra")).toEqual({ ok: true, label: "CM_Astra" })
-  })
+  test.each(["assistant", "agent"] as const)(
+    "accepts a proven %s reset with no greeting and reacquires the composer",
+    async (mode) => {
+      const h = await harness(mode)
+      const before = h.state.composer
+      expect(await h.hooks.startFreshChat()).toEqual({ ok: true, clicked: true })
+      expect(h.state.composer).not.toBe(before)
+      expect(h.state.users).toEqual([])
+      expect(h.state.assistants).toEqual([])
+      expect(h.trigger.clicks).toBe(1)
+      expect(h.item.clicks).toBe(1)
+      expect(h.state.time).toBeGreaterThanOrEqual(1000)
+      expect(h.hooks.requireAgentSelected("CM_Astra")).toEqual({ ok: true, label: "CM_Astra" })
+    },
+  )
 
   test("waits for a new greeting body to finish before accepting reset", async () => {
     const h = await harness()
@@ -142,14 +153,17 @@ describe("WPP dedicated chat navigation", () => {
     expect(h.item.clicks).toBe(0)
   })
 
-  test("continuation preserves populated history without clicking New Chat", async () => {
-    const h = await harness()
-    expect(await h.hooks.continueExistingChat()).toMatchObject({ reason: "continue-thread", clicked: false })
-    expect(h.trigger.clicks).toBe(0)
-    expect(h.state.users).toHaveLength(1)
-    h.state.users = []
-    await expect(h.hooks.continueExistingChat()).rejects.toMatchObject({ type: "o1_code_thread_desync" })
-  })
+  test.each(["assistant", "agent"] as const)(
+    "%s continuation preserves populated history without clicking New Chat",
+    async (mode) => {
+      const h = await harness(mode)
+      expect(await h.hooks.continueExistingChat()).toMatchObject({ reason: "continue-thread", clicked: false })
+      expect(h.trigger.clicks).toBe(0)
+      expect(h.state.users).toHaveLength(1)
+      h.state.users = []
+      await expect(h.hooks.continueExistingChat()).rejects.toMatchObject({ type: "o1_code_thread_desync" })
+    },
+  )
 
   test("revalidates exact locked agent and does not accept similar names", async () => {
     const h = await harness()
@@ -167,7 +181,7 @@ describe("WPP dedicated chat navigation", () => {
   })
 })
 
-async function harness() {
+async function harness(mode: "assistant" | "agent" = "assistant") {
   const state = {
     time: 0,
     menu: false,
@@ -180,6 +194,8 @@ async function harness() {
     failure: null as string | null,
     changedAt: 0,
     agent: "CM_Astra",
+    iconOnly: false,
+    modeLabel: "",
     armed: false,
     users: [element("old prompt")],
     assistants: [element("old answer")],
@@ -219,7 +235,10 @@ async function harness() {
     querySelectorAll(selector: string) {
       if (selector === "[data-testid='chat-title-menu-trigger']") return state.trigger ? [trigger] : []
       if (selector === "[data-testid='chat-menu-item-new-chat']") return state.menu ? [item] : []
-      if (selector === "[data-testid='chat-model-button']") return [{ ...element(state.agent), disabled: true }]
+      if (selector === "[data-testid='chat-model-button']")
+        return [{ ...element(state.iconOnly ? "" : state.agent), disabled: true }]
+      if (selector === "[data-testid='model-select-mode-selected-model']")
+        return state.modeLabel ? [element(state.modeLabel)] : []
       if (selector === "textarea[data-testid='chat-input']") return [state.composer]
       return []
     },
@@ -244,7 +263,10 @@ async function harness() {
     process: { versions: { node: "test" } },
     document,
     window,
-    location: { hostname: "open-web-agent-builder-cs.wpp.ai", pathname: "/chat/project/foundational" },
+    location: {
+      hostname: mode === "assistant" ? "open-web-assistant-cs.wpp.ai" : "open-web-agent-builder-cs.wpp.ai",
+      pathname: mode === "assistant" ? "/chat/project/ai-assistant" : "/chat/project/foundational",
+    },
     crypto,
     Date: { now: () => state.time },
     getComputedStyle: () => ({ visibility: "visible", display: "block" }),
@@ -259,6 +281,7 @@ async function harness() {
       constructor(readonly type: string) {}
     },
     setTimeout: (callback: () => void, ms: number) => {
+      if (ms >= 1000) return -1
       state.time += ms
       state.onTick()
       callback()
@@ -267,7 +290,22 @@ async function harness() {
     clearTimeout() {},
   })
   vm.runInContext(await Bun.file(join(import.meta.dir, "injected", "content.js")).text(), context)
-  return { hooks: vm.runInContext("__o1CodeBridgeContentTest", context), state, trigger, item }
+  const hooks = vm.runInContext("__o1CodeBridgeContentTest", context)
+  return {
+    hooks: {
+      ...hooks,
+      startFreshChat: async (options = {}) => {
+        if (mode === "assistant" && state.trigger) {
+          trigger.click()
+          item.click()
+        }
+        return hooks.startFreshChat({ ...options, shellReset: state.trigger })
+      },
+    },
+    state,
+    trigger,
+    item,
+  }
 }
 
 function element(textContent: string) {

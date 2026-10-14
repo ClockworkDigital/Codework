@@ -75,6 +75,10 @@ type PlatformBase = {
 
   /** Application-global desktop updater */
   updater?: UpdaterPlatform
+  wppChat?: {
+    getMode: () => Promise<"assistant" | "agent">
+    setMode: (mode: "assistant" | "agent") => Promise<{ mode: "assistant" | "agent"; busy: boolean }>
+  }
   wppAuth?: WppAuthPlatform
 
   /** Fetch override */

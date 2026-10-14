@@ -12,7 +12,8 @@ export async function startServer(options = {}) {
   return startServerWithActions(options);
 }
 
-export async function startServerWithActions({ host = DEFAULT_HOST, port = DEFAULT_PORT, openLogin = null, checkAuth = null } = {}) {
+export async function startServerWithActions({ host = DEFAULT_HOST, port = DEFAULT_PORT, openLogin = null, checkAuth = null, chatMode = "assistant" } = {}) {
+  extensionBridge.setChatMode(chatMode);
   if (typeof openLogin === "function") extensionBridge.onAuthRequired = openLogin;
   const server = http.createServer(async (request, response) => {
     try {

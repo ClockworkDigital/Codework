@@ -180,6 +180,7 @@ const createPlatform = (windowState: DesktopWindowState): Platform => {
     platform: "desktop",
     os,
     browserPanel: window.api.browserPanel,
+    wppChat: window.api.wppChat,
     wppAuth: {
       state: () => wppAuthState,
       check: () => window.api.wppAuth.check(),

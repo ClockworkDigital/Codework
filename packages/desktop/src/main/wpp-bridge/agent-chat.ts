@@ -1,3 +1,5 @@
+import { navigationWait } from "./assistant-panel"
+
 export function isAgentChatUrl(value: string) {
   const url = URL.parse(value)
   return (
@@ -240,32 +242,6 @@ function pageLaunchResult(value: unknown) {
     throw agentChatError("o1_code_thread_desync")
   }
   return { state, acted }
-}
-
-export function navigationWait<T>(
-  operation: () => Promise<T>,
-  remaining: number,
-  signal: AbortSignal | undefined,
-  expire: () => Error,
-): Promise<T> {
-  if (signal?.aborted) return Promise.reject(agentChatError("o1_code_client_aborted"))
-  if (remaining <= 0) return Promise.reject(expire())
-  let rejectWait: (error: Error) => void = () => {}
-  const abort = () => rejectWait(agentChatError("o1_code_client_aborted"))
-  const timer = setTimeout(() => rejectWait(expire()), remaining)
-  return new Promise<T>((resolve, reject) => {
-    rejectWait = reject
-    signal?.addEventListener("abort", abort, { once: true })
-    Promise.resolve()
-      .then(() => {
-        if (signal?.aborted) throw agentChatError("o1_code_client_aborted")
-        return operation()
-      })
-      .then(resolve, reject)
-  }).finally(() => {
-    clearTimeout(timer)
-    signal?.removeEventListener("abort", abort)
-  })
 }
 
 function agentChatError(type: string) {

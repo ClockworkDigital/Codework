@@ -11,6 +11,7 @@ import type { BrowserWindow } from "electron"
 import { createHash } from "node:crypto"
 import { diagnosticUrl, observeWorkerWindow, writeWorkerLog, type WorkerLogWriter } from "./worker-logging"
 import { createWorkerWindow } from "./session"
+import { openAssistantPanel } from "./assistant-panel"
 import { agentChatProjectId, openAgentChat } from "./agent-chat"
 import { armTargetAttach } from "./cdp-targets"
 import { installController, type Controller, type ProgressFrame } from "./controller-injection"
@@ -96,11 +97,12 @@ type Worker = {
   lastUsed: number
 }
 
-export type WorkerPoolOptions = { chatUrl: string; log?: WorkerLogWriter }
+export type WorkerPoolOptions = { chatUrl: string; chatMode?: "assistant" | "agent"; log?: WorkerLogWriter }
 
 export class WorkerPool {
   private readonly workers = new Map<number, Worker>()
   private readonly startingWorkers = new Map<number, Pick<Worker, "window" | "agent" | "sessionKey" | "subagent">>()
+  private readonly chatMode: "assistant" | "agent"
   private readonly chatUrl: string
   private readonly log?: WorkerLogWriter
   private readonly jobs = new Map<number, { runId?: string; jobId?: string }>()
@@ -109,6 +111,7 @@ export class WorkerPool {
 
   constructor(options: WorkerPoolOptions) {
     this.chatUrl = options.chatUrl
+    this.chatMode = options.chatMode ?? "assistant"
     this.log = options.log
     this.reapTimer = setInterval(() => this.prune(), REAP_INTERVAL_MS)
     this.reapTimer.unref()
@@ -450,13 +453,13 @@ export class WorkerPool {
         signal,
       )
       stage("installing-controller")
-      const controller = await withClientAbort(installController(window.webContents), signal)
+      const controller = await withClientAbort(installController(window.webContents, this.chatMode), signal)
       stage("installing-network-witness")
       const netWitness = await withClientAbort(installNetworkWitness(window.webContents), signal)
       stage("arming-targets")
       await withClientAbort(armTargetAttach(window.webContents), signal)
       stage("loading-project")
-      await loadWorkerProject(window.webContents, this.chatUrl, 240000, signal)
+      await loadWorkerProject(window.webContents, this.chatUrl, 240000, signal, this.chatMode)
       stage("checking-auth")
       await withClientAbort(throwIfAuthRequired(window.webContents), signal)
       const target = URL.parse(this.chatUrl)
@@ -471,11 +474,12 @@ export class WorkerPool {
         Reflect.set(error, "statusCode", 400)
         throw error
       }
-      // The orchestration project UUID and the embedded builder project ID differ.
-      // Outer placement was verified above; roster navigation pins the builder ID.
-      const projectId = agentChatProjectId(this.chatUrl)
-      stage("opening-agent-chat")
-      await openAgentChat(window.webContents, agent, { signal, projectId }).catch(async (error) => {
+      stage(this.chatMode === "agent" ? "opening-agent-chat" : "opening-assistant-panel")
+      await (
+        this.chatMode === "agent"
+          ? openAgentChat(window.webContents, agent, { signal, projectId: agentChatProjectId(this.chatUrl) })
+          : openAssistantPanel(window.webContents, { signal })
+      ).catch(async (error) => {
         throwIfClientAborted(signal)
         await withClientAbort(throwIfAuthRequired(window.webContents), signal)
         throw error

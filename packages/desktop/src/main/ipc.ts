@@ -35,6 +35,7 @@ import {
 import { createDesktopDraftStore } from "./draft-store"
 import { nativeT } from "./native-translations"
 import { repairSystemCli } from "./system-cli"
+import { extensionBridge } from "./wpp-bridge/proxy/extensionBridge.mjs"
 import { toggleWppLogin, wppAuth } from "./wpp-bridge/session"
 
 const pickerFilters = (ext?: string[]) => {
@@ -107,6 +108,17 @@ export function registerIpcHandlers(deps: Deps) {
   ipcMain.handle("wpp-auth-toggle-login", (event) => {
     requireWppAuthSender(event)
     toggleWppLogin()
+  })
+  ipcMain.handle("wpp-chat-mode-get", (event) => {
+    requireWppAuthSender(event)
+    return extensionBridge.chatMode
+  })
+  ipcMain.handle("wpp-chat-mode-set", (event, mode: unknown) => {
+    requireWppAuthSender(event)
+    if (mode !== "assistant" && mode !== "agent") throw new Error("Invalid WPP chat mode")
+    const changed = extensionBridge.setChatMode(mode)
+    if (changed) getStore().set("wppChatMode", mode)
+    return { mode: extensionBridge.chatMode, busy: !changed }
   })
   ipcMain.handle("consume-initial-deep-links", () => deps.consumeInitialDeepLinks())
   ipcMain.handle("get-default-server-url", () => deps.getDefaultServerUrl())

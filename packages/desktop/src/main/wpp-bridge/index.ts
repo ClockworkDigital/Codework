@@ -9,6 +9,7 @@
 // The extension job queue (/bridge/jobs|results|...) is gone: jobs run in-process via the webview
 // worker pool. Only /bridge/health and /bridge/login remain, feeding the diagnostic status page.
 
+import { getStore } from "../store"
 import { startServer } from "./proxy/server.mjs"
 
 const DEFAULT_HOST = process.env.O1_CODE_PROXY_HOST || "127.0.0.1"
@@ -32,7 +33,13 @@ export function startWppBridge(options: WppBridgeOptions = {}): Promise<void> {
   const host = options.host ?? DEFAULT_HOST
   const port = options.port ?? DEFAULT_PORT
 
-  starting = startServer({ host, port, openLogin: options.openLogin, checkAuth: options.checkAuth }).catch((error) => {
+  starting = startServer({
+    host,
+    port,
+    chatMode: getStore().get("wppChatMode") === "agent" ? "agent" : "assistant",
+    openLogin: options.openLogin,
+    checkAuth: options.checkAuth,
+  }).catch((error) => {
     // Reset so a later retry can re-attempt instead of being pinned to a rejected promise.
     starting = null
     throw error

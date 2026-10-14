@@ -50,6 +50,10 @@ export type ElectronAPI = {
   awaitInitialization: () => Promise<ServerReadyData>
   wslServers: WslServersAPI
   updater: UpdaterAPI
+  wppChat: {
+    getMode: () => Promise<"assistant" | "agent">
+    setMode: (mode: "assistant" | "agent") => Promise<{ mode: "assistant" | "agent"; busy: boolean }>
+  }
   wppAuth: {
     subscribe: (callback: (state: WppAuthState) => void) => () => void
     check: () => Promise<WppAuthState>

@@ -742,9 +742,28 @@ describe("worker startup helpers", () => {
     await Bun.sleep(25)
     expect(settled).toBe(false)
     contents.debugger.emit("message", {}, "Network.loadingFinished", { requestId: "same" }, "child")
+    // WPP's LaunchDarkly stream stays open after the page and roster are fully loaded.
+    contents.debugger.emit("message", {}, "Network.requestWillBeSent", {
+      requestId: "flags",
+      type: "EventSource",
+    })
+    contents.debugger.emit("message", {}, "Network.requestWillBeSent", { requestId: "beacon", type: "Ping" })
+    contents.debugger.emit("message", {}, "Network.requestWillBeSent", { requestId: "stream", type: "Fetch" })
+    contents.debugger.emit("message", {}, "Network.responseReceived", {
+      requestId: "stream",
+      response: { mimeType: "text/event-stream" },
+    })
     roster = { ready: true, signature: "CM_Astra,CM_Lazy" }
     const completedAt = Date.now()
-    await loading
+    const telemetry = setInterval(() => {
+      contents.debugger.emit("message", {}, "Network.requestWillBeSent", { requestId: "beacon", type: "Ping" })
+      contents.debugger.emit("message", {}, "Network.loadingFinished", { requestId: "beacon" })
+    }, 250)
+    try {
+      await loading
+    } finally {
+      clearInterval(telemetry)
+    }
     expect(Date.now() - completedAt).toBeGreaterThanOrEqual(5000)
     expect(contents.debugger.listenerCount("message")).toBe(0)
   }, 10000)

@@ -14,6 +14,10 @@ const api: ElectronAPI = {
   killSidecar: () => ipcRenderer.invoke("kill-sidecar"),
   installCli: () => ipcRenderer.invoke("install-cli"),
   awaitInitialization: () => ipcRenderer.invoke("await-initialization"),
+  wppChat: {
+    getMode: () => ipcRenderer.invoke("wpp-chat-mode-get"),
+    setMode: (mode) => ipcRenderer.invoke("wpp-chat-mode-set", mode),
+  },
   wppAuth: {
     subscribe: (callback) => {
       const handler = (_: unknown, state: Parameters<typeof callback>[0]) => callback(state)

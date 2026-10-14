@@ -157,12 +157,29 @@ test("rejects every pending request when the worker renderer exits", () => {
   expect(pending.size).toBe(0)
 })
 
-describe("dedicated controller route", () => {
-  test("accepts only the current dedicated document and route token", async () => {
+describe("Assistant controller route", () => {
+  test("keeps Assistant and dedicated routes separate when both frames are present", async () => {
+    const assistant = {
+      url: "https://open-web-assistant-cs.wpp.ai/chat/project/ai-assistant",
+      executeJavaScript: async () => true,
+    }
+    const agent = { ...assistant, url: "https://open-web-agent-builder-cs.wpp.ai/chat/project/foundational" }
+    const contents = { mainFrame: { framesInSubtree: [assistant, agent] } }
+    expect(
+      await controllerRouteActive(contents, { frame: assistant, token: "current", active: true, mode: "assistant" }),
+    ).toBe(true)
+    expect(await controllerRouteActive(contents, { frame: agent, token: "current", active: true, mode: "agent" })).toBe(
+      true,
+    )
+    expect(
+      await controllerRouteActive(contents, { frame: agent, token: "current", active: true, mode: "assistant" }),
+    ).toBe(false)
+  })
+  test("accepts only the current Assistant document and route token", async () => {
     const window = { __wppBridgeControllerRoute: "current" }
     const context = vm.createContext({ window })
     const frame = {
-      url: "https://open-web-agent-builder-cs.wpp.ai/chat/project/foundational?resultId=turn",
+      url: "https://open-web-assistant-cs.wpp.ai/chat/project/ai-assistant?resultId=turn",
       executeJavaScript: async (code: string) => vm.runInContext(code, context),
     }
     const contents = { mainFrame: { framesInSubtree: [frame] } }
@@ -174,9 +191,9 @@ describe("dedicated controller route", () => {
     expect(await controllerRouteActive(contents, route)).toBe(false)
   })
 
-  test("rejects replacement frames, duplicate chats and the assistant side panel", async () => {
+  test("rejects replacement frames, duplicate panels and contributor-only chats", async () => {
     const frame = {
-      url: "https://open-web-agent-builder-cs.wpp.ai/chat/project/foundational",
+      url: "https://open-web-assistant-cs.wpp.ai/chat/project/ai-assistant",
       executeJavaScript: async () => true,
     }
     const route = { frame, token: "current", active: true }
@@ -186,7 +203,11 @@ describe("dedicated controller route", () => {
     ).rejects.toThrow("o1_code_thread_desync")
     await expect(
       controllerRouteActive(
-        { mainFrame: { framesInSubtree: [{ ...frame, url: "https://open-web-assistant-cs.wpp.ai/chat" }] } },
+        {
+          mainFrame: {
+            framesInSubtree: [{ ...frame, url: "https://open-web-agent-builder-cs.wpp.ai/chat/project/foundational" }],
+          },
+        },
         route,
       ),
     ).rejects.toThrow("o1_code_thread_desync")
@@ -195,7 +216,7 @@ describe("dedicated controller route", () => {
   test("rejects cancellation while document validation is in flight", async () => {
     const pending = Promise.withResolvers<unknown>()
     const frame = {
-      url: "https://open-web-agent-builder-cs.wpp.ai/chat/project/foundational",
+      url: "https://open-web-assistant-cs.wpp.ai/chat/project/ai-assistant",
       executeJavaScript: () => pending.promise,
     }
     const route = { frame, token: "current", active: true }

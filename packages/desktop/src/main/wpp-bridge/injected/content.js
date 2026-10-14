@@ -1,8 +1,13 @@
 (() => {
-function isAgentChatFrame() {
+function isAssistantChatFrame() {
+  return location.hostname === "open-web-assistant-cs.wpp.ai"
+    && /^\/chat\/[^/]+\/(?:ai-assistant|foundational)\/?$/.test(location.pathname);
+}
+function isDedicatedChatFrame() {
   return location.hostname === "open-web-agent-builder-cs.wpp.ai"
     && /^\/chat\/[^/]+\/foundational\/?$/.test(location.pathname);
 }
+function isChatFrame() { return isAssistantChatFrame() || isDedicatedChatFrame(); }
 const CONTENT_SCRIPT_VERSION = "2026-06-27-electron-transport-1";
 const INSTALL_KEY = `__o1CodeBridgeContentInstalled_${CONTENT_SCRIPT_VERSION}`;
 const PAGE_SOURCE = "o1-code-bridge-page";
@@ -88,7 +93,7 @@ if (!globalThis[INSTALL_KEY]) {
     }
 
     if (data.source === CONTROLLER_SOURCE) {
-      if (event.source !== window || !isAgentChatFrame()) {
+      if (event.source !== window || !isChatFrame()) {
         return;
       }
       handleControllerMessage(data);
@@ -181,7 +186,7 @@ async function runJob(job) {
 }
 
 async function runJobWithProgress(job, jobId) {
-  if (!isAgentChatFrame()) {
+  if (!isChatFrame()) {
     throw new Error(`O1-Code bridge content script is in the wrong frame: ${location.href}`);
   }
 
@@ -200,13 +205,24 @@ async function runJobWithProgress(job, jobId) {
   disarmNetworkCapture();
   const jobTimeoutMs = Number(job.timeoutMs || SETUP_TIMEOUT_MS);
   const initialTextarea = await waitForTextarea(SETUP_TIMEOUT_MS);
-  const agentSelection = requireAgentSelected(expectedAgent);
+  if (continueThread || isDedicatedChatFrame()) requireAgentSelected(expectedAgent);
   // Fresh turns wipe the thread in startFreshChat (which settles after New Chat). Settling here
   // only helps continue turns that must be idle before paste/submit.
   if (continueThread) await waitForGreetingSettlement(initialTextarea);
-  const freshChat = continueThread ? await continueExistingChat() : await startFreshChat({ expectedAgent });
+  const freshChat = continueThread ? await continueExistingChat() : await startFreshChat(isDedicatedChatFrame() ? { expectedAgent } : { shellReset: job?.payload?.shellReset === true });
   const ignoredAssistantErrorText = inspectAssistantUi().error?.text || null;
   let textarea = await waitForTextarea(SETUP_TIMEOUT_MS);
+  const agentSelection = continueThread || isDedicatedChatFrame()
+    ? requireAgentSelected(expectedAgent)
+    : await ensureAgentSelected(expectedAgent, textarea);
+  if (!agentSelection.ok) {
+    const error = setupError("o1_code_wrong_agent");
+    error.diagnostics = buildBridgeDiagnostics({ phase: "wrong-agent", expectedAgent, agentSelection });
+    throw error;
+  }
+  requireAgentSelected(expectedAgent);
+  await waitForGreetingSettlement(textarea);
+  textarea = await waitForTextarea(SETUP_TIMEOUT_MS);
   const attachments = await attachImages(job?.payload?.images || [], textarea, SETUP_TIMEOUT_MS);
   if (attachments.attached > 0 && !await waitForAttachmentReady(textarea, 15000)) {
     throw imageAttachmentDesync(new Error("o1_code_image_attachment_desync"));
@@ -510,10 +526,32 @@ function setupError(type) {
   return error;
 }
 
+let confirmedAgent = null;
+
+function selectedAgentLabel(pill) {
+  const current = document.querySelectorAll("[data-testid='model-select-mode-selected-model']");
+  return pill?.textContent?.trim() || (current.length === 1 ? current[0].textContent?.trim() : "") || "";
+}
+
+function agentAvatar(pill) {
+  const image = pill?.querySelector?.("img");
+  try {
+    return image?.src ? new URL(image.src).pathname : "";
+  } catch {
+    return "";
+  }
+}
+
 function requireAgentSelected(expectedAgent) {
   const buttons = Array.from(document.querySelectorAll("[data-testid='chat-model-button']"));
-  if (!isAgentChatFrame() || buttons.length !== 1 || !isVisible(buttons[0])
-      || buttons[0].textContent?.trim() !== expectedAgent) {
+  const pill = buttons[0];
+  const label = isDedicatedChatFrame() ? pill?.textContent?.trim() : selectedAgentLabel(pill);
+  // Icon-only buttons expose the current agent in the mode menu; its avatar identifies the
+  // selected agent after that menu unmounts. Never use picker dismissal alone as proof.
+  const matches = label === expectedAgent || (!label && confirmedAgent?.name === expectedAgent
+    && confirmedAgent.avatar && agentAvatar(pill) === confirmedAgent.avatar);
+  if (!isChatFrame() || buttons.length !== 1 || !isVisible(pill) || !matches
+      || (confirmedAgent?.name === expectedAgent && confirmedAgent.avatar && agentAvatar(pill) !== confirmedAgent.avatar)) {
     throw setupError("o1_code_wrong_agent");
   }
   return { ok: true, label: expectedAgent };
@@ -562,37 +600,37 @@ async function continueExistingChat() {
   return { ok: true, clicked: false, reason: "continue-thread" };
 }
 
-async function startFreshChat({ timeoutMs = 60000, expectedAgent } = {}) {
-  if (!isAgentChatFrame()) throw setupError("o1_code_fresh_chat_failed");
+async function startFreshChat({ timeoutMs = 60000, expectedAgent, shellReset = false } = {}) {
+  if (!isChatFrame()) throw setupError("o1_code_fresh_chat_failed");
   if (expectedAgent) requireAgentSelected(expectedAgent);
   disarmNetworkCapture();
-  const textarea = findVisibleTextarea();
-  const controls = Array.from(document.querySelectorAll("[data-testid='chat-title-menu-trigger']")).filter(isVisible);
-  if (controls.length !== 1 || controls[0].disabled || controls[0].getAttribute("aria-disabled") === "true") {
-    throw setupError("o1_code_fresh_chat_failed");
+  confirmedAgent = null;
+  if (isDedicatedChatFrame()) {
+    const controls = Array.from(document.querySelectorAll("[data-testid='chat-title-menu-trigger']")).filter(isVisible);
+    if (controls.length !== 1 || controls[0].disabled || controls[0].getAttribute("aria-disabled") === "true") throw setupError("o1_code_fresh_chat_failed");
+    controls[0].click();
+  } else {
+    if (!shellReset) throw setupError("o1_code_fresh_chat_failed");
   }
-  controls[0].click();
   const deadline = Date.now() + timeoutMs;
-  let clicked = false;
+  let clicked = !isDedicatedChatFrame();
   while (Date.now() < deadline) {
-    if (expectedAgent) requireAgentSelected(expectedAgent);
+    if (isDedicatedChatFrame() && expectedAgent) requireAgentSelected(expectedAgent);
     if (!clicked) {
       const items = Array.from(document.querySelectorAll("[data-testid='chat-menu-item-new-chat']")).filter(isVisible);
       if (items.length > 1) throw setupError("o1_code_fresh_chat_failed");
       if (items.length === 1 && !items[0].disabled && items[0].getAttribute("aria-disabled") !== "true") {
-        items[0].click();
-        clicked = true;
+        items[0].click(); clicked = true;
       }
     }
     const next = findVisibleTextarea();
-    const menuClosed = !Array.from(document.querySelectorAll("[data-testid='chat-menu-item-new-chat']")).some(isVisible);
-    if (clicked && menuClosed && next && next.isConnected && isTranscriptEmpty()) {
+    if (clicked && next && next.isConnected && isTranscriptEmpty()) {
       // Reset is observed through closed controls, cleared history and settled network work.
       // A framework may keep the same connected composer while replacing the conversation.
       await waitForGreetingSettlement(next, { timeoutMs: Math.max(1, deadline - Date.now()) });
-      if (expectedAgent) requireAgentSelected(expectedAgent);
+      if (isDedicatedChatFrame() && expectedAgent) requireAgentSelected(expectedAgent);
       const settled = findVisibleTextarea();
-      const closed = !Array.from(document.querySelectorAll("[data-testid='chat-menu-item-new-chat']")).some(isVisible);
+      const closed = !isDedicatedChatFrame() || !Array.from(document.querySelectorAll("[data-testid='chat-menu-item-new-chat']")).some(isVisible);
       if (settled?.isConnected && closed && isTranscriptEmpty()) return { ok: true, clicked: true };
     }
     await wait(100);
@@ -608,9 +646,9 @@ async function startFreshChat({ timeoutMs = 60000, expectedAgent } = {}) {
 // node is found is the conservative side for the "already-empty" tolerance above.
 function isTranscriptEmpty() {
   const root = transcriptRootFor();
-  // The dedicated agent chat's automatic greeting is not prior prompt history. A reloaded
+  // An automatic greeting is not prior prompt history. A reloaded
   // greeting-only page cannot accept a continuation delta even though it contains a bubble.
-  if (location.hostname === "open-web-agent-builder-cs.wpp.ai") {
+  if (isChatFrame()) {
     return root.querySelectorAll(".chat-message--user, [data-message-author-role='user']").length === 0;
   }
   const bubbles = Array.from(root.querySelectorAll(MESSAGE_BUBBLE_SELECTOR)).filter(isVisible);
@@ -1887,12 +1925,13 @@ async function ensureAgentSelected(expectedAgent, textarea) {
     pickerText: "",
     rosterReadiness: null
   };
-  const readPill = () => labelFor(findModelPill(expectedAgent, textarea));
+  const readPill = () => selectedAgentLabel(findModelPill(expectedAgent, textarea));
   const finish = (ok, failureReason = "", pickerRoot = null) => {
     state.afterLabel = readPill();
     state.label = state.afterLabel || state.beforeLabel || "";
     state.pillFound = Boolean(findModelPill(expectedAgent, textarea));
     state.ok = ok;
+    if (ok) confirmedAgent = { name: expectedAgent, avatar: agentAvatar(findModelPill(expectedAgent, textarea)) };
     state.failureReason = failureReason;
     if (pickerRoot) {
       state.pickerText = samplePickerText(pickerRoot);
@@ -1998,9 +2037,10 @@ async function ensureAgentSelected(expectedAgent, textarea) {
   // mounted with pointer-events disabled. The exact name match that found `option`, followed by that
   // option and picker becoming non-interactive, is therefore also authoritative confirmation.
   const pickerOpen = () => [findAgentSearchInput(document), findModeMenu()].some((el) => el && isInteractive(el));
+  const expectedAvatar = agentAvatar(option.element);
   const selectionApplied = () =>
     agentLabelMatches(readPill(), expectedAgent)
-    || (!pickerOpen() && !isInteractive(option.element));
+    || (expectedAvatar && agentAvatar(findModelPill(expectedAgent, textarea)) === expectedAvatar && !pickerOpen());
 
   // Old UI: clicking the agent option dismisses the picker. Newest UI: it instead DRILLS into the
   // agent's base-model sub-list and keeps the picker open until a model leaf is clicked. So treat
@@ -2902,7 +2942,7 @@ function buildBridgeDiagnostics({
 }
 
 function findVisibleTextarea() {
-  const selector = isAgentChatFrame() ? "textarea[data-testid='chat-input']" : "textarea";
+  const selector = isChatFrame() ? "textarea[data-testid='chat-input']" : "textarea";
   const inputs = Array.from(document.querySelectorAll(selector))
     .filter((el) => isVisible(el) && !el.disabled && !el.readOnly);
   return inputs.length === 1 ? inputs[0] : null;

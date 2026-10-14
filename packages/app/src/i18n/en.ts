@@ -1382,6 +1382,11 @@ export const dict = {
   "settings.desktop.wsl.title": "WSL integration",
   "settings.desktop.wsl.description": "Run the OpenCode server inside WSL on Windows.",
 
+  "settings.general.wppChat.title": "Use dedicated agent chats",
+  "settings.general.wppChat.description":
+    "Requires Contributor or Owner access to the WPP project. Turn off to use the Assistant side panel.",
+  "settings.general.wppChat.busy": "Finish running WPP requests before switching chat modes.",
+  "settings.general.wppChat.failed": "Could not save the WPP chat mode. Try again.",
   "settings.general.section.appearance": "Appearance",
   "settings.general.section.advanced": "Advanced",
   "settings.general.section.notifications": "System notifications",

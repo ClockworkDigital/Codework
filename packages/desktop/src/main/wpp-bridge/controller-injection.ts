@@ -1,6 +1,7 @@
 import type { WebContents, WebFrameMain } from "electron"
 import { installInRootAndChildTargets } from "./cdp-targets"
 import { SpawnGate } from "./spawn-gate"
+import { assistantFrame, prepareAssistantChat } from "./assistant-panel"
 import { agentChatFrame } from "./agent-chat"
 import contentSource from "./injected/content.js?raw"
 
@@ -27,7 +28,7 @@ const RELAY_SOURCE = `
 
 export type ProgressFrame = { seq: number; finalText: string }
 type Pending = { resolve: (result: unknown) => void; reject: (error: Error) => void }
-type Route = { frame: WebFrameMain; token: string; active: boolean }
+type Route = { frame: WebFrameMain; token: string; active: boolean; mode: "assistant" | "agent" }
 
 export function rejectPendingRequests(pending: Map<string, Pending>, error: Error) {
   for (const waiter of pending.values()) waiter.reject(error)
@@ -52,14 +53,21 @@ export function routeOutboundFrame(
 }
 
 export type Controller = {
-  runJob: (job: { id?: string }, onProgress?: (frame: ProgressFrame) => void, timeoutMs?: number) => Promise<unknown>
+  runJob: (
+    job: { id?: string; payload?: Record<string, unknown> },
+    onProgress?: (frame: ProgressFrame) => void,
+    timeoutMs?: number,
+  ) => Promise<unknown>
   inspectChat: (timeoutMs?: number) => Promise<unknown>
 }
 
 // Register the outbound binding + relay + content.js with the shared target hub. Caller must
 // armTargetAttach after all installers are registered. Shares the WebContents debugger with
 // installRecorder; Runtime/Page.enable are idempotent across both.
-export async function installController(contents: WebContents): Promise<Controller> {
+export async function installController(
+  contents: WebContents,
+  mode: "assistant" | "agent" = "assistant",
+): Promise<Controller> {
   const dbg = contents.debugger
   const pending = new Map<string, Pending>()
   const progress = new Map<string, (frame: ProgressFrame) => void>()
@@ -91,7 +99,7 @@ export async function installController(contents: WebContents): Promise<Controll
         }
         routeOutboundFrame(frame, pending, progress)
       })
-      .catch(() => rejectPending("WPP dedicated chat frame was lost."))
+      .catch(() => rejectPending("WPP Assistant frame was lost."))
   })
 
   await installInRootAndChildTargets(contents, async (sessionId) => {
@@ -112,7 +120,12 @@ export async function installController(contents: WebContents): Promise<Controll
 
   const send = async (type: string, extra: Record<string, unknown>, timeoutMs = 0) => {
     if (route?.active) throw new Error("WPP controller already has an active request.")
-    const current: Route = { frame: agentChatFrame(contents), token: crypto.randomUUID(), active: true }
+    const current: Route = {
+      frame: mode === "agent" ? agentChatFrame(contents) : assistantFrame(contents),
+      token: crypto.randomUUID(),
+      active: true,
+      mode,
+    }
     route = current
     const requestId = crypto.randomUUID()
     try {
@@ -152,21 +165,36 @@ export async function installController(contents: WebContents): Promise<Controll
   }
 
   return {
-    runJob: (job, onProgress, timeoutMs) => {
+    runJob: async (job, onProgress, timeoutMs) => {
+      const reset = mode === "assistant" && job.payload?.continueThread !== true
+      // New Chat can replace the panel document. Reset before assigning its per-request route.
+      if (reset) await prepareAssistantChat(contents, () => send("O1_CODE_BRIDGE_INSPECT_CHAT", {}, 2000))
       if (onProgress && job?.id) progress.set(job.id, onProgress)
-      return send("O1_CODE_BRIDGE_RUN_JOB", { job }, timeoutMs).finally(() => {
+      try {
+        return await send(
+          "O1_CODE_BRIDGE_RUN_JOB",
+          { job: reset ? { ...job, payload: { ...job.payload, shellReset: true } } : job },
+          timeoutMs,
+        )
+      } finally {
         if (job?.id) progress.delete(job.id)
-      })
+      }
     },
     inspectChat: (timeoutMs) => send("O1_CODE_BRIDGE_INSPECT_CHAT", {}, timeoutMs),
   }
 }
 
 export async function controllerRouteActive(
-  contents: Parameters<typeof agentChatFrame>[0],
-  route: { frame: { executeJavaScript(code: string): Promise<unknown> }; token: string; active: boolean },
+  contents: Parameters<typeof assistantFrame>[0],
+  route: {
+    frame: { executeJavaScript(code: string): Promise<unknown> }
+    token: string
+    active: boolean
+    mode?: "assistant" | "agent"
+  },
 ) {
-  if (!route.active || agentChatFrame(contents) !== route.frame) return false
+  if (!route.active || (route.mode === "agent" ? agentChatFrame(contents) : assistantFrame(contents)) !== route.frame)
+    return false
   const active = await route.frame.executeJavaScript(`window.${ROUTE_KEY} === ${JSON.stringify(route.token)}`)
   return route.active && active === true
 }
@@ -190,8 +218,9 @@ async function handleMainRequest(contents: WebContents, route: Route, frame: Mai
   let result: unknown = null
   let error: string | null = null
   try {
-    if (frame.action !== "pasteImages") throw new Error(`Unknown main action: ${frame.action}`)
-    result = await pasteImagesIntoComposer(contents, route, frame.payload?.images ?? [])
+    if (frame.action === "pasteImages")
+      result = await pasteImagesIntoComposer(contents, route, frame.payload?.images ?? [])
+    else throw new Error(`Unknown main action: ${frame.action}`)
   } catch (e) {
     error = e instanceof Error ? e.message : String(e)
   }

@@ -1,3 +1,4 @@
+import { SettingsWppChat } from "./settings-wpp-chat"
 import { Component, Show, createMemo, createResource, onMount } from "solid-js"
 import { Button } from "@opencode-ai/ui/button"
 import { Icon } from "@opencode-ai/ui/icon"
@@ -300,6 +301,7 @@ export const SettingsGeneral: Component = () => {
   const GeneralSection = () => (
     <div class="flex flex-col gap-1">
       <SettingsList>
+        <SettingsWppChat />
         <SettingsRow
           title={language.t("settings.general.row.quietCompanion.title")}
           description={language.t("settings.general.row.quietCompanion.description")}
