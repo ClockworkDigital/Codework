@@ -168,10 +168,7 @@ export class WorkerPool {
       this.record(worker.id, "protocol-ready", {})
       // Do not pin protocolEndpoint onto the job: the probe often learns /v1/chat while the live
       // turn hits *.lambda-url…/, and pageRecorder's expectedEndpoint gate would drop the Fetch.
-      const result = await withClientAbort(
-        worker.controller.runJob(job, onProgress, remainingJobTimeout(job)),
-        signal,
-      )
+      const result = await withClientAbort(worker.controller.runJob(job, onProgress, remainingJobTimeout(job)), signal)
       this.record(worker.id, "job-result", {
         durationMs: Date.now() - startedAt,
         ok: result && typeof result === "object" ? Reflect.get(result, "ok") : null,
@@ -210,7 +207,10 @@ export class WorkerPool {
       // content.js may time out a beat before Network.loadingFinished on a slow stream — wait for
       // CDP progress before labeling unfinished-stream / capture failure.
       if (shouldAwaitCdpFinish(result, witness)) {
-        witness = await awaitCdpWitnessSettle(() => worker.netWitness.summarizeWindow(sinceMs))
+        witness = await withClientAbort(
+          awaitCdpWitnessSettle(() => worker.netWitness.summarizeWindow(sinceMs)),
+          signal,
+        )
       }
       const enriched = attachCaptureVerdict(result, witness)
       this.record(worker.id, "capture-verdict", {
