@@ -53,6 +53,10 @@ jobs:
 
       - name: Test Windows packaging
         working-directory: packages/desktop
+        env:
+          CM_BRAND: "0"
+          CM_UNSIGNED: "0"
+          OPENCODE_CHANNEL: dev
         run: bun test --timeout 20000 electron-builder.config.test.ts src/main/system-cli.test.ts
 
       - name: Build CookieMonster
