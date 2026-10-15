@@ -32,7 +32,16 @@ export function BrowserIconButton(
 }
 
 export const BrowserDropdownMenu = Object.assign((props: ComponentProps<typeof Menu>) => <Menu {...props} />, {
-  ...Menu,
+  // Solid's live-reload proxy does not enumerate component properties.
+  Trigger: Menu.Trigger,
+  Portal: Menu.Portal,
+  Content: Menu.Content,
+  Item: Menu.Item,
+  RadioGroup: Menu.RadioGroup,
+  RadioItem: Menu.RadioItem,
+  Group: Menu.Group,
+  GroupLabel: Menu.GroupLabel,
+  Separator: Menu.Separator,
   ItemLabel,
   ItemIndicator,
 })
