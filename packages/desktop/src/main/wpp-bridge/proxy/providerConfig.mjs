@@ -22,11 +22,6 @@ export const O1_CODE_MCP = {
   figma: {
     type: "remote",
     url: "https://mcp.figma.com/mcp",
-    oauth: {
-      clientName: "Claude Code",
-      scope: "mcp:connect",
-      callbackPort: 19876,
-    },
     enabled: true,
   },
 }

@@ -7,6 +7,7 @@ The OpenCode Desktop app, built with Electron.
 The `v2-upgrade` branch starts from upstream `v2.0.29` (`042d0832f5`). It ports the CookieMonster provider,
 WPP bridge, CM Browser, scheduling, CM3 sidebar and macOS distribution settings onto the native V2 backend.
 It includes upstream's official Figma plugin and skill bundle, plus an adapter for the existing After Effects runtime.
+Figma uses native V2 OAuth with the `opencode` client identity, discovered scopes and an available loopback callback port.
 This is an integration test branch. Strict changed-file lint and complete desktop visual verification are outstanding.
 
 From the repository root on the test Mac, using Bun 1.4.2:
@@ -30,7 +31,8 @@ use that directory.
 On the target machine, check WPP sign-in and a streamed tool call, Figma sign-in and a real read/write task, and AE
 connection, inspection, checkpoint-backed editing, capture, rendering and recovery. Also check CM Browser private tabs,
 Take Over/Resume, panel switching and foreground subagent delegation. Review CM3 layout, model selection, scheduling
-and state after reopening. No live Figma OAuth, real AE execution, signed macOS package or updater has been verified here.
+and state after reopening. Live Figma OAuth, file creation, canvas writing, readback and screenshots were verified on Windows.
+No real AE execution, signed macOS package or updater has been verified here.
 
 Local checks cover native/legacy provider configuration, the packaged Figma skill bundle, CM Browser protocol and
 delegation, native V2 scheduling and AE tool execution, reviewed skill writes, WPP parsing/capture, native browser

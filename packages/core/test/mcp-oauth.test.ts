@@ -527,6 +527,7 @@ describe("MCP OAuth", () => {
       const { url } = await Effect.runPromise(Effect.scoped(start(server))).finally(() => server.stop(true))
       expect(url.searchParams.get("client_id")).toBe("registered")
       expect(registrations).toHaveLength(1)
+      expect(registrations[0]).toMatchObject({ client_name: "opencode", client_uri: "https://opencode.ai" })
     })
 
     test("reuses the client registered by an earlier login", async () => {

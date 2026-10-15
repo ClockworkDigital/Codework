@@ -634,10 +634,10 @@ test("injected config is self-contained for a clean bundled OpenCode install", (
 
   expect(config.provider).toEqual({ cookiemonster: COOKIE_MONSTER_PROVIDER })
   expect(config.mcp).toEqual({ figma: O1_CODE_MCP.figma })
-  expect(config.mcp.figma.oauth).toEqual({
-    clientName: "Claude Code",
-    scope: "mcp:connect",
-    callbackPort: 19876,
+  expect(config.mcp.figma).toEqual({
+    type: "remote",
+    url: "https://mcp.figma.com/mcp",
+    enabled: true,
   })
   expect(config.lsp).toBe(true)
   expect(config.plugin).toEqual([plugin])
