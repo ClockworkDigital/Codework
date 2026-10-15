@@ -110,11 +110,11 @@ test("missing or invalid required default fails and clears stale output", () => 
   }
 })
 
-test("vendored inventory preserves pinned CookieJar 0.2.3 cancellation fix and the Marked license", () => {
+test("vendored inventory preserves pinned CookieJar 0.2.3 checkpoint and cancellation fixes and the Marked license", () => {
   const vendor = fileURLToPath(new URL("../vendor/cm-ae", import.meta.url))
-  // CookieJar 3c666e3 + pre-submit cancellation fix, built with node scripts/build.mjs --client.
+  // CookieJar f577a3b: project-scoped checkpoints and pre-submit cancellation guards; client build.
   const hashes = {
-    "plugin.mjs": "3c6e25a0d55489eec2d001252aa856bd3b0de8697feb5d4cbfc5dbd1c7d9618d",
+    "plugin.mjs": "20a20c33e531c8e7fdba4c5a29b0ceb6954f43da5d6b0f653d957ac0a60aef8a",
     "render-worker.mjs": "93e847a93868eace9618e8ee98003aa05377944167a382a990561ea39b553a1f",
     "permissions.json": "af8b258ad2c703f6dee904b580d9410e98163a1a9d2232c9b1f798c4f41188b4",
     "ZOD-LICENSE.txt": "3f1189b28e3866e0d979968d466b78f813f76827cfdca1fbb124cc0a5c8841f8",

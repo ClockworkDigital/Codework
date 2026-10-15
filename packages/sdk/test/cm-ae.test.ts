@@ -5,31 +5,51 @@ import { OpenCode } from "../src"
 import { tmpdir } from "../../core/test/fixture/tmpdir"
 
 if (process.env.CM_AE_TEST_CHILD !== "1") {
-  test("AE tools execute through native V2 in an isolated backend", async () => {
-    await using root = await tmpdir("cm-v2-ae-process-")
-    const result = Bun.spawnSync([process.execPath, "test", import.meta.path], {
-      env: {
-        ...process.env,
-        CM_AE_TEST_CHILD: "1",
-        CM_DESKTOP: "1",
-        CM_AE_VERSION: "2.0.29",
-        CM_AE_PLUGIN_URL: pathToFileURL(join(import.meta.dir, "../../desktop/vendor/cm-ae/plugin.mjs")).href,
-        CM_AE_DATA_DIR: join(root.path, "ae"),
-        XDG_DATA_HOME: join(root.path, "data"),
-        XDG_CONFIG_HOME: join(root.path, "config"),
-        XDG_CACHE_HOME: join(root.path, "cache"),
-        XDG_STATE_HOME: join(root.path, "state"),
-        OPENCODE_TEST_HOME: root.path,
-      },
-      stdout: "pipe",
-      stderr: "pipe",
-      timeout: 25_000,
-    })
-    expect(result.exitCode, Buffer.concat([result.stdout, result.stderr]).toString()).toBe(0)
-  }, 30_000)
+  for (const operation of ["connections", "capture"])
+    test(`AE ${operation} results execute through native V2 in an isolated backend`, async () => {
+      await using root = await tmpdir("cm-v2-ae-process-")
+      const bundle = join(root.path, "plugin.mjs")
+      if (operation === "capture") {
+        await Bun.write(
+          bundle,
+          `export async function server() {
+        return { config: async () => {}, event: async () => {}, dispose: async () => {}, tool: {
+          ae_capture: { description: "Capture a test frame", args: {}, execute: async () => ({
+            output: "Captured test frame", attachments: [{ mime: "image/png", filename: "capture.png",
+              url: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" }]
+          }) }
+        } };
+      }`,
+        )
+        await Bun.write(join(root.path, "permissions.json"), JSON.stringify({ ae_capture: "ask" }))
+      }
+      const result = Bun.spawnSync([process.execPath, "test", import.meta.path], {
+        env: {
+          ...process.env,
+          CM_AE_TEST_CHILD: "1",
+          CM_AE_TEST_OPERATION: operation,
+          CM_DESKTOP: "1",
+          CM_AE_VERSION: "2.0.29",
+          CM_AE_PLUGIN_URL: pathToFileURL(
+            operation === "capture" ? bundle : join(import.meta.dir, "../../desktop/vendor/cm-ae/plugin.mjs"),
+          ).href,
+          CM_AE_DATA_DIR: join(root.path, "ae"),
+          XDG_DATA_HOME: join(root.path, "data"),
+          XDG_CONFIG_HOME: join(root.path, "config"),
+          XDG_CACHE_HOME: join(root.path, "cache"),
+          XDG_STATE_HOME: join(root.path, "state"),
+          OPENCODE_TEST_HOME: root.path,
+        },
+        stdout: "pipe",
+        stderr: "pipe",
+        timeout: 25_000,
+      })
+      expect(result.exitCode, Buffer.concat([result.stdout, result.stderr]).toString()).toBe(0)
+    }, 30_000)
 } else
   test("V2 preserves AE tools and checkpoint-backed runtime without loading the old plugin API", async () => {
     await using root = await tmpdir("cm-v2-ae-")
+    const capture = process.env.CM_AE_TEST_OPERATION === "capture"
     let requests = 0
     const server = Bun.serve({
       port: 0,
@@ -37,11 +57,15 @@ if (process.env.CM_AE_TEST_CHILD !== "1") {
         requests++
         const body = await request.json()
         if (requests === 1)
-          expect(body.tools.map((tool: { function: { name: string } }) => tool.function.name)).toContain("ae_restore")
+          expect(body.tools.map((tool: { function: { name: string } }) => tool.function.name)).toContain(
+            capture ? "ae_capture" : "ae_restore",
+          )
         if (requests === 2)
           expect(
             body.messages.some(
-              (message: { role: string; content: string }) => message.role === "tool" && message.content === "[]",
+              (message: { role: string; content: string }) =>
+                message.role === "tool" &&
+                (capture ? JSON.stringify(message.content).includes("Captured test frame") : message.content === "[]"),
             ),
           ).toBe(true)
         const delta =
@@ -49,7 +73,12 @@ if (process.env.CM_AE_TEST_CHILD !== "1") {
             ? {
                 role: "assistant",
                 tool_calls: [
-                  { index: 0, id: "ae-read", type: "function", function: { name: "ae_connections", arguments: "{}" } },
+                  {
+                    index: 0,
+                    id: "ae-read",
+                    type: "function",
+                    function: { name: capture ? "ae_capture" : "ae_connections", arguments: "{}" },
+                  },
                 ],
               }
             : { role: "assistant", content: "No AE instances are connected." }
@@ -105,11 +134,17 @@ if (process.env.CM_AE_TEST_CHILD !== "1") {
           (message) =>
             message.type === "assistant" &&
             message.content.some(
-              (part) => part.type === "tool" && part.name === "ae_connections" && part.state.status === "completed",
+              (part) =>
+                part.type === "tool" &&
+                part.name === (capture ? "ae_capture" : "ae_connections") &&
+                part.state.status === "completed" &&
+                (!capture ||
+                  part.state.content.some((content) => content.type === "file" && content.mime === "image/png")),
             ),
         ),
       ).toBe(true)
       expect(requests).toBe(2)
+      if (capture) return
       const descriptor = await Bun.file(join(process.env.CM_AE_DATA_DIR!, "descriptor.json")).json()
       const refused = await fetch(`http://127.0.0.1:${descriptor.port}/chat`, {
         method: "POST",

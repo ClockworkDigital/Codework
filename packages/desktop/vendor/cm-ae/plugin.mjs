@@ -2952,8 +2952,8 @@ var $ZodObjectJIT = /* @__PURE__ */ $constructor("$ZodObjectJIT", (inst, def) =>
             path: iss.path ? [${k}, ...iss.path] : [${k}]
           })));
         }
-
-
+        
+        
         if (${id}.value === undefined) {
           if (${k} in input) {
             newResult[${k}] = undefined;
@@ -2961,7 +2961,7 @@ var $ZodObjectJIT = /* @__PURE__ */ $constructor("$ZodObjectJIT", (inst, def) =>
         } else {
           newResult[${k}] = ${id}.value;
         }
-
+        
       `);
     }
     doc.write(`payload.value = newResult;`);
@@ -12829,7 +12829,7 @@ function createCheckpoints({ dataDir }) {
   function protectionOwners(manifest) {
     return manifest.protectionOwners ?? (manifest.inUse ? ["recovery"] : []);
   }
-  async function load(root, id) {
+  async function load(root, id, projectId) {
     if (typeof id !== "string" || !UUID.test(id))
       fail("invalid_payload", "Invalid checkpoint id");
     const index = path.join(root, id + ".json");
@@ -12837,6 +12837,8 @@ function createCheckpoints({ dataDir }) {
       fail("checkpoint_not_found", "Checkpoint does not exist");
     try {
       const locator = validateManifest(await readJSON(index), id, root);
+      if (projectId !== undefined && locator.projectId !== projectId)
+        return null;
       const directory = path.dirname(locator.path);
       if (await secureDirectory(directory) !== directory)
         fail("checkpoint_corrupt", "Checkpoint directory changed");
@@ -12850,13 +12852,15 @@ function createCheckpoints({ dataDir }) {
       throw new AEError("checkpoint_corrupt", "Checkpoint metadata is corrupt or unavailable", { id, cause: error45.code || error45.name });
     }
   }
-  async function scan(root, strict = false) {
+  async function scan(root, projectId, strict = false) {
     const entries = [];
     for (const name of await fs.readdir(root)) {
       if (!UUID.test(name.slice(0, -5)) || !name.endsWith(".json"))
         continue;
       try {
-        entries.push(await load(root, name.slice(0, -5)));
+        const entry = await load(root, name.slice(0, -5), projectId);
+        if (entry)
+          entries.push(entry);
       } catch (error45) {
         if (strict)
           throw error45;
@@ -12890,7 +12894,7 @@ function createCheckpoints({ dataDir }) {
         const project = await canonical2(projectPath), source = await regular(project);
         if (source.size > MAX_BYTES)
           fail("checkpoint_capacity", "Project exceeds the 5 GB checkpoint cap");
-        const entries = (await scan(root, true)).filter((entry) => entry.projectId === projectId).map((entry) => protectedIds.includes(entry.id) ? { ...entry, inUse: true } : entry);
+        const entries = (await scan(root, projectId, true)).map((entry) => protectedIds.includes(entry.id) ? { ...entry, inUse: true } : entry);
         retention([...entries, ...Array.from({ length: copies }, (_, i) => ({
           id: "planned-" + i,
           createdAt: "9999",
@@ -12933,7 +12937,7 @@ function createCheckpoints({ dataDir }) {
         const source = await regular(project);
         if (source.size > MAX_BYTES)
           fail("checkpoint_capacity", "Project exceeds the 5 GB checkpoint cap");
-        const entries = (await scan(root, true)).filter((entry) => entry.projectId === projectId);
+        const entries = await scan(root, projectId, true);
         for (const entry of entries) {
           if ((await regular(entry.path)).size !== entry.size)
             fail("checkpoint_corrupt", "Retention cannot use corrupt checkpoint sizes");
@@ -13024,7 +13028,7 @@ function createCheckpoints({ dataDir }) {
     list(projectId) {
       return run(async (root) => {
         assertString(projectId, "projectId");
-        return (await scan(root)).filter((entry) => entry.projectId === projectId);
+        return scan(root, projectId);
       });
     },
     pin(id, pinned) {
@@ -13035,7 +13039,7 @@ function createCheckpoints({ dataDir }) {
         if (!pinned && manifest.inUse)
           fail("checkpoint_in_use", "Recovery copy is in use");
         const updated = { ...manifest, pinned };
-        const entries = (await scan(root, true)).filter((entry) => entry.projectId === manifest.projectId && entry.id !== id);
+        const entries = (await scan(root, manifest.projectId, true)).filter((entry) => entry.id !== id);
         const victims = retention(entries, updated);
         await atomicWrite(metadata(updated), manifestData(updated));
         for (const victim of victims)
@@ -13066,7 +13070,7 @@ function createCheckpoints({ dataDir }) {
         if (owners.size > 100)
           fail("checkpoint_capacity", "Too many checkpoint protection owners");
         const updated = { ...manifest, inUse: owners.size > 0, protectionOwners: [...owners] };
-        const entries = (await scan(root, true)).filter((entry) => entry.projectId === manifest.projectId);
+        const entries = await scan(root, manifest.projectId, true);
         const victims = retention(entries.map((entry) => entry.id === id ? updated : entry));
         await atomicWrite(metadata(updated), manifestData(updated));
         for (const victim of victims)

@@ -40,8 +40,8 @@ interface LegacyTool {
     | string
     | {
         output: string
-        title: string
-        metadata: Record<string, Schema.Json>
+        title?: string
+        metadata?: Record<string, Schema.Json>
         attachments?: { url: string; mime: string; filename?: string }[]
       }
   >
@@ -189,7 +189,7 @@ export const Plugin = {
                     name: file.filename,
                   })),
                 ],
-                metadata: { ...result.metadata, title: result.title },
+                metadata: { ...result.metadata, ...(result.title === undefined ? {} : { title: result.title }) },
               }
             }),
         })
