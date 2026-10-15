@@ -1,5 +1,10 @@
+import type { WppAuthState } from "@cookiemonster/provider/auth"
 import type { ElectronAPI } from "./api-types"
 import { invoke, listen, send } from "./ipc-client"
+import type { BrowserTabs, BrowserSelection } from "@cookiemonster/cm-browser/panel"
+
+// Replies originate in the typed native browser implementation; JSON carries them through the RPC string codec.
+const browserReply = <Value>(value: string) => JSON.parse(value) as Value
 
 type Mutable<Value> =
   Value extends ReadonlyArray<unknown>
@@ -21,6 +26,27 @@ const toArrayBuffer = (value: Uint8Array) =>
 const seeded = window.electron.storageSnapshot.then((snapshot) => new Map(Object.entries(snapshot)))
 
 export const api: ElectronAPI = {
+  browserPanel: {
+    ...window.electron.cmBrowserEvents,
+    command: (sessionID, command) =>
+      invoke("CmBrowserCommand", { sessionID, command: JSON.stringify(command) }).then(browserReply<BrowserTabs>),
+    viewport: (viewport) =>
+      invoke("CmBrowserViewport", { sessionID: viewport.sessionID, viewport: JSON.stringify(viewport) }),
+    selection: (sessionID, tabID) =>
+      invoke("CmBrowserContext", { sessionID, tabID, operation: "selection" }).then(browserReply<string>),
+    screenshot: (sessionID, tabID) =>
+      invoke("CmBrowserContext", { sessionID, tabID, operation: "screenshot" }).then(browserReply<string>),
+    pick: (sessionID, tabID) =>
+      invoke("CmBrowserContext", { sessionID, tabID, operation: "pick" })
+        .then(browserReply<BrowserSelection | null>)
+        .then((value) => value ?? undefined),
+    panelRequestCurrent: (id, sessionID) => invoke("CmBrowserPanelCurrent", { id, sessionID }),
+    acknowledgePanel: (input) => invoke("CmBrowserPanelAcknowledge", { acknowledgement: JSON.stringify(input) }),
+    linkContext: (sessionID, lease) => invoke("CmBrowserLinkContext", { sessionID, lease }),
+  },
+  onWppAuth: window.electron.onWppAuth,
+  wppAuth: (check) => invoke("CmWppAuth", { check }).then(browserReply<WppAuthState>),
+  wppLogin: () => invoke("CmWppLogin"),
   awaitInitialization: () => invoke("AppAwaitInitialization"),
   reconnectService: () => invoke("AppReconnectService"),
   consumeInitialDeepLinks: () => invoke("AppConsumeInitialDeepLinks").then(mutable),

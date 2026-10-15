@@ -1,3 +1,6 @@
+import { Cm3Shell } from "@/cookiemonster/cm3-shell"
+import { SchedulingProvider, SchedulingPanel } from "@/cookiemonster/scheduling-panel"
+import "@/cookiemonster/cm3-live.css"
 import { Show, Suspense, type ParentProps } from "solid-js"
 import { createStore } from "solid-js/store"
 import { createMediaQuery } from "@solid-primitives/media"
@@ -14,6 +17,18 @@ import { ExtensionSlot } from "@/runtime/extension/render"
 
 export default function Layout(props: ParentProps) {
   const platform = usePlatform()
+
+  return (
+    <Show when={platform.browserPanel} fallback={<Workspace>{props.children}</Workspace>}>
+      <SchedulingProvider>
+        <Workspace>{props.children}</Workspace>
+      </SchedulingProvider>
+    </Show>
+  )
+}
+
+function Workspace(props: ParentProps) {
+  const platform = usePlatform()
   const settings = useSettingsSurface()
   const preferences = useSettings()
   const mobile = createMediaQuery("(max-width: 767px)")
@@ -23,12 +38,13 @@ export default function Layout(props: ParentProps) {
     tabsMount: undefined,
   })
 
-  const verticalTabs = () => preferences.appearance.tabLayout() === "vertical" && !mobile()
+  const verticalTabs = () => !platform.browserPanel && preferences.appearance.tabLayout() === "vertical" && !mobile()
   const bottomTitlebar = () => mobile() && preferences.general.mobileTitlebarPosition() === "bottom"
 
   return (
     <TitlebarRightProvider>
       <div
+        classList={{ "cm3-live": !!platform.browserPanel }}
         class="relative bg-v2-background-bg-deep flex-1 min-h-0 min-w-0 flex flex-col select-none [&_input]:select-text [&_textarea]:select-text [&_[contenteditable]]:select-text"
         style={{
           // Mobile panels only need clearance for their outer border.
@@ -47,6 +63,9 @@ export default function Layout(props: ParentProps) {
       >
         <Titlebar verticalTabs={verticalTabs() ? { mount: state.tabsMount } : undefined} />
         <div class="flex flex-1 min-h-0 min-w-0 flex-row">
+          <Show when={platform.browserPanel}>
+            <Cm3Shell />
+          </Show>
           <Show when={verticalTabs()}>
             <aside
               ref={(element) => setState("tabsMount", element)}
@@ -85,6 +104,9 @@ export default function Layout(props: ParentProps) {
               <Suspense>{props.children}</Suspense>
             </ExtensionServerCover>
           </main>
+          <Show when={platform.browserPanel}>
+            <SchedulingPanel />
+          </Show>
         </div>
         <ExtensionSlot at="window.bottom" input={{}} />
         <ToastRegion />

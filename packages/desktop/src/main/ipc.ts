@@ -14,6 +14,7 @@ import { fileHandlers } from "./ipc-handlers/files"
 import { menuHandlers } from "./ipc-handlers/menu"
 import { storageHandlers } from "./ipc-handlers/storage"
 import { windowHandlers } from "./ipc-handlers/window"
+import { cmBrowserHandlers } from "./ipc-handlers/cm-browser"
 import { IpcPortHandoff, IpcServerProtocolLive } from "./ipc-transport"
 import { ApplicationLifecycle } from "./lifecycle"
 import { showCliInstaller } from "./native/install-cli"
@@ -31,6 +32,7 @@ const handlers = Layer.mergeAll(
   menuHandlers,
   eventHandlers,
   extensionHandlers,
+  cmBrowserHandlers,
 )
 
 export const layer = RpcServer.layer(DesktopRpcs, { disableFatalDefects: true }).pipe(

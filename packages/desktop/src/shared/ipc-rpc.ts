@@ -6,6 +6,7 @@ import { FileRpcs } from "./ipc-rpc/files"
 import { MenuRpcs } from "./ipc-rpc/menu"
 import { StorageRpcs } from "./ipc-rpc/storage"
 import { WindowRpcs } from "./ipc-rpc/window"
+import { CmBrowserRpcs } from "./ipc-rpc/cm-browser"
 
 export { AppRpcs } from "./ipc-rpc/app"
 
@@ -21,6 +22,14 @@ export { StorageRpcs } from "./ipc-rpc/storage"
 
 export { WindowRpcs } from "./ipc-rpc/window"
 
-export const DesktopRpcs = AppRpcs.merge(StorageRpcs, FileRpcs, WindowRpcs, MenuRpcs, EventRpcs, ExtensionRpcs)
+export const DesktopRpcs = AppRpcs.merge(
+  StorageRpcs,
+  FileRpcs,
+  WindowRpcs,
+  MenuRpcs,
+  EventRpcs,
+  ExtensionRpcs,
+  CmBrowserRpcs,
+)
 
 export type DesktopRpcClient = RpcClient.FromGroup<typeof DesktopRpcs, RpcClientError.RpcClientError>

@@ -43,6 +43,7 @@ const projectContextMenuID = (server: ServerConnection.Any, directory: string) =
 
 export type HomeProjectsViewProps = {
   dropdown?: boolean
+  renderProjectSessions?: (server: ServerConnection.Any, project: LocalProject) => JSX.Element
   language: ReturnType<typeof useLanguage>
   servers: ServerConnection.Any[]
   projects: LocalProject[]
@@ -562,17 +563,20 @@ function HomeProjectSlot(
   )
 
   return (
-    <HomeProjectRow
-      {...props}
-      project={project()}
-      server={props.server}
-      index={props.index}
-      serverSelected={props.selection.server === ServerConnection.key(props.server)}
-      selected={
-        props.selection.server === ServerConnection.key(props.server) && props.selection.directory === props.worktree
-      }
-      unread={props.hasUnread(props.server, project())}
-    />
+    <>
+      <HomeProjectRow
+        {...props}
+        project={project()}
+        server={props.server}
+        index={props.index}
+        serverSelected={props.selection.server === ServerConnection.key(props.server)}
+        selected={
+          props.selection.server === ServerConnection.key(props.server) && props.selection.directory === props.worktree
+        }
+        unread={props.hasUnread(props.server, project())}
+      />
+      <Show when={project().expanded}>{props.renderProjectSessions?.(props.server, project())}</Show>
+    </>
   )
 }
 

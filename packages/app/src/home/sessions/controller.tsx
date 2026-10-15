@@ -14,7 +14,7 @@ import {
 } from "@/home/sessions/index"
 import type { LocalProject } from "@/shell/state/layout"
 import { useLanguage } from "@/runtime/i18n/language"
-import { ServerConnection } from "@/runtime/server/registry"
+import { ServerConnection, useServers } from "@/runtime/server/registry"
 import { sessionHasOpenTab, useTabs } from "@/shell/tabs/tabs"
 import { errorMessage } from "@/shell/layout/helpers"
 import { useSessionTabAvatarState } from "@/shell/layout/project-avatar-state"
@@ -41,7 +41,11 @@ export type HomeSessionGroup = {
 
 export type OpenSessionOptions = { background?: boolean }
 
-export function createHomeSessionsController(home: HomeController) {
+export function createHomeSessionsController(
+  home: HomeController,
+  options?: { registerPalette?: boolean; allProjects?: boolean },
+) {
+  const servers = useServers()
   const tabs = useTabs()
   const command = useCommand()
   const dialog = useDialog()
@@ -50,6 +54,7 @@ export function createHomeSessionsController(home: HomeController) {
   const queryClient = useQueryClient()
 
   const projectDirectories = createMemo(() => {
+    if (options?.allProjects) return
     const selected = home.selection.value().directory
 
     if (!selected) return
@@ -145,39 +150,40 @@ export function createHomeSessionsController(home: HomeController) {
       })
   })
 
-  command.register("home.palette", () => [
-    {
-      id: "command.palette",
-      title: language.t("command.palette"),
-      hidden: true,
-      onSelect: async () => {
-        const conn = home.server.focused()
+  if (options?.registerPalette !== false)
+    command.register("home.palette", () => [
+      {
+        id: "command.palette",
+        title: language.t("command.palette"),
+        hidden: true,
+        onSelect: async () => {
+          const conn = home.server.focused()
 
-        if (!conn) return
-        const ctx = home.server.focusedContext()
+          if (!conn) return
+          const ctx = home.server.focusedContext()
 
-        if (!ctx) return
-        const { HomeCommandPalette } = await import("./command-palette")
-        void dialog.show(() => (
-          <HomeCommandPalette
-            server={conn}
-            onSelectSession={(entry) => {
-              if (!entry.sessionID || !entry.directory || !entry.server) return
-              const sessionID = entry.sessionID
-              const server = entry.server
-              const directory = entry.project?.worktree ?? entry.directory
-              ctx.projects.open(directory)
-              ctx.projects.touch(directory)
-              void startTransition(() => {
-                const tab = tabs.addSessionTab({ server, sessionId: sessionID })
-                tabs.select(tab)
-              })
-            }}
-          />
-        ))
+          if (!ctx) return
+          const { HomeCommandPalette } = await import("./command-palette")
+          void dialog.show(() => (
+            <HomeCommandPalette
+              server={conn}
+              onSelectSession={(entry) => {
+                if (!entry.sessionID || !entry.directory || !entry.server) return
+                const sessionID = entry.sessionID
+                const server = entry.server
+                const directory = entry.project?.worktree ?? entry.directory
+                ctx.projects.open(directory)
+                ctx.projects.touch(directory)
+                void startTransition(() => {
+                  const tab = tabs.addSessionTab({ server, sessionId: sessionID })
+                  tabs.select(tab)
+                })
+              }}
+            />
+          ))
+        },
       },
-    },
-  ])
+    ])
 
   const rename = async (server: ServerConnection.Key, session: SessionInfo, title: string) => {
     const conn = home.server.list().find((item) => ServerConnection.key(item) === server)
@@ -302,6 +308,8 @@ export function createHomeSessionsController(home: HomeController) {
       language,
     },
     data: {
+      error: () => sessionLoad.error,
+      retry: () => sessionLoad.refetch(),
       records,
       groups,
       loading: () => sessionLoad.isPending,
@@ -315,6 +323,17 @@ export function createHomeSessionsController(home: HomeController) {
       sync: syncLocations,
     },
     session: {
+      pinsReady: servers.hydrated,
+      isPinned: (session: SessionInfo) => {
+        const server = home.selection.value().server
+
+        return !!server && servers.sessionPins.list(server).includes(session.id)
+      },
+      pin: (session: SessionInfo, pinned: boolean) => {
+        const server = home.selection.value().server
+
+        if (server) servers.sessionPins.set(server, session.id, pinned)
+      },
       showProjectName: () => !home.project.selected(),
       server: () => home.selection.value().server,
       canCreate: () => !!home.project.newSession(),
@@ -408,7 +427,8 @@ function groupSessions(records: HomeSessionRecord[], language: ReturnType<typeof
   const now = new Date()
   const today = localDay(now)
   const yesterday = localDay(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1))
-  const day = (record: HomeSessionRecord) => localDay(new Date(record.session.time.updated ?? record.session.time.created))
+  const day = (record: HomeSessionRecord) =>
+    localDay(new Date(record.session.time.updated ?? record.session.time.created))
   const todaySessions = records.filter((record) => day(record) === today)
   const yesterdaySessions = records.filter((record) => day(record) === yesterday)
   const olderSessions = records.filter((record) => day(record) !== today && day(record) !== yesterday)

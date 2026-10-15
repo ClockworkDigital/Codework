@@ -51,6 +51,7 @@ const State = Persistence.struct({
     Schema.String,
     Schema.mutableKey(Schema.String.pipe(Schema.catchDecoding(() => Effect.succeed(Option.none())))),
   ),
+  pinnedSessions: Schema.optional(Schema.Record(Schema.String, Schema.mutableKey(Persistence.array(Schema.String)))),
   recentlyClosed: Schema.Record(Schema.String, Schema.mutableKey(Persistence.array(Schema.String))),
 })
 

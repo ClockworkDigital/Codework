@@ -29,6 +29,18 @@ export const layer = Layer.effect(
     )
     yield* Effect.promise(() => app.whenReady())
     yield* prepareDesktop
+
+    if (import.meta.env.CM_BRAND) {
+      if (app.isPackaged && process.platform === "darwin") {
+        const { installCookieMonster } = yield* Effect.promise(() => import("../cm-install"))
+
+        if (yield* Effect.promise(installCookieMonster)) return yield* Effect.never
+      }
+
+      const { startCookieMonster } = yield* Effect.promise(() => import("../cm-bootstrap"))
+      yield* Effect.promise(startCookieMonster)
+    }
+
     marks.init = Date.now()
 
     return Service.of({

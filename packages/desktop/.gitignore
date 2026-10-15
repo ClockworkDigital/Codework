@@ -27,3 +27,8 @@ out/
 resources/opencode-cli*
 resources/icons
 resources/*.metainfo.xml
+
+resources/cm-plugins/
+resources/vault-auth/
+
+resources/cm-ae/

@@ -11,13 +11,11 @@ import type { Endpoint } from "@opencode/client/service"
 let probe: Promise<Endpoint | undefined> | undefined
 
 export function startSidecarProbe() {
-  if (!app.isPackaged) return
+  if (!app.isPackaged || import.meta.env.CM_BRAND) return
   const version = bundledVersion()
 
   if (!version) return
-  probe = import("@opencode/client/service")
-    .then(({ Service }) => Service.discover({ version }))
-    .catch(() => undefined)
+  probe = import("@opencode/client/service").then(({ Service }) => Service.discover({ version })).catch(() => undefined)
 }
 
 export function sidecarProbe() {

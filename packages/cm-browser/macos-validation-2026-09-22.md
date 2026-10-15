@@ -1,0 +1,83 @@
+# macOS browser validation, 2026-09-22
+
+Scope: issues #22–#35 on macOS arm64, Electron 44.3.0 / Chromium 152.0.7977.78. macOS is the sole release target. These checks use disposable profiles, synthetic files/accounts/servers and owned child processes. The final unsigned CookieMonster package was installed locally and the app restarted; no live model or physical permission request was sent. This is agent implementation review and automated fixture evidence, not external security assurance.
+
+## Changes
+
+- #22: the imports fixture now explicitly unlocks after restoring intentionally disabled encryption. Restored capability must not restore authority. It waits for the actual macOS hide event, and installs the renderer-reload listener before reloading. The earlier run failed at a locked-vault read; an intermediate run timed out on a missed lifecycle event. The corrected run passes all 43 production import cases without changing production guards.
+- #23: screen sharing uses the macOS 15+ native system picker behind exact-origin rules; clipboard shares the selected-visible-main-page gate. The focused fixture starts a real current-tab capture, replaces the document on revocation even when the original URL changes to HTTP 204, exercises clipboard request/check handlers without reading contents, and covers notification consent. A 100 ms visibility monitor closes the observed macOS gap where `isVisible()` changed without a new hide event.
+- #32: encrypted backup now uses the existing platform/architecture secure-entry boundary on macOS. AppKit has an explicit passphrase-only mode: no plaintext username field, initial focus on the secure field. Account-entry mode is preserved. New copy is appended to typed native i18n, with English fallback and unchanged prior locale indices. Translations are not claimed reviewed.
+- #33: discovery proposals now identify macOS as the sole target. Payment vaults, managed passkeys and sync remain absent; no new implementation is authorized by those proposals.
+
+## Automated results
+
+| Issue | Evidence                                                                                                                                                                                                 | Result                                     |
+| ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| #22   | `--imports`: source selection, review/cancel, deduplication, stable IDs, locked/unavailable/malformed inputs, partial cookie writes, stale destination and listener cleanup                              | 43 native cases passed                     |
+| #23   | `--site-permissions`: Chromium notification/clipboard paths, real tab display stream, native-picker configuration, revocation and active-document shutdown                                               | Passed                                     |
+| #24   | `--capture-selection`: unchanged capture succeeds; tab, viewport and task round trips reject stale results                                                                                               | Passed                                     |
+| #25   | `--diagnostics`: bounded console/network counts, permission, cancellation, isolation, changed source                                                                                                     | Passed                                     |
+| #26   | `--site-tools`: discovery/execution, malformed metadata, changed tool/navigation, cancellation/revocation                                                                                                | Passed                                     |
+| #27   | `--site-data`: site selection, actual clearing boundaries, unrelated/app/WPP preservation                                                                                                                | Passed                                     |
+| #28   | Bookmark format/import unit coverage plus guided native import                                                                                                                                           | Passed in desktop suite/import fixture     |
+| #29   | `--tab-organisation`: pin/reorder/duplicate/bulk close, private grants and beforeunload                                                                                                                  | Passed                                     |
+| #30   | `--presentation-preferences`: zoom/presets, navigation, recovery and preview exit                                                                                                                        | Passed                                     |
+| #31   | Search/history/presentation unit coverage                                                                                                                                                                | Passed in desktop suite                    |
+| #32   | `--vault-backup`: real subprocess adapter with a synthetic helper; authenticated export/import, exact collision handling, cancellation, lock termination, wrong passphrase, tampering and missing helper | Passed                                     |
+| #34   | `--accounts`, `--persistence-exdev`, `--persistence-reopen`: capability loss, atomic failure, owned-process crashes, real encrypted storage and migration                                                | Passed; physical authentication is stubbed |
+
+The backup fixture validates exact helper arguments and reply framing. A first wrong-key fixture used a mismatched reply length and therefore tested parsing, not decryption; the corrected test explicitly verifies successful decoding of the wrong passphrase before checking authenticated decryption refusal. The production AppKit helper compiles, but the synthetic child does not prove physical focus, screen-reader behavior or user interaction with AppKit/Touch ID.
+
+Desktop units passed 569 tests with 4 skips and 4,003 expectations. Browser-plugin units passed 91 tests / 3,653 expectations. Mounted app browser tests passed 43 / 283. Desktop and app typechecks passed. Native-i18n tests passed 13 with one pre-existing `pa-PK` detection failure; new append-only key checks pass. Scoped oxlint reported 83 warnings and zero errors across seven TS files. Source review caught the plaintext initial-focus problem; passphrase-only mode resolves it.
+
+The final #23 rerun passed 257 desktop browser tests / 3,089 expectations and 43 mounted app browser tests / 322 expectations, both package typechecks, the focused native Electron permission fixture and both independent source reviews. Scoped oxlint reported zero errors; its warnings are existing rules across the scoped browser files. Native i18n passed 14 checks with the same pre-existing `pa-PK` failure. A branded unsigned production build emitted `.pkg`, `.dmg` and `.zip` artifacts. The `.pkg` replaced `/Applications/CookieMonster.app`; installed and packaged `app.asar` SHA-256 values matched, receipt `com.ogilvy.cookiemonster` reported version `1.18.27`, `/usr/local/bin/opencode` resolved into the installed bundle and ran, and the restarted bridge returned healthy with the CookieMonster model roster. Signing and notarization were intentionally skipped for this local test build.
+
+### Password-assurance follow-up
+
+The final issue #3 rebuild retained the same macOS vault helper. Source, packaged,
+and installed copies are executable 54,256-byte arm64 Mach-O binaries with
+identical SHA-256 `4f51afc0b4f7c1be6f8ff8d817214435f45597ebf05c36ff5ba491bc13966a47`.
+The installed helper has its linker-generated ad-hoc signature; the surrounding
+test app remains intentionally unsigned and unnotarized. The installed receipt
+is still `com.ogilvy.cookiemonster` version `1.18.27`.
+
+`--persistence-reopen` passed again on this Mac. Eleven real Electron child
+phases decrypted the same encrypted vault through fresh processes, covered
+successful and failed migration, and preserved complete old-or-new state across
+owned `SIGKILL` interruption before and after rename. The login keychain contains
+the `Electron Safe Storage` generic-password item used by this isolated harness;
+the check inspected metadata only and did not request or expose its secret.
+`--accounts` and `--persistence-exdev` also passed capability-loss, EXDEV/SNAP,
+partial-write, fsync-failure, malformed-store, and corruption-preservation cases.
+Focused vault authentication/access/backup tests passed 9/9.
+
+The production-adapter Touch ID harness completed both physical paths through
+the real macOS `systemPreferences.promptTouchID` call. Fingerprint approval
+returned `VERIFIED`; a separate run that selected Cancel returned `CANCELLED`
+and did not unlock. The harness never opened or decrypted the password vault.
+It now labels the platform correctly as Touch ID, supports an explicit expected
+cancellation mode, and shows cancellation instructions before opening the
+native prompt.
+
+A default full-native attempt timed out at the consent-lifecycle stage without a completion result. This is not a passing run. The focused rerun witnessed `isVisible=false` while no new hide event arrived and consent was not yet aborted. Electron documents historical [macOS occlusion-driven show/hide events](https://github.com/electron/electron/issues/8664). The fixture now establishes a focused foreground baseline before this hide test, labels each lifecycle case and bounds its event wait. The focused access-review rerun passes. This fixture correction does not establish that arbitrary macOS hide/show sequences always deliver events or change production guards; native visibility checks at consent completion remain necessary. The subsequent default full-native run passed through link destinations, including custom device dimensions, rotation and disable/restoration. It retained the expected local `/fail` `ERR_EMPTY_RESPONSE` and Chromium ObserverList diagnostic. The original failures remain recorded above; the passing run does not erase them.
+
+## Accepted internal-test limits and external release gates
+
+#23 implements the demanded categories supported by the target build. Screen sharing requires macOS 15+ and Apple's picker/OS recording consent; clipboard and notifications retain exact-origin consent and revocation. Geolocation remains blocked because no provider/API key or macOS usage declaration is configured. Physical OS notification delivery, physical desktop selection, accessibility and reviewed translations remain outside the automated evidence.
+
+#34's internal macOS test-build gate was accepted by the repository owner on
+2026-09-22. The acceptance covers the documented same-user shell-capable-agent
+boundary and the first-key, power-loss, key-loss, rollback, and recovery limits;
+external security review was waived only for this internal test scope.
+
+| Required evidence                                                          | Current state                                                                                             |
+| -------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| Actual macOS Touch ID success/cancel                                       | Passed through the production adapter: `VERIFIED` and `CANCELLED`                                         |
+| Actual macOS Keychain behavior                                             | Cross-process encrypted vault/reopen and keychain item metadata verified in the isolated Electron harness |
+| Packaged helper integrity, upgrade and supported-build acceptance          | Passed locally for the unsigned arm64 test build; source/package/install hashes match                     |
+| Same-user-process threat model, including shell-capable agents             | Explicitly accepted for the internal macOS test build                                                     |
+| External security review and finding resolution                            | Waived for internal testing; still required for broader distribution                                      |
+| Physical native entry, accessibility and verified translations             | Accepted as a documented internal-test limitation                                                         |
+| OS-key loss, first-key initialization interruption and power-loss recovery | Accepted as a documented internal-test limitation                                                         |
+
+A shell-capable same-user process remains outside the browser permission/vault-authentication boundary. Do not claim Chromium-equivalent protection. Unsupported or unavailable authentication/storage configurations remain locked. Broader distribution still requires the repository's written WPP Open owner sign-off and external security review.

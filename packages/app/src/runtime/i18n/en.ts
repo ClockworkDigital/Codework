@@ -1,6 +1,10 @@
+import { cookiemonster } from "@/cookiemonster/en"
+import { browser } from "@/cookiemonster/browser/en"
 import { DESKTOP_NATIVE_ENGLISH } from "./desktop-native"
 
 export const dict = {
+  ...browser,
+  ...cookiemonster,
   ...DESKTOP_NATIVE_ENGLISH,
   "session.location.unavailable": "Session location unavailable",
   "session.location.description": "Choose another directory to continue this session.",

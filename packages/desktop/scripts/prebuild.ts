@@ -5,6 +5,12 @@ import { copyBuiltCliToResources, downloadCliToResources, resolveChannel } from 
 
 const channel = resolveChannel()
 
+if (process.env.CM_BRAND === "1") {
+  await $`bun ./scripts/build-cm-plugins.ts`
+  await $`bun ./scripts/build-vault-auth.ts`
+  await $`bun ./scripts/stage-cm-ae.ts`
+}
+
 if (channel === "prod" && !Bun.env.OPENCODE_CLI_DIST) {
   throw new Error("OPENCODE_CLI_DIST is required for production desktop builds")
 }

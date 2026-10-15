@@ -1,0 +1,38 @@
+import { describe, expect, test } from "bun:test"
+import {
+  TASK_COMPLETION_SYSTEM_REMINDER,
+  TOOL_CALL_SYSTEM_REMINDER,
+  TOOL_CALL_SYSTEM_REMINDER_JSON,
+  toolCallInstructions,
+  toolCallRecoveryInstructions,
+} from "./toolCallReminder.mjs"
+
+describe("tool-call transport instructions", () => {
+  test("selects concrete XML instructions for XML model profiles", () => {
+    expect(toolCallInstructions("xml")).toBe(`${TOOL_CALL_SYSTEM_REMINDER}\n\n${TASK_COMPLETION_SYSTEM_REMINDER}`)
+    expect(toolCallInstructions("xml")).toContain("<function_calls>")
+    expect(toolCallInstructions("xml")).toContain("CM_TASK_COMPLETE_V1")
+  })
+
+  test("selects concrete JSON instructions for JSON model profiles", () => {
+    expect(toolCallInstructions("json")).toStartWith(TOOL_CALL_SYSTEM_REMINDER_JSON)
+    expect(toolCallInstructions("json")).toContain('{"type":"tool_call"')
+    expect(toolCallInstructions("json")).toContain("CM_TASK_COMPLETE_V1")
+  })
+
+  test("adds the unfenced XML rule only for phase-capable profiles", () => {
+    const phased = toolCallInstructions("xml", { commentaryPhase: true })
+
+    expect(phased).toContain("with no Markdown fence")
+    expect(phased).toContain("messages[].toolCalls")
+    expect(toolCallInstructions("xml")).not.toContain("messages[].toolCalls")
+  })
+
+  test("builds a bounded recovery instruction with the exact available tool names", () => {
+    const instruction = toolCallRecoveryInstructions(["bash", "read", "bash"])
+    expect(instruction).toContain("tool-routing step for a local coding session")
+    expect(instruction).toContain("Available tool names: bash, read")
+    expect(instruction).toContain("begin with bash or read")
+    expect(instruction).not.toContain("system instructions")
+  })
+})

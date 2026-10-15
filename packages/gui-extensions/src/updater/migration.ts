@@ -20,3 +20,12 @@ export function stableMacDownload(input: unknown, arch: string) {
 
   return file && { version: artifact.version, url: file.url }
 }
+
+export function updatePolicy(name: string, platform: string, channel: string, packaged: boolean) {
+  const branded = name === "CookieMonster"
+
+  return {
+    enabled: packaged && (branded ? platform === "darwin" && channel === "prod" : channel !== "dev"),
+    prerelease: branded,
+  }
+}

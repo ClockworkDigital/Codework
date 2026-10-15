@@ -26,6 +26,7 @@ import { SessionMessage } from "./message.js"
 import { SessionPrompt } from "./prompt.js"
 import { SessionRevert } from "./revert.js"
 import { SessionShell } from "./shell.js"
+import { SessionOwnership } from "./ownership.js"
 import { SessionSkill } from "./skill.js"
 import { SessionSchema } from "./schema.js"
 import { SessionStore } from "./store.js"
@@ -217,7 +218,10 @@ export const make = Effect.fn("Session.make")(function* () {
         Effect.catchTag("Session.NotFoundError", () => Effect.void),
         Effect.orDie,
       )
-    }).pipe(Effect.forkIn(scope, { startImmediately: true }))
+    }).pipe(
+      (work) => SessionOwnership.withLock(work, sessionID, database.filename),
+      Effect.forkIn(scope, { startImmediately: true }),
+    )
     yield* Fiber.join(running)
   })
   const skill = Effect.fn("Session.skill")(function* (

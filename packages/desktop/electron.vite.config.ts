@@ -60,6 +60,7 @@ export default defineConfig(({ command }) => {
         dedupe: ["effect"],
       },
       define: {
+        "import.meta.env.CM_BRAND": JSON.stringify(process.env.CM_BRAND === "1"),
         // Local renderer/server mode still uses the dev application identity and updater policy.
         "import.meta.env.OPENCODE_CHANNEL": JSON.stringify(channel === "local" ? "dev" : channel),
       },
@@ -123,6 +124,7 @@ const require = __cjs_mod__.createRequire(import.meta.url);
       define: {
         "import.meta.env.OPENCODE_VERSION": JSON.stringify(process.env.OPENCODE_VERSION),
         "import.meta.env.VITE_OPENCODE_CHANNEL": JSON.stringify(channel),
+        "import.meta.env.CM_BRAND": JSON.stringify(process.env.CM_BRAND === "1"),
         "import.meta.env.OPENCODE_TEST_ONBOARDING": JSON.stringify(
           command === "serve" && process.env.OPENCODE_TEST_ONBOARDING === "1",
         ),

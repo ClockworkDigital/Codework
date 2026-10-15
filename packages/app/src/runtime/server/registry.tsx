@@ -222,7 +222,7 @@ export const { use: useServers, provider: ServersProvider } = createSimpleContex
         previousKey: "server.v3",
       },
       serverState(() => props.canonicalLocalServer),
-      { list: [], hidden: {}, projects: {}, lastProject: {}, recentlyClosed: {} },
+      { list: [], hidden: {}, projects: {}, lastProject: {}, recentlyClosed: {}, pinnedSessions: {} },
     )
 
     const allServers = createMemo((): Array<ServerConnection.Any> => {
@@ -294,6 +294,17 @@ export const { use: useServers, provider: ServersProvider } = createSimpleContex
       remove,
       canRemove,
       scope,
+      sessionPins: {
+        list: (key: ServerConnection.Key) => store.pinnedSessions?.[scope(key)] ?? [],
+        set: (key: ServerConnection.Key, sessionID: string, pinned: boolean) => {
+          if (!hydrated()) return
+          const current = store.pinnedSessions?.[scope(key)] ?? []
+          setStore("pinnedSessions", (pins) => ({
+            ...pins,
+            [scope(key)]: pinned ? [...new Set([...current, sessionID])] : current.filter((id) => id !== sessionID),
+          }))
+        },
+      },
       projects: {
         forServer: projectsForServer,
       },

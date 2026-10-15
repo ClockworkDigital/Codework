@@ -6,7 +6,7 @@ import { ServerConnection } from "@/runtime/server/registry"
 import { projectSettingsKey, useSettings } from "@/settings/model"
 
 export function useSessionTabAvatarState(
-  server: Accessor<ServerConnection.Key>,
+  server: Accessor<ServerConnection.Key | undefined>,
   sessionId: Accessor<string>,
   root?: Accessor<boolean>,
   snapshot?: Accessor<SessionInfo | undefined>,
@@ -74,5 +74,5 @@ export function useSessionTabAvatarState(
     return busy(sessionId())
   })
 
-  return { unread, loading }
+  return { unread, loading, hasPermissions, hasQuestions: hasForms }
 }

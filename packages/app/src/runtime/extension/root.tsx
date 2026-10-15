@@ -2,6 +2,7 @@ import { createMemo, lazy, onCleanup, Show, Suspense, type ParentProps } from "s
 import { extensionEnabled } from "@opencode/gui-extensions/sdk/bridge"
 import type { Definition } from "@opencode/gui-extensions/sdk"
 import { builtins } from "./builtins"
+import { cookieMonster } from "@/cookiemonster/extension"
 import { createInstalled } from "./installed"
 import { createMenubarItems, MenubarItemsProvider } from "./menubar-items"
 import { usePlatform } from "@/runtime/platform/platform"
@@ -39,9 +40,10 @@ export function ExtensionRoot(props: ParentProps) {
   const os = platform.platform === "desktop" ? platform.os : undefined
 
   // Built-ins only: installed `.ocdx` archives run their main entry until that format ships renderer bundles.
-  const definitions = builtins.filter(
-    (definition: Definition) => !definition.os || (!!os && definition.os.includes(os)),
-  )
+  const definitions = [
+    ...builtins.filter((definition) => !platform.browserPanel || definition.id !== "browser"),
+    cookieMonster,
+  ].filter((definition: Definition) => !definition.os || (!!os && definition.os.includes(os)))
 
   // Only enable preferences cross this boundary; the host derives blocked status from live hard dependencies.
   const disabled = createMemo(() => {

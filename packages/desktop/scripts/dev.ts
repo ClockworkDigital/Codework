@@ -23,6 +23,10 @@ async function main() {
 }
 
 async function prepareDesktop() {
+  if (process.env.CM_BRAND === "1") {
+    await $`bun ./scripts/stage-cm-ae.ts`
+    await $`bun ./scripts/build-vault-auth.ts`
+  }
   await Promise.all([
     $`bun run install-electron`,
     $`bun ./scripts/copy-icons.ts ${process.env.OPENCODE_CHANNEL ?? "dev"}`,

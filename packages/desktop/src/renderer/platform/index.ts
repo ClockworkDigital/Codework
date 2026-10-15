@@ -1,3 +1,5 @@
+import { createStore } from "solid-js/store"
+import type { WppAuthState } from "@cookiemonster/provider/auth"
 import type { Platform } from "@opencode/app/desktop"
 import type { ElectronAPI } from "../api-types"
 import { setPinchZoomEnabled, webviewZoom } from "../window/zoom"
@@ -16,12 +18,28 @@ export type DesktopWindowState = {
 
 export function createDesktopPlatform(api: ElectronAPI, windowState: DesktopWindowState): Platform {
   const os = desktopOS()
+  const [auth, setAuth] = createStore<WppAuthState>({ status: "unknown", checkedAt: null, loginVisible: false })
+
+  if (import.meta.env.CM_BRAND) {
+    window.addEventListener("unload", api.onWppAuth(setAuth), { once: true })
+    void api
+      .wppAuth(false)
+      .then(setAuth)
+      .catch(() => undefined)
+  }
 
   return {
     platform: "desktop",
     os,
     version: windowState.version,
     windowID: windowState.id,
+    ...(import.meta.env.CM_BRAND
+      ? {
+          browserPanel: api.browserPanel,
+          wppLogin: api.wppLogin,
+          wppAuth: { state: () => auth, check: () => api.wppAuth(true), toggleLogin: api.wppLogin },
+        }
+      : {}),
     ...createDesktopFiles(api, os),
     ...createDesktopStorage(api),
     exportDebugLogs: () => api.exportDebugLogs(),

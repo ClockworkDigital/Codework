@@ -2,6 +2,41 @@
 
 The OpenCode Desktop app, built with Electron.
 
+## CookieMonster V2 integration testing
+
+The `v2-upgrade` branch starts from upstream `v2.0.29` (`042d0832f5`). It ports the CookieMonster provider,
+WPP bridge, CM Browser, scheduling, CM3 sidebar and macOS distribution settings onto the native V2 backend.
+It includes upstream's official Figma plugin and skill bundle, plus an adapter for the existing After Effects runtime.
+This is an integration test branch. Strict changed-file lint and complete desktop visual verification are outstanding.
+
+From the repository root on the test Mac, using Bun 1.4.2:
+
+```bash
+git switch v2-upgrade
+git pull --ff-only
+bun install
+export CM_V2_TEST_ROOT="$(mktemp -d)"
+CM_BRAND=1 OPENCODE_DESKTOP_TEST_ROOT="$CM_V2_TEST_ROOT" O1_CODE_PROXY_PORT=18787 \
+  O1_CODE_SHOW_WORKERS=1 bun run dev:desktop --build-server
+```
+
+Keep `CM_V2_TEST_ROOT` for later launches to reuse this isolated desktop profile, website logins and session database.
+Branded development stages the vendored AE runtime and native vault helper before launch. It runs the CLI from this
+checkout; do not use `--download-server` to test these changes. AE's installed panel must match the vendored runtime,
+currently `0.2.3`, protocol `1`. AE uses its existing `~/.cookiemonster-ae` discovery directory by default, so only one
+CookieMonster AE runtime can own that directory. An explicit `CM_AE_DATA_DIR` also requires configuring the panel to
+use that directory.
+
+On the target machine, check WPP sign-in and a streamed tool call, Figma sign-in and a real read/write task, and AE
+connection, inspection, checkpoint-backed editing, capture, rendering and recovery. Also check CM Browser private tabs,
+Take Over/Resume, panel switching and foreground subagent delegation. Review CM3 layout, model selection, scheduling
+and state after reopening. No live Figma OAuth, real AE execution, signed macOS package or updater has been verified here.
+
+Local checks cover native/legacy provider configuration, the packaged Figma skill bundle, CM Browser protocol and
+delegation, native V2 scheduling and AE tool execution, reviewed skill writes, WPP parsing/capture, native browser
+contracts and installer behavior. Migration on copies of the two local databases retained all 18 sessions and passed
+SQLite integrity checks. The source databases were not migrated.
+
 ## Development
 
 ```bash

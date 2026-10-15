@@ -27,6 +27,41 @@ test("managed service ports are stable per installation channel", () => {
   expect(ServiceConfig.defaultPort("preview-a")).not.toBe(ServiceConfig.defaultPort("preview-b"))
 })
 
+test("CookieMonster uses a private registration, credential and stable per-profile port", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "cm-service-private-"))
+  const previous = { desktop: process.env.CM_DESKTOP, file: process.env.CM_SERVICE_FILE }
+  const layer = Global.layerWith({ config: path.join(root, "config"), state: path.join(root, "state") })
+  const run = <A, E>(effect: Effect.Effect<A, E, Global.Service | FileSystem.FileSystem>) =>
+    Effect.runPromise(effect.pipe(Effect.provide(layer), Effect.provide(NodeFileSystem.layer)))
+  try {
+    delete process.env.CM_DESKTOP
+    delete process.env.CM_SERVICE_FILE
+    await run(ServiceConfig.password("ordinary-service"))
+    const ordinary = await run(ServiceConfig.read())
+    process.env.CM_DESKTOP = "1"
+    process.env.CM_SERVICE_FILE = path.join(root, "desktop", "service-cookiemonster.json")
+    expect((await run(ServiceConfig.options())).file).toBe(process.env.CM_SERVICE_FILE)
+    expect(await run(ServiceConfig.read())).toEqual({})
+    const port = ServiceConfig.defaultPort()
+    expect(port).toBeGreaterThanOrEqual(10_000)
+    expect(port).toBeLessThan(60_000)
+    expect(ServiceConfig.defaultPort()).toBe(port)
+    await run(ServiceConfig.password("private-service"))
+    expect(await run(ServiceConfig.read())).toEqual({ password: "private-service" })
+    expect(JSON.parse(await fs.readFile(process.env.CM_SERVICE_FILE + ".config", "utf8"))).toEqual({
+      password: "private-service",
+    })
+    delete process.env.CM_DESKTOP
+    expect(await run(ServiceConfig.read())).toEqual(ordinary)
+  } finally {
+    if (previous.desktop === undefined) delete process.env.CM_DESKTOP
+    else process.env.CM_DESKTOP = previous.desktop
+    if (previous.file === undefined) delete process.env.CM_SERVICE_FILE
+    else process.env.CM_SERVICE_FILE = previous.file
+    await fs.rm(root, { recursive: true, force: true })
+  }
+})
+
 test("service disabled accepts only booleans without changing configuration on invalid input", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "opencode-service-disabled-config-"))
   const layer = Global.layerWith({ config: path.join(root, "config"), state: path.join(root, "state") })

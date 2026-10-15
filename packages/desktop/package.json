@@ -29,7 +29,9 @@
     "electron-context-menu": "5.0.0",
     "electron-log": "^5",
     "electron-updater": "6.8.9",
-    "lighthouse": "13.4.1"
+    "lighthouse": "13.4.1",
+    "csv-parse": "6.1.0",
+    "parse5": "7.3.0"
   },
   "devDependencies": {
     "@brendonovich/vite-plugin-opencode": "0.1.3",
@@ -56,7 +58,9 @@
     "magic-string": "0.30.21",
     "solid-js": "catalog:",
     "typescript": "~5.6.2",
-    "vite": "8.2.2"
+    "vite": "8.2.2",
+    "@cookiemonster/cm-browser": "workspace:*",
+    "@cookiemonster/provider": "workspace:*"
   },
   "optionalDependencies": {
     "@lydell/node-pty-darwin-arm64": "1.2.0-beta.12",

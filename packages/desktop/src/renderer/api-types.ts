@@ -1,6 +1,8 @@
+import type { WppAuthState } from "@cookiemonster/provider/auth"
 import type { DesktopMenuAction } from "@opencode/app/desktop-menu"
 import type { DesktopNativeBundle } from "@opencode/app/i18n/desktop-native"
 import type { WindowBootstrap } from "../shared/window-bootstrap"
+import type { BrowserPanelPlatform } from "@cookiemonster/cm-browser/panel"
 import type {
   ClipboardImage,
   DirectoryPickerOptions,
@@ -13,6 +15,10 @@ import type {
 } from "../shared/ipc-contract"
 
 export type ElectronAPI = {
+  browserPanel: BrowserPanelPlatform
+  wppLogin(): Promise<void>
+  wppAuth(check: boolean): Promise<WppAuthState>
+  onWppAuth(callback: (state: WppAuthState) => void): () => void
   awaitInitialization(): Promise<ServerReadyData>
   reconnectService(): Promise<ServerReadyData>
   consumeInitialDeepLinks(): Promise<string[]>

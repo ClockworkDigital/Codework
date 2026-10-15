@@ -1,5 +1,8 @@
 export * as PluginInternal from "./internal.js"
 
+import { ScheduleRuntime } from "../schedule/runtime.js"
+import { CmAePlugin } from "../cm-ae/plugin.js"
+import { SchedulePlugin } from "../schedule/plugin.js"
 import { LLMClient } from "@opencode/ai"
 import type { Plugin } from "@opencode/plugin/effect/plugin"
 import { LayerNode } from "@opencode/util/effect/layer-node"
@@ -106,6 +109,7 @@ import { WarmingPlugin } from "./warming.js"
 import { WellKnownPlugin } from "../wellknown/plugin.js"
 
 const services = [
+  ScheduleRuntime.Service,
   Agent.Service,
   AppProcess.Service,
   Provider.Service,
@@ -160,6 +164,7 @@ const services = [
 export type Requirements = Context.Service.Identifier<(typeof services)[number]>
 
 export const requirements = LayerNode.group([
+  ScheduleRuntime.node,
   Agent.node,
   AppProcess.node,
   Provider.node,
@@ -285,6 +290,6 @@ export const list = Effect.fn("PluginInternal.list")(function* () {
     )
   return {
     pre: resolve(pre),
-    post: resolve(post),
+    post: resolve(process.env.CM_DESKTOP === "1" ? [...post, SchedulePlugin.Plugin, CmAePlugin.Plugin] : post),
   }
 })

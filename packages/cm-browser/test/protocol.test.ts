@@ -1,0 +1,759 @@
+import { expect, test } from "bun:test"
+import {
+  DEFAULT_ALLOWLIST,
+  MAX_TYPED_TEXT,
+  MAX_SNAPSHOT_BYTES,
+  screenshotBytes,
+  screenshotDimensions,
+  success,
+  MAX_URL_LENGTH,
+  hostAllowed,
+  parseBrowserIpcRequest,
+  parseBrowserIpcCancel,
+  parseRequest,
+  parseDelegationRequest,
+  parseDelegationResult,
+  parseBrowserIpcResult,
+  parsePanelRequest,
+  parsePanelResult,
+  stateDirectory,
+} from "../src/protocol"
+
+test("panel requests and results require exact view, tab and native readiness combinations", () => {
+  for (const request of [
+    { op: "set_panel", view: "browser", tabID: "one" },
+    { op: "set_panel", view: "review" },
+    { op: "set_panel", view: "hidden" },
+  ] as const) {
+    expect(parsePanelRequest(request)).toEqual(request)
+    expect(parseRequest(request)).toEqual(request)
+    expect(
+      parseBrowserIpcRequest({ type: "browser_request", id: "panel", sessionID: "task", request })?.request,
+    ).toEqual(request)
+    const { op, ...view } = request
+    const result =
+      view.view === "browser" ? { ...view, browserReady: true as const } : { ...view, browserReady: false as const }
+    expect(parsePanelResult(result)).toEqual(result)
+    expect(
+      parseBrowserIpcResult({
+        type: "browser_result",
+        id: "panel",
+        response: { ok: true, result: { panelResult: result } },
+      }),
+    ).toBeDefined()
+    for (const extra of [{ unknown: true }, { deadline: 123 }, { browserReady: true }, { op: "read_state" }])
+      expect(parsePanelRequest({ ...request, ...extra })).toBeUndefined()
+    expect(parsePanelResult({ ...result, browserReady: !result.browserReady })).toBeUndefined()
+  }
+  for (const invalid of [
+    null,
+    [],
+    {},
+    { view: "files" },
+    { view: "browser" },
+    { view: "browser", tabID: "" },
+    { view: "browser", tabID: "../one" },
+    { view: "browser", tabID: "a".repeat(129) },
+    { view: "browser", tabID: "one\n" },
+    { view: "review", tabID: "one" },
+    { view: "hidden", tabID: undefined },
+  ]) {
+    expect(
+      parsePanelRequest(invalid && !Array.isArray(invalid) ? { ...invalid, op: "set_panel" } : invalid),
+    ).toBeUndefined()
+    expect(parsePanelResult(invalid)).toBeUndefined()
+  }
+  for (const panelResult of [
+    undefined,
+    null,
+    [],
+    {},
+    { view: "browser", tabID: "one", browserReady: false },
+    { view: "review", tabID: "one", browserReady: false },
+    { view: "hidden", browserReady: true },
+    { view: "hidden", browserReady: false, secret: "private" },
+  ])
+    expect(
+      parseBrowserIpcResult({
+        type: "browser_result",
+        id: "panel",
+        response: { ok: true, result: { panelResult } },
+      }),
+    ).toBeUndefined()
+})
+
+test("targeted inspection and document waits share bounded selector rules", () => {
+  const frameRef = "a".repeat(36)
+  const frameContext = { frameRef, approval: "b".repeat(36), topOrigin: "https://example.test", origin: "null" }
+  for (const selector of ["button", "#week", ".event", "button#open.primary"]) {
+    expect(parseRequest({ op: "read_state", tabID: "one", selector })).toBeDefined()
+    expect(parseRequest({ op: "read_state", tabID: "one", frameRef, frameContext, selector })).toBeDefined()
+    for (const condition of ["visible", "attached", "ready"])
+      expect(
+        parseRequest({
+          op: "wait_for_element",
+          tabID: "one",
+          frameRef,
+          frameContext,
+          selector,
+          condition,
+          timeoutMs: 15000,
+        }),
+      ).toBeDefined()
+  }
+  for (const selector of ["button span", "input[value]", "button:hover", "*", "#a,#b", "#a\\31", "x".repeat(513)])
+    for (const request of [
+      { op: "read_state", tabID: "one" },
+      { op: "wait_for_element", tabID: "one", selector, condition: "visible", timeoutMs: 10 },
+    ])
+      expect(parseRequest({ ...request, selector })).toBeUndefined()
+})
+
+test("visual actions admit bounded raster coordinates and explicit one-use image identity", () => {
+  const visual = {
+    op: "visual_action",
+    tabID: "one",
+    visualRef: "a".repeat(36),
+    action: "click",
+    x: 120,
+    y: 40,
+  } as const
+  expect(parseRequest({ op: "prepare_write", request: visual })).toBeDefined()
+  for (const invalid of [
+    { x: -1 },
+    { y: 4096 },
+    { x: Infinity },
+    { y: NaN },
+    { visualRef: "url" },
+    { action: "fill" },
+    { frameID: "raw" },
+    { script: "raw" },
+  ])
+    expect(parseRequest({ op: "prepare_write", request: { ...visual, ...invalid } })).toBeUndefined()
+})
+
+test("embedded input admits exact native bindings and bounded frame actions only", () => {
+  const frameRef = "a".repeat(36)
+  const frameContext = { frameRef, approval: "b".repeat(36), topOrigin: "https://example.test", origin: "null" }
+  const action = { op: "click", ref: `frame.${"c".repeat(36)}:target` } as const
+  const prepare = { op: "prepare_frame_input", tabID: "one", frameRef, action } as const
+  expect(parseRequest(prepare)).toEqual(prepare)
+  expect(parseRequest({ ...prepare, op: "frame_input", frameContext })).toBeDefined()
+  for (const invalid of [
+    { ...action, ref: "top:ref" },
+    { op: "navigate", url: "https://example.test" },
+    { ...action, script: "private" },
+    { ...action, tabID: "other" },
+  ])
+    expect(parseRequest({ ...prepare, action: invalid })).toBeUndefined()
+  expect(parseRequest({ ...prepare, frameContext })).toBeUndefined()
+  expect(
+    parseRequest({ ...prepare, op: "frame_input", frameContext: { ...frameContext, frameRef: "d".repeat(36) } }),
+  ).toBeUndefined()
+})
+
+test("delegation parses only exact bounded identities and acknowledgements", () => {
+  const grant = { op: "grant_tabs", executionID: "exec-1", childSessionID: "child", tabIDs: ["a", "b"] } as const
+  const revoke = { op: "revoke_tabs", executionID: "exec-1" } as const
+  expect(parseRequest(grant)).toEqual(grant)
+  expect(parseRequest(revoke)).toEqual(revoke)
+  for (const invalid of [
+    { tabIDs: [] },
+    { tabIDs: ["a", "a"] },
+    { tabIDs: Array.from({ length: 17 }, (_, i) => `tab-${i}`) },
+    { tabIDs: ["a", 1] },
+    { tabIDs: ["../tab"] },
+    { childSessionID: "" },
+    { executionID: "x".repeat(129) },
+    { executionID: "x\n" },
+    { parentSessionID: "parent" },
+    { origin: "https://example.test" },
+    { active: true },
+  ])
+    expect(parseDelegationRequest({ ...grant, ...invalid })).toBeUndefined()
+  for (const extra of [{ tabIDs: ["a"] }, { childSessionID: "child" }, { active: false }])
+    expect(parseRequest({ ...revoke, ...extra })).toBeUndefined()
+  const envelope = { type: "browser_request", id: "request", sessionID: "parent", request: grant } as const
+  expect(parseBrowserIpcRequest(envelope)).toEqual(envelope)
+  expect(parseBrowserIpcRequest({ ...envelope, sessionID: "child" })).toBeUndefined()
+  expect(parseBrowserIpcRequest({ ...envelope, sessionID: "../parent" })).toBeUndefined()
+  expect(parseBrowserIpcRequest({ ...envelope, parentSessionID: "other" })).toBeUndefined()
+  for (const active of [true, false]) {
+    const result = { executionID: "exec-1", active }
+    expect(parseDelegationResult(result)).toEqual(result)
+    expect(parseDelegationResult({ ...result, tabIDs: ["a"] })).toBeUndefined()
+  }
+  for (const result of [null, [], {}, { executionID: "e", active: "true" }, { executionID: "", active: false }]) {
+    expect(parseDelegationResult(result)).toBeUndefined()
+    expect(
+      parseBrowserIpcResult({
+        type: "browser_result",
+        id: "request",
+        response: { ok: true, result: { delegation: result } },
+      }),
+    ).toBeUndefined()
+  }
+})
+
+test("browser IPC accepts only the bounded action dispatch status vocabulary", () => {
+  for (const actionStatus of ["not_dispatched", "dispatched_observed", "dispatched_uncertain"] as const)
+    expect(
+      parseBrowserIpcResult({
+        type: "browser_result",
+        id: "click",
+        response: { ok: false, code: "unavailable", error: "unavailable", actionStatus },
+      })?.response,
+    ).toMatchObject({ actionStatus })
+  expect(
+    parseBrowserIpcResult({
+      type: "browser_result",
+      id: "click",
+      response: {
+        ok: false,
+        code: "unavailable",
+        error: "unavailable",
+        actionStatus: "sent_twice",
+        actionCause: "transport_unknown",
+      },
+    }),
+  ).toBeUndefined()
+  expect(
+    parseBrowserIpcResult({
+      type: "browser_result",
+      id: "click",
+      response: { ok: false, code: "unavailable", error: "unavailable", actionCause: "raw_error" },
+    }),
+  ).toBeUndefined()
+})
+
+test("explicit frame reads require exact preparation and origin binding, never raw CDP targeting", () => {
+  const frameRef = "a".repeat(36)
+  const frameContext = {
+    frameRef,
+    approval: "b".repeat(36),
+    topOrigin: "https://top.test:8443",
+    origin: "https://child.test:9443",
+  }
+  const prepare = { op: "prepare_frame", tabID: "one", frameRef } as const
+  const read = { op: "read_state", tabID: "one", frameRef, frameContext } as const
+  expect(parseRequest(prepare)).toEqual(prepare)
+  expect(parseRequest(read)).toEqual(read)
+  expect(parseRequest({ ...read, frameContext: { ...frameContext, origin: "null" } })).toMatchObject({
+    frameContext: { origin: "null" },
+  })
+  expect(parseRequest({ ...read, frameContext: undefined })).toBeUndefined()
+  expect(parseRequest({ ...prepare, frameContext })).toBeUndefined()
+  expect(parseRequest({ op: "read_state", tabID: "one", frameContext })).toBeUndefined()
+  for (const key of ["frameId", "sessionID", "contextId", "script", "unknown"]) {
+    expect(parseRequest({ ...prepare, [key]: "x" })).toBeUndefined()
+    expect(parseRequest({ ...read, [key]: "x" })).toBeUndefined()
+  }
+  for (const invalid of [
+    { origin: "https://child.test/path" },
+    { topOrigin: "about:blank" },
+    { frameRef: "c".repeat(36) },
+    { approval: "" },
+    { extra: true },
+  ])
+    expect(parseRequest({ ...read, frameContext: { ...frameContext, ...invalid } })).toBeUndefined()
+  expect(
+    parseRequest({ op: "prepare_write", request: { op: "click", tabID: "one", ref: "x", frameContext } }),
+  ).toBeUndefined()
+})
+
+test("frame selection requires exact operation, frame and option consent with no top fallback", () => {
+  const frameRef = "a".repeat(36)
+  const ref = `frame.${"b".repeat(36)}:select`
+  const optionRef = `frame.${"b".repeat(36)}:option`
+  const frameContext = {
+    frameRef,
+    approval: "c".repeat(36),
+    topOrigin: "https://top.test",
+    origin: "https://child.test",
+  }
+  const frameSelectContext = { ...frameContext, op: "select_option" as const, ref, optionRef }
+  const prepare = { op: "prepare_frame_select" as const, tabID: "one", frameRef, ref, optionRef }
+  const select = { ...prepare, op: "select_option" as const, frameSelectContext }
+  expect(parseRequest(prepare)).toEqual(prepare)
+  expect(parseRequest(select)).toEqual(select)
+  for (const extra of [{ frameContext }, { context: {} }, { sessionID: "raw" }, { unknown: true }]) {
+    expect(parseRequest({ ...prepare, ...extra })).toBeUndefined()
+    expect(parseRequest({ ...select, ...extra })).toBeUndefined()
+  }
+  for (const invalid of [
+    undefined,
+    frameContext,
+    { ...frameSelectContext, op: "read_state" },
+    { ...frameSelectContext, ref: optionRef },
+    { ...frameSelectContext, optionRef: ref },
+    { ...frameSelectContext, frameRef: "d".repeat(36) },
+    { ...frameSelectContext, extra: true },
+  ])
+    expect(parseRequest({ ...select, frameSelectContext: invalid })).toBeUndefined()
+  expect(parseRequest({ op: "read_state", tabID: "one", frameRef, frameContext: frameSelectContext })).toBeUndefined()
+  expect(parseRequest({ op: "read_state", tabID: "one", frameSelectContext })).toBeUndefined()
+  expect(parseRequest({ op: "prepare_write", request: prepare })).toBeUndefined()
+  expect(parseRequest({ ...select, frameRef: undefined })).toBeUndefined()
+  expect(parseRequest({ ...prepare, ref: "top:select" })).toBeUndefined()
+})
+
+test("unsupported frame arguments never silently fall back to the top document", () => {
+  const context = {
+    tabID: "one",
+    origin: "http://localhost",
+    urlHash: "a".repeat(64),
+    revision: 0,
+    accessRevision: 0,
+    ownerContext: "owner-task-1",
+  }
+  const writes = [
+    { op: "select_option", tabID: "one", ref: "select", optionRef: "option" },
+    { op: "click", tabID: "one", ref: "button" },
+    { op: "fill", tabID: "one", ref: "input", text: "text" },
+    { op: "hover", tabID: "one", ref: "button" },
+    { op: "drag", tabID: "one", sourceRef: "source", targetRef: "target" },
+    { op: "press_key", tabID: "one", key: "Enter", modifiers: [] },
+    { op: "scroll", tabID: "one", deltaX: 0, deltaY: 1 },
+    { op: "navigate", tabID: "one", url: "http://localhost/" },
+    { op: "screenshot", tabID: "one" },
+    { op: "observe_network", tabID: "one", durationMs: 250 },
+  ]
+  const requests = [
+    { op: "read_state", tabID: "one" },
+    { op: "list_tabs" },
+    { op: "wait_for_element", tabID: "one", selector: "button", timeoutMs: 1 },
+    { op: "wait_for_navigation", tabID: "one", url: "http://localhost/", timeoutMs: 1 },
+    ...writes.map((request) => ({ ...request, context })),
+    ...writes.map((request) => ({ op: "prepare_write", request })),
+  ]
+  for (const key of ["frameRef", "frameId", "frameID", "executionContextId", "contextId", "sessionId", "sessionID"])
+    for (const value of [undefined, null, "", "opaque", 1, {}]) {
+      for (const request of requests) expect(parseRequest({ ...request, [key]: value })).toBeUndefined()
+      for (const request of writes)
+        expect(parseRequest({ op: "prepare_write", request: { ...request, [key]: value } })).toBeUndefined()
+    }
+})
+
+test("tab lifecycle requires exact actions, explicit targets and preparation tokens", () => {
+  for (const request of [
+    { op: "create_tab" },
+    { op: "select_tab", tabID: "one" },
+    { op: "close_tab", tabID: "one" },
+  ] as const) {
+    expect(parseRequest({ op: "prepare_tab", request })).toEqual({ op: "prepare_tab", request })
+    expect(parseRequest(request)).toBeUndefined()
+    expect(parseRequest({ ...request, token: "a".repeat(36) })).toEqual({ ...request, token: "a".repeat(36) })
+    for (const token of [undefined, "", 1, "x".repeat(129)]) expect(parseRequest({ ...request, token })).toBeUndefined()
+    expect(parseRequest({ op: "prepare_write", request })).toBeUndefined()
+    expect(
+      parseRequest({ op: "prepare_tab", request: { ...request, url: "https://private.invalid/" } }),
+    ).toBeUndefined()
+    for (const extra of [
+      { url: "https://private.invalid/" },
+      { context: {} },
+      { sessionID: "other" },
+      { unknown: true },
+    ]) {
+      expect(parseRequest({ op: "prepare_tab", request: { ...request, ...extra } })).toBeUndefined()
+      expect(parseRequest({ op: "prepare_tab", request, ...extra })).toBeUndefined()
+      expect(parseRequest({ ...request, token: "opaque", ...extra })).toBeUndefined()
+    }
+    expect(parseRequest({ op: "prepare_tab", request: { ...request, token: "opaque" } })).toBeUndefined()
+    for (const token of ["x".repeat(128), "uuid_123-abc"])
+      expect(parseRequest({ ...request, token })).toEqual({ ...request, token })
+    for (const token of ["https://private.invalid/", "private title", "opaque\\n"])
+      expect(parseRequest({ ...request, token })).toBeUndefined()
+  }
+  for (const tabID of [undefined, "", 1, "x".repeat(129)])
+    expect(parseRequest({ op: "prepare_tab", request: { op: "close_tab", tabID } })).toBeUndefined()
+  expect(parseRequest({ op: "prepare_tab", request: { op: "create_tab", tabID: "one" } })).toBeUndefined()
+})
+
+test("screenshot byte, edge, raster and complete UTF-8 response budgets are exact", () => {
+  for (const length of [46_080, 46_081]) {
+    const bytes = Buffer.alloc(length)
+    bytes.set([255, 216, 255])
+    bytes.set([255, 217], length - 2)
+    expect(Boolean(screenshotBytes(bytes.toString("base64")))).toBe(length === 46_080)
+  }
+  for (const value of ["", "!!!!", "/9j/2Q==\\n", "/9j/2R==", Buffer.from("not jpeg").toString("base64")])
+    expect(screenshotBytes(value)).toBeUndefined()
+  expect(screenshotDimensions(4096, 1024)).toBe(true)
+  expect(screenshotDimensions(2048, 2048)).toBe(true)
+  for (const pair of [
+    [4097, 1],
+    [4096, 1025],
+    [2048, 2049],
+    [0, 1],
+    [1.5, 1],
+    [NaN, 1],
+  ])
+    expect(screenshotDimensions(...(pair as [number, number]))).toBe(false)
+  const state = {
+    tabID: "one",
+    url: "http://localhost/",
+    title: "",
+    visibleText: "",
+    elements: [],
+    screenshot: { data: "a".repeat(61_440), width: 1, height: 1 },
+  }
+  const spare = 65_536 - Buffer.byteLength(JSON.stringify({ ok: true, result: state }))
+  state.url += "x".repeat(spare)
+  expect(success(state).ok).toBe(true)
+  expect(success({ ...state, url: state.url + "x" }).ok).toBe(false)
+  expect(success({ ...state, url: state.url.slice(0, -1) + "é" }).ok).toBe(false)
+})
+
+test("screenshot requires approval binding and exposes no capture controls", () => {
+  const request = { op: "screenshot", tabID: "one" } as const
+  const context = {
+    tabID: "one",
+    origin: "http://localhost",
+    urlHash: "a".repeat(64),
+    revision: 0,
+    accessRevision: 0,
+    ownerContext: "owner-task-1",
+  }
+  expect(parseRequest({ op: "prepare_write", request })).toEqual({ op: "prepare_write", request })
+  expect(parseRequest(request)).toBeUndefined()
+  expect(parseRequest({ ...request, context, clip: {}, quality: 100, fullPage: true })).toEqual({ ...request, context })
+  for (const tabID of ["", 1, undefined, "x".repeat(129)])
+    expect(parseRequest({ op: "prepare_write", request: { ...request, tabID } })).toBeUndefined()
+})
+
+test.each(["observe_console", "observe_network"] as const)(
+  "%s requires exact bounded consent and exposes no payload controls",
+  (op) => {
+    const request = { op, tabID: "one", durationMs: 250 } as const
+    const context = {
+      tabID: "one",
+      origin: "http://localhost",
+      urlHash: "a".repeat(64),
+      revision: 0,
+      accessRevision: 0,
+      ownerContext: "owner-task-1",
+    }
+    expect(parseRequest({ op: "prepare_write", request })).toEqual({ op: "prepare_write", request })
+    expect(parseRequest(request)).toBeUndefined()
+    expect(parseRequest({ ...request, context })).toEqual({ ...request, context })
+    for (const durationMs of [250, 3000, 5000])
+      expect(parseRequest({ ...request, context, durationMs })).toEqual({ ...request, context, durationMs })
+    for (const durationMs of [249, 5001, 250.5, "250", undefined, NaN, Infinity])
+      expect(parseRequest({ op: "prepare_write", request: { ...request, durationMs } })).toBeUndefined()
+    for (const extra of [
+      { includeMessages: true },
+      { includeSources: true },
+      { includeNetwork: true },
+      { filter: "password" },
+    ])
+      expect(parseRequest({ op: "prepare_write", request: { ...request, ...extra } })).toBeUndefined()
+    expect(parseRequest({ ...request, context: { ...context, ownerContext: undefined } })).toBeUndefined()
+  },
+)
+
+test("site tools require opaque refs, bounded JSON objects and exact execution bindings", () => {
+  const list = { op: "list_site_tools", tabID: "one" } as const
+  const prepare = {
+    op: "prepare_site_tool",
+    tabID: "one",
+    toolRef: "a".repeat(8) + "-aaaa-4aaa-8aaa-" + "a".repeat(12),
+    arguments: '{"query":"hello"}',
+  } as const
+  const siteToolContext = {
+    tabID: "one",
+    origin: "https://example.com",
+    urlHash: "a".repeat(64),
+    revision: 1,
+    accessRevision: 2,
+    ownerContext: "owner-task",
+    toolRef: prepare.toolRef,
+    toolRevision: 3,
+    argumentHash: "b".repeat(64),
+  }
+  expect(parseRequest(list)).toEqual(list)
+  expect(parseRequest(prepare)).toEqual(prepare)
+  expect(parseRequest({ ...prepare, op: "execute_site_tool", siteToolContext })).toEqual({
+    ...prepare,
+    op: "execute_site_tool",
+    siteToolContext,
+  })
+  for (const argumentsValue of [
+    "[]",
+    "null",
+    "1",
+    '"x"',
+    "{",
+    '{"__proto__":{}}',
+    JSON.stringify({ x: "x".repeat(9000) }),
+  ])
+    expect(parseRequest({ ...prepare, arguments: argumentsValue })).toBeUndefined()
+  expect(parseRequest({ ...prepare, arguments: JSON.stringify({ nested: [[[[[[[[[1]]]]]]]]] }) })).toBeUndefined()
+  expect(
+    parseRequest({ ...prepare, op: "execute_site_tool", siteToolContext: { ...siteToolContext, argumentHash: "x" } }),
+  ).toBeUndefined()
+  expect(parseRequest({ ...list, frameId: "private" })).toBeUndefined()
+  expect(parseRequest({ ...prepare, name: "ignored" })).toBeUndefined()
+})
+
+test("drag accepts only bounded endpoint refs and retains write binding", () => {
+  const request = {
+    op: "drag",
+    tabID: "one",
+    sourceRef: "one.snapshot:source",
+    targetRef: "one.snapshot:target",
+  } as const
+  const context = {
+    tabID: "one",
+    origin: "http://localhost",
+    urlHash: "a".repeat(64),
+    revision: 0,
+    accessRevision: 0,
+    ownerContext: "owner-task-1",
+  }
+  expect(parseRequest({ op: "prepare_write", request })).toEqual({ op: "prepare_write", request })
+  expect(parseRequest(request)).toBeUndefined()
+  expect(parseRequest({ ...request, context, x: 1, y: 2, steps: 100, duration: 100 })).toEqual({ ...request, context })
+  for (const key of ["sourceRef", "targetRef", "tabID"])
+    for (const value of [undefined, "", 1, "x".repeat(key === "tabID" ? 129 : 257)])
+      expect(parseRequest({ op: "prepare_write", request: { ...request, [key]: value } })).toBeUndefined()
+})
+
+test("select_option requires bounded select and option refs with write binding", () => {
+  const request = {
+    op: "select_option",
+    tabID: "one",
+    ref: "one.snapshot:select",
+    optionRef: "one.snapshot:option",
+  } as const
+  const context = {
+    tabID: "one",
+    origin: "http://localhost",
+    urlHash: "a".repeat(64),
+    revision: 0,
+    accessRevision: 0,
+    ownerContext: "owner-task-1",
+  }
+  expect(parseRequest({ op: "prepare_write", request })).toEqual({ op: "prepare_write", request })
+  expect(parseRequest(request)).toBeUndefined()
+  expect(parseRequest({ ...request, context, value: "never forwarded" })).toEqual({ ...request, context })
+  for (const key of ["ref", "optionRef", "tabID"])
+    for (const value of [undefined, "", 1, "x".repeat(key === "tabID" ? 129 : 257)])
+      expect(parseRequest({ op: "prepare_write", request: { ...request, [key]: value } })).toBeUndefined()
+})
+
+test("hover and click modes retain write binding and reject malformed input", () => {
+  const context = {
+    tabID: "one",
+    origin: "http://localhost",
+    urlHash: "a".repeat(64),
+    revision: 0,
+    accessRevision: 0,
+    ownerContext: "owner-task-1",
+  }
+  const prepare = (request: unknown) => parseRequest({ op: "prepare_write", request })
+  for (const request of [
+    { op: "hover", tabID: "one", ref: "one.snapshot:e0" } as const,
+    ...([undefined, "left", "double", "right"] as const).map(
+      (mode) =>
+        ({
+          op: "click",
+          tabID: "one",
+          ref: "one.snapshot:e0",
+          ...(mode ? { mode } : {}),
+        }) as const,
+    ),
+  ]) {
+    expect(prepare(request)).toEqual({ op: "prepare_write", request })
+    expect(parseRequest(request)).toBeUndefined()
+    expect(parseRequest({ ...request, context })).toEqual({ ...request, context })
+    for (const ref of [undefined, "", 1, "x".repeat(257)]) expect(prepare({ ...request, ref })).toBeUndefined()
+    for (const tabID of [undefined, "", 1, "x".repeat(129)]) expect(prepare({ ...request, tabID })).toBeUndefined()
+  }
+  for (const mode of [null, "", "middle", "DOUBLE", 2, {}, []])
+    expect(prepare({ op: "click", tabID: "one", ref: "ref", mode })).toBeUndefined()
+})
+
+test("scroll and waits require explicit targets and bounded inputs", () => {
+  const scroll = { op: "scroll", tabID: "one", deltaX: -2000, deltaY: 2000 } as const
+  const prepare = (request: unknown) => parseRequest({ op: "prepare_write", request })
+  expect(prepare(scroll)).toEqual({ op: "prepare_write", request: scroll })
+  expect(parseRequest(scroll)).toBeUndefined()
+  for (const values of [
+    { deltaX: 2001 },
+    { deltaY: -2001 },
+    { deltaX: Infinity },
+    { deltaY: NaN },
+    { deltaX: 0.5 },
+    { deltaX: "1" },
+    { deltaX: 0, deltaY: 0 },
+    { ref: "" },
+    { ref: "x".repeat(257) },
+  ])
+    expect(prepare({ ...scroll, ...values })).toBeUndefined()
+  const waits = [
+    { op: "wait_for_element", tabID: "one", selector: "#ready", timeoutMs: 15000 },
+    { op: "wait_for_navigation", tabID: "one", url: "http://localhost/done", timeoutMs: 15000 },
+  ] as const
+  for (const wait of waits) {
+    expect(parseRequest(wait)).toEqual(wait)
+    expect(prepare(wait)).toBeUndefined()
+    for (const timeoutMs of [undefined, 0, -1, 15001, 0.5, Infinity, NaN, "1"])
+      expect(parseRequest({ ...wait, timeoutMs })).toBeUndefined()
+  }
+  for (const input of [...waits, scroll]) {
+    const parse = input.op === "scroll" ? prepare : parseRequest
+    for (const tabID of [undefined, "", "x".repeat(129)]) expect(parse({ ...input, tabID })).toBeUndefined()
+    for (const timeoutMs of [0, -1, 15001, 0.5, Infinity]) expect(parse({ ...input, timeoutMs })).toBeUndefined()
+    expect(parse({ ...input, timeoutMs: 1 })).toBeDefined()
+  }
+  for (const selector of ["", " ", "x".repeat(513)]) expect(parseRequest({ ...waits[0], selector })).toBeUndefined()
+  for (const url of ["", "file:///private", "http://localhost/" + "x".repeat(MAX_URL_LENGTH)])
+    expect(parseRequest({ ...waits[1], url })).toBeUndefined()
+})
+
+test("private cancellation requires bounded request and session identities, never a signal payload", () => {
+  const cancel = { type: "browser_cancel", id: "request", sessionID: "session" } as const
+  expect(parseBrowserIpcCancel({ ...cancel, signal: {}, request: {} })).toEqual(cancel)
+  expect(parseBrowserIpcRequest(cancel)).toBeUndefined()
+  for (const invalid of [null, [], {}, { ...cancel, id: "" }, { ...cancel, sessionID: 42 }])
+    expect(parseBrowserIpcCancel(invalid)).toBeUndefined()
+  for (const key of ["id", "sessionID"])
+    for (const length of [128, 129]) {
+      const input = { ...cancel, [key]: "x".repeat(length) }
+      expect(Boolean(parseBrowserIpcCancel(input))).toBe(length === 128)
+      expect(Boolean(parseBrowserIpcRequest({ ...input, type: "browser_request", request: { op: "list_tabs" } }))).toBe(
+        length === 128,
+      )
+    }
+})
+
+test("success bounds complete UTF-8 response JSON without truncating identities", () => {
+  const overhead = Buffer.byteLength(JSON.stringify({ ok: true, result: "" }))
+  const exact = "x".repeat(MAX_SNAPSHOT_BYTES - overhead)
+  expect(success(exact)).toEqual({ ok: true, result: exact })
+  for (const result of [
+    exact + "x",
+    "\u4e2d".repeat(MAX_SNAPSHOT_BYTES / 2),
+    "\n".repeat(MAX_SNAPSHOT_BYTES / 2),
+    { tabs: [{ url: exact }, { url: exact }] },
+    { history: [{ url: exact, title: "" }] },
+  ]) {
+    const response = success(result)
+    expect(response).toMatchObject({ ok: false, code: "unavailable" })
+    expect(Buffer.byteLength(JSON.stringify(response))).toBeLessThanOrEqual(MAX_SNAPSHOT_BYTES)
+  }
+})
+
+test("parses explicit tab operations and rejects missing IDs and oversized inputs", () => {
+  const requests = [
+    { op: "list_tabs" },
+    { op: "read_state", tabID: "one" },
+    { op: "navigate", tabID: "one", url: "https://teams.microsoft.com/" },
+    { op: "click", tabID: "one", ref: "one.snapshot:e0" },
+    { op: "fill", tabID: "one", ref: "one.snapshot:e0", text: "hi" },
+    { op: "press_key", tabID: "one", key: "Enter", modifiers: ["Ctrl"] },
+  ] as const
+  const context = {
+    tabID: "one",
+    origin: "http://localhost",
+    urlHash: "a".repeat(64),
+    revision: 0,
+    accessRevision: 0,
+    ownerContext: "owner-task-1",
+  }
+  for (const request of requests) {
+    if (request.op === "read_state" || request.op === "list_tabs") {
+      expect(parseRequest(request)).toEqual(request)
+      continue
+    }
+    expect(parseRequest(request)).toBeUndefined()
+    expect(parseRequest({ ...request, context })).toEqual({ ...request, context })
+    expect(parseRequest({ op: "prepare_write", request })).toEqual({ op: "prepare_write", request })
+  }
+  for (const request of [
+    { op: "read_state" },
+    { op: "evaluate", tabID: "one", code: "1" },
+    { op: "navigate", tabID: "one", url: "x".repeat(MAX_URL_LENGTH + 1) },
+    { op: "fill", tabID: "one", ref: "ref", text: "x".repeat(MAX_TYPED_TEXT + 1) },
+    { op: "press_key", tabID: "one", key: "Enter", modifiers: ["Super"] },
+  ])
+    expect(parseRequest({ ...request, context })).toBeUndefined()
+  const message = { type: "browser_request", id: "req-1", sessionID: "ses_1", request: requests[1] } as const
+  expect(parseBrowserIpcRequest(message)).toEqual(message)
+  expect(parseBrowserIpcRequest({ ...message, sessionID: "" })).toBeUndefined()
+})
+
+test("write contexts are runtime-validated and survive IPC parsing", () => {
+  const context = {
+    tabID: "one",
+    origin: "http://localhost",
+    urlHash: "a".repeat(64),
+    revision: 0,
+    accessRevision: 0,
+    ownerContext: "owner-task-1",
+  }
+  const request = { op: "press_key", tabID: "one", key: "Enter", modifiers: [], context } as const
+  const message = { type: "browser_request", id: "req", sessionID: "session", request } as const
+  expect(parseBrowserIpcRequest(message)).toEqual(message)
+  for (const invalid of [
+    undefined,
+    null,
+    [],
+    {},
+    { ...context, tabID: "" },
+    { ...context, tabID: "x".repeat(129) },
+    { ...context, origin: "file:///private" },
+    { ...context, origin: "http://localhost/" + "x".repeat(MAX_URL_LENGTH) },
+    { ...context, origin: "http://localhost/path" },
+    { ...context, origin: "http://user:secret@localhost" },
+    { ...context, urlHash: undefined },
+    { ...context, urlHash: "a".repeat(63) },
+    { ...context, urlHash: "g".repeat(64) },
+    { ...context, revision: -1 },
+    { ...context, revision: 0.5 },
+    { ...context, revision: "0" },
+    { ...context, accessRevision: NaN },
+    { ...context, accessRevision: Number.MAX_SAFE_INTEGER + 1 },
+    { ...context, ownerContext: undefined },
+    { ...context, ownerContext: "" },
+    { ...context, ownerContext: "owner task" },
+    { ...context, ownerContext: "x".repeat(129) },
+  ])
+    expect(parseRequest({ ...request, context: invalid })).toBeUndefined()
+  for (const input of [
+    { op: "read_state", tabID: "one" },
+    { op: "prepare_write", request },
+    { ...request, modifiers: ["Super"] },
+  ])
+    expect(parseRequest({ op: "prepare_write", request: input })).toBeUndefined()
+})
+
+test("host policy allows exact hosts and subdomains, not lookalikes or other schemes", () => {
+  expect(hostAllowed("https://teams.microsoft.com/v2/", DEFAULT_ALLOWLIST)).toBe(true)
+  expect(hostAllowed("https://eu.teams.microsoft.com/", DEFAULT_ALLOWLIST)).toBe(true)
+  expect(hostAllowed("https://notteams.microsoft.com.evil.test/", DEFAULT_ALLOWLIST)).toBe(false)
+  expect(hostAllowed("file:///etc/passwd", DEFAULT_ALLOWLIST)).toBe(false)
+  expect(stateDirectory({ APPDATA: "C:\\Users\\x\\AppData\\Roaming" }, "win32")).toContain("CookieMonster")
+  expect(stateDirectory({ HOME: "/home/x" }, "linux")).toContain(".config")
+})
+
+test("history requests validate result bounds and date ranges without requiring a tab", () => {
+  expect(parseRequest({ op: "search_history", query: "guide", limit: 20, from: 0, to: 100 })).toEqual({
+    op: "search_history",
+    query: "guide",
+    limit: 20,
+    from: 0,
+    to: 100,
+  })
+  for (const values of [
+    { limit: 21 },
+    { limit: 0 },
+    { from: 200, to: 100 },
+    { from: -1 },
+    { to: 9e15 },
+    { query: "x".repeat(257) },
+  ])
+    expect(parseRequest({ op: "search_history", query: "", limit: 10, ...values })).toBeUndefined()
+  expect(parseRequest({ op: "open_history", ref: "" })).toBeUndefined()
+  expect(parseRequest({ op: "open_history", ref: "opaque" })).toEqual({ op: "open_history", ref: "opaque" })
+})

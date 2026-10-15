@@ -1,3 +1,4 @@
+import { Shutdown } from "../lifecycle/shutdown"
 import { app } from "electron"
 import { Context, Effect, FileSystem, Layer, Path } from "effect"
 import { BackgroundServiceState } from "./background-service-state"
@@ -19,6 +20,16 @@ export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const context = yield* Effect.context<FileSystem.FileSystem | Path.Path | DesktopCli.Service>()
+
+    if (import.meta.env.CM_BRAND) {
+      const shutdown = yield* Shutdown.Service
+      yield* shutdown.add(
+        Effect.promise(async () => {
+          const { Service } = await import("@opencode/client/service")
+          await Service.stop({ file: `${app.getPath("userData")}/opencode/service-cookiemonster.json`, pty: "handoff" })
+        }),
+      )
+    }
 
     return Service.of(
       yield* BackgroundServiceState.make({
@@ -43,10 +54,19 @@ const connect = Effect.fn("BackgroundService.connect")(function* (mode: "initial
 
   const ensure = () =>
     client.Service.ensure({
-      file:
-        isolated && process.env.OPENCODE_DESKTOP_SERVER_CHANNEL === "local"
+      file: import.meta.env.CM_BRAND
+        ? path.join(app.getPath("userData"), "opencode", "service-cookiemonster.json")
+        : isolated && process.env.OPENCODE_DESKTOP_SERVER_CHANNEL === "local"
           ? path.join(app.getPath("userData"), "opencode", "service-local.json")
           : undefined,
+      env: {
+        ...Object.fromEntries(
+          Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined),
+        ),
+        ...(import.meta.env.CM_BRAND
+          ? { CM_SERVICE_FILE: path.join(app.getPath("userData"), "opencode", "service-cookiemonster.json") }
+          : {}),
+      },
       version,
       // A fixed port makes a second contender fail to bind and back off; port 0 never collides, so two
       // services could boot against the same database.
@@ -54,7 +74,7 @@ const connect = Effect.fn("BackgroundService.connect")(function* (mode: "initial
         ...cli.command,
         "serve",
         "--service",
-        ...(isolated ? ["--hostname", "0.0.0.0", "--port", String(0x0c0c)] : []),
+        ...(isolated && !import.meta.env.CM_BRAND ? ["--hostname", "0.0.0.0", "--port", String(0x0c0c)] : []),
       ],
       onStart: (reason, previousVersion) =>
         runFork(Effect.logInfo("v2 CLI background service starting", { reason, previousVersion })),

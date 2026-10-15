@@ -2,7 +2,7 @@ import { app, autoUpdater, shell } from "electron"
 import pkg from "electron-updater"
 import { Effect } from "effect"
 import type { Platform } from "./machine"
-import { requiresStableMacInstaller, stableMacDownload } from "./migration"
+import { requiresStableMacInstaller, stableMacDownload, updatePolicy } from "./migration"
 
 const updateClient = pkg.autoUpdater
 
@@ -20,9 +20,15 @@ export const make = Effect.fn("Updater.platform")(function* (channel: string) {
     error: (...args) => runFork(Effect.logError(...args)),
     debug: (...args) => runFork(Effect.logDebug(...args)),
   }
+
+  if (app.getName() === "CookieMonster")
+    updateClient.setFeedURL({
+      provider: "generic",
+      url: "https://github.com/trmosala/opencode/releases/latest/download",
+    })
   updateClient.channel = "latest"
   updateClient.requestHeaders = { "User-Agent": userAgent }
-  updateClient.allowPrerelease = false
+  updateClient.allowPrerelease = updatePolicy(app.getName(), process.platform, channel, app.isPackaged).prerelease
   updateClient.allowDowngrade = true
   updateClient.autoDownload = false
   updateClient.autoInstallOnAppQuit = process.platform === "darwin"

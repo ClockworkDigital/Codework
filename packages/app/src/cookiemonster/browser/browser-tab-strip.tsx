@@ -1,0 +1,242 @@
+import { Icon } from "@opencode/ui/icon"
+import { Spinner } from "@opencode/ui/spinner"
+import { Tooltip } from "@opencode/ui/tooltip"
+import { createEffect, For, onCleanup, onMount, Show, type JSX } from "solid-js"
+import {
+  browserShortcutHint,
+  browserTabKeyIndex,
+  type BrowserCommand,
+  type BrowserTab,
+  type BrowserTabs,
+} from "@cookiemonster/cm-browser/panel"
+import { useLanguage } from "@/runtime/i18n/language"
+import { usePlatform } from "@/runtime/platform/platform"
+import { BrowserIconButton, BrowserDropdownMenu } from "./browser-native-controls"
+import { BrowserTabMenu } from "./browser-tools"
+import "./browser-tab-strip.css"
+
+export function BrowserTabStrip(props: {
+  tabs: BrowserTabs
+  command: (command: BrowserCommand) => Promise<unknown>
+  children?: JSX.Element
+}) {
+  const language = useLanguage()
+  const platform = usePlatform()
+  let strip!: HTMLDivElement
+  let add!: HTMLButtonElement
+
+  const title = (tab: BrowserTab) => {
+    const value = tab.title || (tab.url === "about:blank" ? language.t("browser.tabs.new") : tab.url)
+
+    return tab.unloaded ? language.t("browser.tabs.unloadedTitle", { title: value }) : value
+  }
+
+  const reveal = () =>
+    strip
+      .querySelector('[data-slot="browser-tab"][data-active="true"]')
+      ?.scrollIntoView({ block: "nearest", inline: "nearest" })
+
+  createEffect(() => {
+    props.tabs.activeID
+    props.tabs.tabs.map((tab) => `${tab.id}:${tab.pinned}`).join(",")
+    queueMicrotask(() => {
+      if (strip.isConnected) reveal()
+    })
+  })
+  onMount(() => {
+    const observer = new ResizeObserver(reveal)
+    observer.observe(strip)
+    onCleanup(() => observer.disconnect())
+  })
+
+  const close = async (tabID: string) => {
+    const focused = document.activeElement
+    const restore = focused instanceof HTMLElement && strip.contains(focused)
+    await props.command({ op: "close", tabID })
+
+    // Main may refuse a close via beforeunload. Never move focus in that case,
+    // or steal it if the user moved elsewhere while the native dialog was open.
+    if (!restore || focused.isConnected || !strip.isConnected) return
+
+    if (document.activeElement && document.activeElement !== document.body) return
+
+    const selected = strip.querySelector<HTMLButtonElement>('[role="tab"][aria-selected="true"]')
+
+    ;(selected ?? add).focus()
+  }
+
+  return (
+    <div data-component="browser-tab-strip">
+      <div ref={strip} data-slot="browser-tab-list" role="tablist" aria-label={language.t("browser.tabs.label")}>
+        <For each={props.tabs.tabs}>
+          {(tab) => (
+            <div
+              data-slot="browser-tab"
+              data-active={tab.id === props.tabs.activeID}
+              data-pinned={tab.pinned}
+              role="presentation"
+            >
+              <button
+                type="button"
+                role="tab"
+                aria-selected={tab.id === props.tabs.activeID}
+                aria-busy={tab.loading}
+                aria-label={title(tab)}
+                aria-description={tab.pinned ? language.t("browser.tabs.pinned") : undefined}
+                tabIndex={tab.id === props.tabs.activeID ? 0 : -1}
+                data-slot="browser-tab-select"
+                title={`${title(tab)}\n${tab.url}`}
+                onClick={() => void props.command({ op: "select", tabID: tab.id })}
+                onMouseDown={(event) => {
+                  if (event.button === 1) event.preventDefault()
+                }}
+                onAuxClick={(event) => {
+                  if (event.button !== 1) return
+                  event.preventDefault()
+                  void close(tab.id)
+                }}
+                onKeyDown={(event) => {
+                  if (event.isComposing || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return
+
+                  if (event.key === "Delete") {
+                    event.preventDefault()
+                    event.stopPropagation()
+                    void close(tab.id)
+
+                    return
+                  }
+
+                  const next = browserTabKeyIndex(
+                    event.key,
+                    props.tabs.tabs.findIndex((entry) => entry.id === tab.id),
+                    props.tabs.tabs.length,
+                    getComputedStyle(strip).direction === "rtl" ? "rtl" : "ltr",
+                  )
+
+                  if (next === undefined) return
+                  event.preventDefault()
+                  event.stopPropagation()
+                  strip.querySelectorAll<HTMLButtonElement>('[role="tab"]')[next]?.focus()
+                  void props.command({ op: "select", tabID: props.tabs.tabs[next].id })
+                }}
+              >
+                <span data-slot="browser-tab-icon" aria-hidden="true">
+                  <Show
+                    when={!tab.loading}
+                    fallback={
+                      <Show when={import.meta.env.VITE_CM_BRAND} fallback={<span data-slot="browser-tab-spinner" />}>
+                        <Spinner class="size-3.5" />
+                      </Show>
+                    }
+                  >
+                    <Show when={!tab.loadFailed} fallback={<Icon name="warning" size="small" />}>
+                      <Show when={tab.url !== "about:blank"} fallback={<Icon name="plus-small" size="small" />}>
+                        <span data-slot="browser-tab-initial" dir="auto">
+                          {Array.from(title(tab).trim())[0]}
+                        </span>
+                      </Show>
+                    </Show>
+                  </Show>
+                </span>
+                <span data-slot="browser-tab-title" dir="auto">
+                  {title(tab)}
+                </span>
+                <Show when={tab.loadFailed}>
+                  <span class="sr-only">{language.t("browser.toast.loadFailed")}</span>
+                </Show>
+              </button>
+              <Show when={tab.agentAccess}>
+                <span
+                  data-slot="browser-tab-agent"
+                  role="img"
+                  aria-label={language.t("browser.site.agentOn")}
+                  title={language.t("browser.site.agentOn")}
+                />
+              </Show>
+              <div data-slot="browser-tab-actions">
+                <BrowserTabMenu
+                  tab={tab}
+                  tabs={props.tabs.tabs}
+                  activeID={props.tabs.activeID}
+                  command={props.command}
+                />
+              </div>
+              <Show when={!tab.pinned}>
+                <BrowserIconButton
+                  icon="close-small"
+                  variant="ghost"
+                  data-slot="browser-tab-close"
+                  aria-label={language.t("browser.tabs.close")}
+                  title={language.t("browser.tabs.close")}
+                  onClick={() => void close(tab.id)}
+                />
+              </Show>
+            </div>
+          )}
+        </For>
+      </div>
+      <div data-slot="browser-tab-controls">
+        <Tooltip
+          placement="top"
+          flip={false}
+          contentClass="browser-tooltip"
+          value={
+            <span>
+              {language.t("browser.tabs.new")}{" "}
+              <span class="opacity-60">{browserShortcutHint("new", platform.os === "macos", language.t)}</span>
+            </span>
+          }
+        >
+          <BrowserIconButton
+            ref={add}
+            icon="plus-small"
+            variant="ghost"
+            aria-label={language.t("browser.tabs.new")}
+            onClick={() => void props.command({ op: "new" })}
+          />
+        </Tooltip>
+        <BrowserDropdownMenu>
+          <Tooltip placement="top" flip={false} value={language.t("browser.tabs.label")}>
+            <BrowserDropdownMenu.Trigger
+              as={BrowserIconButton}
+              type="button"
+              icon="chevron-down"
+              variant="ghost"
+              disabled={!props.tabs.tabs.length}
+              aria-label={language.t("browser.tabs.label")}
+            />
+          </Tooltip>
+          <BrowserDropdownMenu.Portal>
+            <BrowserDropdownMenu.Content class="max-h-80 w-72 max-w-[calc(100vw-16px)] overflow-y-auto">
+              <BrowserDropdownMenu.RadioGroup
+                value={props.tabs.activeID ?? ""}
+                onChange={(tabID) => {
+                  if (typeof tabID === "string") void props.command({ op: "select", tabID })
+                }}
+              >
+                <For each={props.tabs.tabs}>
+                  {(tab) => (
+                    <BrowserDropdownMenu.RadioItem value={tab.id} textValue={title(tab)}>
+                      <BrowserDropdownMenu.ItemLabel class="min-w-0">
+                        <span class="block truncate" dir="auto">
+                          {title(tab)}
+                        </span>
+                        <span class="block truncate text-text-weak text-12-regular" dir="ltr">
+                          {tab.url}
+                        </span>
+                      </BrowserDropdownMenu.ItemLabel>
+                      <BrowserDropdownMenu.ItemIndicator>
+                        <Icon name="check" size="small" />
+                      </BrowserDropdownMenu.ItemIndicator>
+                    </BrowserDropdownMenu.RadioItem>
+                  )}
+                </For>
+              </BrowserDropdownMenu.RadioGroup>
+            </BrowserDropdownMenu.Content>
+          </BrowserDropdownMenu.Portal>
+        </BrowserDropdownMenu>
+        {props.children}
+      </div>
+    </div>
+  )
+}

@@ -261,4 +261,47 @@ export function getConfig() {
   }
 }
 
-export default getConfig()
+const config = getConfig()
+
+const branded = process.env.CM_BRAND === "1"
+
+const unsigned = process.env.CM_UNSIGNED === "1"
+
+const brandedConfig: Configuration = {
+  ...config,
+  ...(branded
+    ? {
+        appId: "com.ogilvy.cookiemonster",
+        productName: "CookieMonster",
+        artifactName: "cookiemonster-${os}-${arch}.${ext}",
+        extraMetadata: {
+          ...config.extraMetadata,
+          cmUserInstall: true,
+          ...(process.env.CM_VERSION ? { version: process.env.CM_VERSION } : {}),
+        },
+        extraResources: [
+          ...(config.extraResources ?? []),
+          { from: "resources/cm-plugins", to: "cm-plugins" },
+          { from: "resources/vault-auth", to: "vault-auth" },
+          { from: "resources/cm-ae", to: "cm-ae" },
+        ],
+        dmg: {
+          backgroundColor: "#ffffff",
+          window: { width: 540, height: 360 },
+          contents: [
+            { x: 160, y: 160, type: "file" },
+            { x: 380, y: 160, type: "file", path: path.join(packageDir, "resources", "Install CookieMonster.txt") },
+          ],
+        },
+        publish: { provider: "github", owner: "trmosala", repo: "opencode", channel: "latest" },
+      }
+    : {}),
+}
+
+export default unsigned
+  ? ({
+      ...brandedConfig,
+      mac: { ...brandedConfig.mac, identity: null, hardenedRuntime: false, notarize: false },
+      dmg: { ...brandedConfig.dmg, sign: false },
+    } satisfies Configuration)
+  : brandedConfig

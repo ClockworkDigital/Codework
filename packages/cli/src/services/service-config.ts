@@ -44,6 +44,8 @@ export function filename(channel = OPENCODE_CHANNEL) {
 }
 
 export function defaultPort(channel = OPENCODE_CHANNEL) {
+  if (process.env.CM_DESKTOP === "1" && process.env.CM_SERVICE_FILE)
+    return 10_000 + (Number.parseInt(Hash.fast(process.env.CM_SERVICE_FILE).slice(0, 8), 16) % 50_000)
   if (channel === "latest" || channel === "dev" || channel === "beta" || channel === "next") return 0xc0de
   if (channel === "local") return 0xc0df
   return 10_000 + (Number.parseInt(Hash.fast(channel).slice(0, 8), 16) % 50_000)
@@ -108,16 +110,20 @@ const paths = Effect.gen(function* () {
   const global = yield* Global.Service
   const name = filename()
   const legacy = legacyFilename()
-  const file = path.join(global.state, name)
+  const branded = process.env.CM_DESKTOP === "1" ? process.env.CM_SERVICE_FILE : undefined
+  if (branded && !path.isAbsolute(branded)) throw new Error("CM_SERVICE_FILE must be absolute")
+  const file = branded ?? path.join(global.state, name)
   return {
     fs,
     file,
-    legacyConfigFile: legacy ? path.join(global.config, legacy) : undefined,
-    legacyRegistrationFiles: [
-      ...(legacy ? [path.join(global.state, legacy)] : []),
-      ...(name !== "service.json" && OPENCODE_CHANNEL !== "local" ? [path.join(global.state, "service.json")] : []),
-    ],
-    configFile: path.join(global.config, name),
+    legacyConfigFile: !branded && legacy ? path.join(global.config, legacy) : undefined,
+    legacyRegistrationFiles: branded
+      ? []
+      : [
+          ...(legacy ? [path.join(global.state, legacy)] : []),
+          ...(name !== "service.json" && OPENCODE_CHANNEL !== "local" ? [path.join(global.state, "service.json")] : []),
+        ],
+    configFile: branded ? `${branded}.config` : path.join(global.config, name),
   }
 })
 
@@ -128,11 +134,7 @@ export const options = Effect.fnUntraced(function* (input: { readonly checkVersi
     file,
     version: input.checkVersion ? OPENCODE_VERSION : undefined,
     env: (yield* read()).env,
-    command: [
-      ...selfCommand(),
-      "serve",
-      "--service",
-    ],
+    command: [...selfCommand(), "serve", "--service"],
   }
 })
 
