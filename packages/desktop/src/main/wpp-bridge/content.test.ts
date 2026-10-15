@@ -5,6 +5,10 @@ import { join } from "node:path"
 import vm from "node:vm"
 
 type ContentHarness = {
+  beginNetworkCapture: () => { runId: string }
+  waitForNetworkResponse: (input: { runId: string }) => Promise<unknown>
+  deliver: (record: Record<string, unknown>) => void
+  timers: Map<number, () => void>
   imageAttachmentDesync: (error: Error) => Error & { statusCode?: number; type?: string }
   pickTokenPill: (elements: unknown[]) => { value: number; text: string } | null
   waitForUpdatedTokenPill: (
@@ -19,6 +23,37 @@ type ContentHarness = {
 }
 
 const harness = await loadContentHarness()
+
+test.each(["done", "finishReason"])("settles captured %s without waiting for the DOM poll", async (terminal) => {
+  const h = await loadContentHarness()
+  const { runId } = h.beginNetworkCapture()
+  const result = {
+    id: "response",
+    runId,
+    method: "POST",
+    finalText: "complete",
+    [terminal]: terminal === "done" ? true : "stop",
+  }
+  let settled = false
+  const waiting = h.waitForNetworkResponse({ runId }).then((record) => {
+    settled = true
+    return record
+  })
+  try {
+    h.deliver({ ...result, runId: "other-run" })
+    await Promise.resolve()
+    expect(settled).toBe(false)
+    h.deliver(result)
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(settled).toBe(true)
+    expect(await waiting).toEqual(result)
+    expect(h.timers.size).toBe(0)
+  } finally {
+    h.timers.forEach((callback) => callback())
+    await waiting
+  }
+})
 
 describe("WPP content image attachment", () => {
   test("classifies an unknown trusted-paste outcome as a pre-submit attachment desync", () => {
@@ -87,16 +122,20 @@ describe("WPP token pill settlement", () => {
 async function loadContentHarness(): Promise<ContentHarness> {
   const source = await Bun.file(join(import.meta.dir, "injected", "content.js")).text()
   const listeners = new Map<string, (...args: unknown[]) => void>()
+  const timers = new Map<number, () => void>()
+  let timerId = 0
 
   const window = {
     addEventListener(name: string, listener: (...args: unknown[]) => void) {
       listeners.set(name, listener)
     },
     postMessage() {},
+    __o1CodeRecorderControl() {},
   }
 
   const context = vm.createContext({
     window,
+    document: { querySelectorAll: () => [] },
     location: { hostname: "open-web-assistant-cs.wpp.ai", href: "https://open-web-assistant-cs.wpp.ai/" },
     process: { versions: { node: "test" } },
     __O1_CODE_BRIDGE_TEST_HOOKS__: true,
@@ -107,17 +146,35 @@ async function loadContentHarness(): Promise<ContentHarness> {
     Set,
     Error,
     Promise,
-    setTimeout,
-    clearTimeout,
+    crypto,
+    setTimeout: (callback: () => void) => {
+      timers.set(++timerId, callback)
+      return timerId
+    },
+    clearTimeout: (id: number) => timers.delete(id),
     getComputedStyle: () => ({ visibility: "visible", display: "block" }),
   })
 
-  vm.runInContext(source, context)
+  vm.runInContext(
+    source.replace(
+      /\}\)\(\);?\s*$/u,
+      "globalThis.__o1CodeBridgeContentTest.waitForNetworkResponse = waitForNetworkResponse;\n})();",
+    ),
+    context,
+  )
   const value: unknown = vm.runInContext("__o1CodeBridgeContentTest", context)
 
   if (!isContentHarness(value)) throw new Error("Content test harness was not installed")
 
-  return value
+  return {
+    ...value,
+    timers,
+    deliver: (record) =>
+      listeners.get("message")?.({
+        source: window,
+        data: { source: "o1-code-bridge-page", type: "O1_CODE_BRIDGE_NETWORK_RECORD", record },
+      }),
+  }
 }
 
 function isContentHarness(value: unknown): value is ContentHarness {

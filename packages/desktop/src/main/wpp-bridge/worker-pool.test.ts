@@ -762,6 +762,40 @@ describe("submission witness boundary", () => {
 })
 
 describe("worker startup helpers", () => {
+  test.each([true, false])("assistant startup follows its shell control readiness, ready=%s", async (ready) => {
+    let rosterProbes = 0
+    const contents = Object.assign(new EventEmitter(), {
+      loadURL: async () => {
+        contents.debugger.emit(
+          "message",
+          {},
+          "Network.requestWillBeSent",
+          { requestId: "unrelated", type: "Fetch" },
+          "builder",
+        )
+      },
+      debugger: new EventEmitter(),
+      getURL: () => "https://example.test/project",
+      mainFrame: {
+        framesInSubtree: [
+          { url: "https://example.test/project", executeJavaScript: async () => ({ ready, signature: "" }) },
+          {
+            url: "https://open-web-agent-builder-cs.wpp.ai/project/agents",
+            executeJavaScript: async () => {
+              rosterProbes += 1
+              return { ready: false }
+            },
+          },
+        ],
+      },
+    })
+    const loading = loadWorkerProject(contents, contents.getURL(), 50)
+    if (ready) await expect(loading).resolves.toBeUndefined()
+    if (!ready) await expect(loading).rejects.toMatchObject({ type: "o1_code_project_load_timeout" })
+    expect(rosterProbes).toBe(0)
+    expect(contents.debugger.listenerCount("message")).toBe(0)
+  })
+
   test("waits for full load, late roster cards and network settlement across child frames", async () => {
     const navigation = Promise.withResolvers<void>()
     let roster = { ready: false, signature: "CM_Astra" }
@@ -782,7 +816,7 @@ describe("worker startup helpers", () => {
 
     let settled = false
 
-    const loading = loadWorkerProject(contents, "https://example.test/project", 8000).then(() => {
+    const loading = loadWorkerProject(contents, "https://example.test/project", 8000, undefined, "agent").then(() => {
       settled = true
     })
 

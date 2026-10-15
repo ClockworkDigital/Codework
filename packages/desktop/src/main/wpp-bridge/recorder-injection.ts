@@ -101,17 +101,18 @@ async function waitForInitialDocument(contents: WebContents) {
   }
 
   if (!contents.isLoadingMainFrame()) return
+  // did-finish-load can precede loadURL's resolution while the loading flag is still set.
   await new Promise<void>((resolve) => {
     const done = () => {
       clearTimeout(timeout)
-      contents.off("did-finish-load", done)
+      contents.off("did-stop-loading", done)
       contents.off("did-fail-load", done)
       resolve()
     }
 
     // ponytail: initial about:blank can race BrowserWindow creation; don't let a dev probe hang.
     const timeout = setTimeout(done, 2000)
-    contents.once("did-finish-load", done)
+    contents.once("did-stop-loading", done)
     contents.once("did-fail-load", done)
   })
 }

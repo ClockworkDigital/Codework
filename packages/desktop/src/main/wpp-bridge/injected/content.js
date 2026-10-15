@@ -49,6 +49,7 @@ const MESSAGE_CONTAINER_SELECTOR = [
 ].join(",");
 let activeCaptureRunId = null;
 const networkRecords = new Map();
+const networkWaiters = new Map();
 const progressDispatchers = new Map();
 const recorderStatus = {
   ready: false,
@@ -81,6 +82,7 @@ if (!globalThis[INSTALL_KEY]) {
         if (record?.runId && record.runId === activeCaptureRunId && record?.id) {
           networkRecords.set(record.id, record);
           forwardProgressRecord(record);
+          if (record.done || record.finishReason || record.error) networkWaiters.get(record.runId)?.();
         }
         return;
       }
@@ -2225,6 +2227,7 @@ async function waitForNetworkResponse({ runId, timeoutMs, textarea, prompt = "",
   while (Date.now() < responseWaitDeadline(startedAt, baseTimeoutMs, maxTimeoutMs, textarea, thinking)) {
     const nowMs = Date.now();
     const record = pickNetworkRecord(runId);
+    if (recordHasCapturedContent(record) && (record.done || record.finishReason)) return record;
     const chatReady = isChatReadyForNextMessage(textarea);
     const domCandidate = latestAssistantMessageSnapshot(textarea);
     const domCandidateChanged = isNewAssistantMessage(domCandidate, beforeAssistantMessage);
@@ -2242,10 +2245,11 @@ async function waitForNetworkResponse({ runId, timeoutMs, textarea, prompt = "",
     // `thinking` (stop button / "thinking" text / in-flight record) is computed on the same
     // throttled cadence — it gates the fatal-toast bail below.
     if (Date.now() - lastAssistantUiCheckAt >= assistantUiCheckMs) {
-      assistantUi = inspectAssistantUi(uiRoot);
+      const text = visiblePageText(uiRoot);
+      assistantUi = { error: findAssistantUiError(text), warning: findAssistantUiWarning(text) };
       thinking = Boolean(
         (textarea && findStopButton(textarea))
-        || matchThinkingText(visiblePageText(uiRoot))
+        || matchThinkingText(text)
         || hasIncompleteNetworkRecord(runId)
       );
       lastAssistantUiCheckAt = Date.now();
@@ -2338,7 +2342,15 @@ async function waitForNetworkResponse({ runId, timeoutMs, textarea, prompt = "",
       }
     }
 
-    await wait(400);
+    await new Promise((resolve) => {
+      const finish = () => {
+        clearTimeout(timer);
+        networkWaiters.delete(runId);
+        resolve();
+      };
+      const timer = setTimeout(finish, 400);
+      networkWaiters.set(runId, finish);
+    });
   }
 
   return null;

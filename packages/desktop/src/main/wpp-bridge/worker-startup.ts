@@ -95,7 +95,7 @@ export async function loadWorkerProject(
       if (URL.parse(contents.getURL())?.origin !== URL.parse(url)?.origin) return
 
       const frames = contents.mainFrame.framesInSubtree.filter(
-        (frame) => frame.url === contents.getURL() || isWppFrameUrl(frame.url),
+        (frame) => frame.url === contents.getURL() || (chatMode === "agent" && isWppFrameUrl(frame.url)),
       )
 
       const pages = await observe(() =>
@@ -133,8 +133,8 @@ export async function loadWorkerProject(
         lastActivity = Date.now()
       }
 
-      // shortcut: five quiet seconds approximate lazy-load completion; use a WPP completion signal when exposed.
-      if (ready && pending.size === 0 && Date.now() - lastActivity >= 5000) return
+      // The assistant control is independent of the project roster; dedicated chats still need its lazy load.
+      if (ready && (chatMode === "assistant" || (pending.size === 0 && Date.now() - lastActivity >= 5000))) return
       await observe(() => new Promise<void>((resolve) => setTimeout(resolve, 250)))
     }
   } finally {

@@ -53,6 +53,7 @@ export function serializeChatCompletionRequest(body, { sinceIndex = 0, purpose =
   const state = { imageIndex: 0 }
   const delta = sinceIndex > 0
   const turnMessages = delta ? nonSystemMessages.slice(sinceIndex) : nonSystemMessages
+  const phases = profile.commentaryPhase ? assistantPhases(turnMessages) : []
   const tools = serializeTools(body.tools)
   const toolInstructions = purpose === "chat" && tools.length > 0
     ? toolCallInstructions(toolFormat, profile)
@@ -86,14 +87,12 @@ export function serializeChatCompletionRequest(body, { sinceIndex = 0, purpose =
         }),
     messages: turnMessages.map((message, index) =>
       serializeMessage(message, state, {
-        phase: profile.commentaryPhase
-          ? assistantPhase(nonSystemMessages, (delta ? sinceIndex : 0) + index)
-          : undefined,
+        phase: phases[index],
       }),
     ),
   }
 
-  return JSON.stringify(envelope, null, 2)
+  return JSON.stringify(envelope)
 }
 
 export function serializeIncompleteTaskContinuationRequest(body, { purpose = "chat" } = {}) {
@@ -111,7 +110,7 @@ export function serializeIncompleteTaskContinuationRequest(body, { purpose = "ch
     tools,
     resumeIncomplete: true,
     messages: [],
-  }, null, 2)
+  })
 }
 
 // A terminal answer that violates an explicit first-tool requirement is recovered through a
@@ -196,13 +195,18 @@ function serializeMessage(message, state, { phase } = {}) {
   return serialized
 }
 
-function assistantPhase(messages, index) {
-  const message = messages[index]
-  if (message?.role !== "assistant") return undefined
-  if (Array.isArray(message.tool_calls) && message.tool_calls.length > 0) return "commentary"
-  const nextUserOffset = messages.slice(index + 1).findIndex((candidate) => candidate?.role === "user")
-  if (nextUserOffset < 0) return "commentary"
-  return messages.slice(index + 1, index + 1 + nextUserOffset).some((candidate) => candidate?.role === "assistant")
-    ? "commentary"
-    : "final_answer"
+function assistantPhases(messages) {
+  const phases = new Array(messages.length)
+  let nextRole
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]
+    if (message.role === "assistant") {
+      phases[index] =
+        nextRole === "user" && !(Array.isArray(message.tool_calls) && message.tool_calls.length > 0)
+          ? "final_answer"
+          : "commentary"
+    }
+    if (message.role === "assistant" || message.role === "user") nextRole = message.role
+  }
+  return phases
 }

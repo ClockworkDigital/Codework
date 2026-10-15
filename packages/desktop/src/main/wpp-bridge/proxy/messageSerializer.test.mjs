@@ -17,6 +17,25 @@ const framed = (model = "CM_Opus 5 - Extra High") => ({
 })
 
 describe("CookieMonster request envelope", () => {
+  test("sends compact JSON without changing prompt content in fresh, continued, or recovery requests", () => {
+    const body = framed()
+    body.messages.push(
+      { role: "assistant", content: "First line.\n  Preserve indentation." },
+      { role: "user", content: "Continue.\n\tKeep whitespace." },
+    )
+    for (const raw of [
+      serializeChatCompletionRequest(body),
+      serializeChatCompletionRequest(body, { sinceIndex: 2 }),
+      serializeToolRecoveryRequest(body),
+      serializeIncompleteTaskContinuationRequest(body),
+    ]) {
+      const envelope = JSON.parse(raw)
+      expect(raw).toBe(JSON.stringify(envelope))
+      expect(envelope.tools[0]).toEqual({ name: "bash", description: "run", parameters: { type: "object" } })
+      if (envelope.messages.length) expect(envelope.messages.at(-1).content).toBe("Continue.\n\tKeep whitespace.")
+    }
+  })
+
   for (const [model, profile] of Object.entries(MODEL_PROFILES).filter(([, profile]) => profile.reasoningEfforts)) {
     test(`serializes every ${model} effort with its fixed agent's protocol`, () => {
       for (const [reasoning_effort, agentName] of Object.entries(profile.reasoningEfforts)) {
@@ -135,9 +154,33 @@ describe("CookieMonster request envelope", () => {
     expect(out.messages.at(-2).phase).toBe("final_answer")
   })
 
-  test("keeps the established Opus envelope byte-identical", () => {
+  test("classifies long assistant histories with linear work and preserves continuation phases", () => {
+    let reads = 0
+    const messages = [
+      ...Array.from({ length: 500 }, (_, index) => ({
+        get role() {
+          reads += 1
+          return "assistant"
+        },
+        content: `Progress ${index}`,
+      })),
+      { role: "tool", tool_call_id: "call-1", content: "done" },
+      { role: "user", content: "Next task" },
+    ]
+    const body = { model: "CM_GPT6.1_Sol", messages }
+    const out = JSON.parse(serializeChatCompletionRequest(body))
+    expect(reads).toBeLessThan(messages.length * 10)
+    expect(out.messages.slice(0, -3).every((message) => message.phase === "commentary")).toBe(true)
+    expect(out.messages.at(-3).phase).toBe("final_answer")
+    expect(out.messages.at(-2).phase).toBeUndefined()
+    expect(JSON.parse(serializeChatCompletionRequest(body, { sinceIndex: 498 })).messages).toEqual(
+      out.messages.slice(498),
+    )
+  })
+
+  test("preserves the established Opus envelope apart from JSON formatting", () => {
     const raw = serializeChatCompletionRequest(framed())
-    expect(new Bun.CryptoHasher("sha256").update(raw).digest("hex")).toBe(
+    expect(new Bun.CryptoHasher("sha256").update(JSON.stringify(JSON.parse(raw), null, 2)).digest("hex")).toBe(
       "87f727b61b18d52b89403822ca36d1bc8dbe199c97ca91b32780c20cb66ba771",
     )
   })

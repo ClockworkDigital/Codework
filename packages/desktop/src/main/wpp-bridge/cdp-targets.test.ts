@@ -1,8 +1,34 @@
 // SAFETY: This fixture owns its synthetic native objects, runtime probes and malformed inputs; partial shapes deliberately exercise the production guards.
 /* oxlint-disable anti-slop/no-chained-type-assertions, anti-slop/no-unknown-parameters, anti-slop/require-safety-comment-for-type-assertion */
 import { describe, expect, test } from "bun:test"
+import { EventEmitter } from "node:events"
 import type { WebContents } from "electron"
 import { armTargetAttach, installInRootAndChildTargets, runTargetInstallers } from "./cdp-targets"
+import { installRecorder } from "./recorder-injection"
+
+test("installs the recorder when initial loading stops after about:blank has already finished", async () => {
+  const contents = Object.assign(new EventEmitter(), {
+    getURL: () => "",
+    isLoadingMainFrame: () => true,
+    loadURL: async () => {
+      contents.emit("did-finish-load")
+    },
+    debugger: { isAttached: () => true },
+  })
+  const installing = installRecorder(contents as unknown as WebContents)
+  await Promise.resolve()
+  await Promise.resolve()
+  expect(contents.listenerCount("did-fail-load")).toBe(1)
+  contents.emit("did-stop-loading")
+  try {
+    expect(await Promise.race([installing.then(() => true), Bun.sleep(50).then(() => false)])).toBe(true)
+    expect(contents.listenerCount("did-stop-loading")).toBe(0)
+    expect(contents.listenerCount("did-fail-load")).toBe(0)
+  } finally {
+    contents.emit("did-fail-load")
+    await installing
+  }
+})
 
 describe("runTargetInstallers", () => {
   test("runs installers in registration order before resume", async () => {
