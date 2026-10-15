@@ -118,13 +118,16 @@ test("mounted settings show eligibility, allow revocation during consent and rou
       },
     }
     const calls: BrowserCommand[] = []
+    let inspection = () => Promise.resolve(true)
     let finish: (() => void) | undefined
     const mounted = fixture.mount(host, tabs, async (command: BrowserCommand) => {
       calls.push(command)
+      if (command.op === "inspect-site") return inspection()
       if (command.op === "access" && command.enabled)
         await new Promise<void>((resolve) => {
           finish = resolve
         })
+      return true
     })
     dispose = mounted.dispose
     const row = () => host.querySelector("[data-access-tab=one]")!
@@ -337,6 +340,31 @@ test("mounted settings show eligibility, allow revocation during consent and rou
     expect(
       [...host.querySelectorAll("button")].some((entry) => entry.textContent?.trim() === "Resume saved download"),
     ).toBe(false)
+    mounted.layout(true)
+    const pending = Promise.withResolvers<boolean>()
+    inspection = () => pending.promise
+    mounted.panel("site")
+    expect(host.textContent).toContain("Inspecting Chromium site data…")
+    pending.resolve(false)
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    expect(host.textContent).toContain("Could not inspect this site. Try Refresh inspection.")
+    expect(host.textContent).not.toContain("Inspecting Chromium site data…")
+    const retry = Promise.withResolvers<boolean>()
+    inspection = () => retry.promise
+    button("Refresh inspection").click()
+    expect(host.textContent).toContain("Inspecting Chromium site data…")
+    retry.reject(new Error("Inspection failed"))
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    expect(host.textContent).toContain("Could not inspect this site. Try Refresh inspection.")
+    inspection = () => Promise.resolve(true)
+    button("Refresh inspection").click()
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    mounted.update({
+      ...tabs,
+      tabs: [{ ...tabs.tabs[0], siteData: { origin: "https://display.example", cookies: 2, storage: [] } }],
+    })
+    expect(host.textContent).toContain("Cookies matching this page: 2")
+    expect(host.textContent).not.toContain("Could not inspect this site")
   } finally {
     dispose?.()
     host.remove()

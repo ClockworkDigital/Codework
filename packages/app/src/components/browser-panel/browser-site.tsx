@@ -1,6 +1,6 @@
 import { BrowserButton } from "./browser-native-controls"
 
-import { createEffect, For, Show } from "solid-js"
+import { createEffect, createSignal, For, Show } from "solid-js"
 import { useLanguage } from "@/context/language"
 import type { BrowserTab, BrowserProfile, BrowserCommand, BrowserPermission } from "@/browser-panel"
 
@@ -30,6 +30,20 @@ export function BrowserSite(props: {
     props.tab.url.startsWith("https:") || ["localhost", "127.0.0.1", "[::1]"].includes(new URL(props.tab.url).hostname)
   const data = () => (props.tab.siteData?.origin === origin() ? props.tab.siteData : undefined)
   let inspected = ""
+  const [inspectionFailed, setInspectionFailed] = createSignal(false)
+  const inspect = () => {
+    const key = `${props.tab.id}\u0000${props.tab.url}`
+    inspected = key
+    setInspectionFailed(false)
+    void props.command({ op: "inspect-site", tabID: props.tab.id }).then(
+      (result) => {
+        if (inspected === key && result === false) setInspectionFailed(true)
+      },
+      () => {
+        if (inspected === key) setInspectionFailed(true)
+      },
+    )
+  }
   const size = () => {
     const bytes = data()?.usage
     if (bytes === undefined) return ""
@@ -47,8 +61,7 @@ export function BrowserSite(props: {
     const url = props.tab.url
     const key = `${id}\u0000${url}`
     if (props.busy || props.tab.access?.loading || inspected === key || !/^https?:/.test(url)) return
-    inspected = key
-    void props.command({ op: "inspect-site", tabID: id })
+    inspect()
   })
   return (
     <div class="space-y-3">
@@ -134,7 +147,14 @@ export function BrowserSite(props: {
       </BrowserButton>
       <fieldset class="space-y-2 border-t border-border-weaker-base pt-2">
         <legend class="font-medium">{language.t("browser.site.data")}</legend>
-        <Show when={data()} fallback={<p role="status">{language.t("browser.site.inspecting")}</p>}>
+        <Show
+          when={data()}
+          fallback={
+            <p role="status">
+              {language.t(inspectionFailed() ? "browser.site.inspectFailed" : "browser.site.inspecting")}
+            </p>
+          }
+        >
           {(inspection) => (
             <>
               <Show when={inspection().cookies !== undefined}>
@@ -163,7 +183,7 @@ export function BrowserSite(props: {
           size="small"
           variant="ghost"
           disabled={props.busy || props.tab.access?.loading}
-          onClick={() => void props.command({ op: "inspect-site", tabID: props.tab.id })}
+          onClick={inspect}
         >
           {language.t("browser.site.refresh")}
         </BrowserButton>
