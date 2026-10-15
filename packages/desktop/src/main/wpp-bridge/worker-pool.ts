@@ -34,7 +34,7 @@ import {
 import { selectWorkerSlot, shouldReapWorker, ttlForWorker, type WorkerView } from "./worker-slot"
 import { SpawnGate } from "./spawn-gate"
 import { assertCapabilityResponse, buildCapabilityProbeJob } from "./proxy/protocol.mjs"
-import { DEFAULT_MODEL_ID } from "./proxy/modelProfiles.mjs"
+import { DEFAULT_AGENT_NAME } from "./proxy/modelProfiles.mjs"
 import { resetThread } from "./proxy/sessionThreads.mjs"
 
 const IDLE_WORKER_TTL_MS = 10 * 60 * 1000
@@ -161,7 +161,7 @@ export class WorkerPool {
     const queuedAt = Date.now()
 
     const worker = await this.acquire(
-      (job.payload?.model || DEFAULT_MODEL_ID).trim(),
+      (job.payload?.model || DEFAULT_AGENT_NAME).trim(),
       (job.payload?.sessionKey || "").trim(),
       job.payload?.subagent === true,
       signal,

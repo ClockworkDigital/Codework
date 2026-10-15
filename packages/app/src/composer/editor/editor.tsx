@@ -364,7 +364,6 @@ export function ComposerEditor(props: ComposerEditorProps) {
                         title={i18n.t("ui.promptInput.chooseVariant")}
                         keybind={["Shift", "Mod", "D"]}
                         control={control}
-                        class={control.current() === "default" ? "composer-variant-default" : undefined}
                       />
                     </Show>
                   )}
@@ -820,7 +819,6 @@ function ComposerEditorConfiguredSelect(props: {
   keybind?: string[]
   control: ComposerSelectControl
   model?: boolean
-  class?: string
 }) {
   const current = () => props.control.current()
   const providerID = () => props.control.options().find((option) => option.id === current())?.providerID
@@ -829,7 +827,6 @@ function ComposerEditorConfiguredSelect(props: {
     <ComposerEditorSelect
       mobileDrawer={props.mobileDrawer}
       title={props.title}
-      class={props.class}
       keybind={props.control.keybind?.() ?? props.keybind}
       options={props.control.options()}
       current={current()}
@@ -850,7 +847,6 @@ export function ComposerEditorSelect(props: {
   options: ComposerOption[]
   current: string
   currentIcon?: JSX.Element
-  class?: string
   onOpenChange?: (open: boolean) => void
   onSelect: (id: string) => void
 }) {
@@ -900,7 +896,7 @@ export function ComposerEditorSelect(props: {
               as={Button}
               variant="ghost-muted"
               size="normal"
-              class={`max-w-[220px] justify-start ![font-weight:440] ${props.class ?? ""}`}
+              class="max-w-[220px] justify-start ![font-weight:440]"
               aria-label={props.title}
             >
               {content()}
@@ -927,7 +923,7 @@ export function ComposerEditorSelect(props: {
           }}
           variant="ghost-muted"
           size="normal"
-          class={`max-w-[220px] justify-start ![font-weight:440] ${props.class ?? ""}`}
+          class="max-w-[220px] justify-start ![font-weight:440]"
           aria-label={props.title}
           aria-haspopup="dialog"
           aria-expanded={store.open}

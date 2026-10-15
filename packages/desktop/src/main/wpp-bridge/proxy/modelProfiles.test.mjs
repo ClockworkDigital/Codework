@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import {
+  DEFAULT_AGENT_NAME,
   DEFAULT_MODEL_ID,
   MODEL_IDS,
   MODEL_PROFILES,
@@ -285,7 +286,7 @@ describe("CookieMonster model profiles", () => {
     ).toEqual(resolveModelProfile("CM_Opus5.5-High"))
     expect(
       resolveRequestModelProfile({ model: "CM_GPT6.1_Sol", o1_code_model: "custom-agent", reasoning_effort: null }),
-    ).toEqual({ ...resolveModelProfile(DEFAULT_MODEL_ID), agentName: "custom-agent" })
+    ).toEqual({ ...resolveModelProfile(DEFAULT_AGENT_NAME), agentName: "custom-agent" })
     expect(resolveRequestModelProfile({ model: DEFAULT_MODEL_ID, o1_code_model: "CM_Opus 5 - High" })).toEqual({
       agentName: "CM_Opus 5 - High",
       toolFormat: "xml",
@@ -306,24 +307,29 @@ describe("CookieMonster model profiles", () => {
       "toString",
       "__proto__",
       "hasOwnProperty",
-      undefined,
-      null,
     ]) {
       for (const reasoning_effort of [undefined, null, "high", "unsupported"]) {
         expect(resolveRequestModelProfile({ model, reasoning_effort })).toEqual(resolveModelProfile(model))
       }
     }
-    expect(resolveRequestModelProfile()).toBe(resolveModelProfile(DEFAULT_MODEL_ID))
+    expect(resolveRequestModelProfile()).toEqual(resolveModelProfile(DEFAULT_MODEL_ID))
   })
 
-  test("uses the project Sol High agent as the fallback", () => {
-    expect(DEFAULT_MODEL_ID).toBe("CM_GPT-5.6-Sol_High")
-    expect(resolveModelProfile("legacy-or-unknown")).toEqual(resolveModelProfile(DEFAULT_MODEL_ID))
+  test("defaults to the Sol 6.1 family with selectable effort and a concrete Medium fallback", () => {
+    expect(DEFAULT_MODEL_ID).toBe("CM_GPT6.1_Sol")
+    expect(DEFAULT_AGENT_NAME).toBe("CM_GPT6.1_Sol_Medium")
+    expect(resolveModelProfile("legacy-or-unknown")).toEqual(resolveModelProfile(DEFAULT_AGENT_NAME))
+    for (const model of [undefined, null, DEFAULT_MODEL_ID]) {
+      expect(resolveRequestModelProfile({ model }).agentName).toBe(DEFAULT_AGENT_NAME)
+      for (const [reasoning_effort, agentName] of Object.entries(MODEL_PROFILES[DEFAULT_MODEL_ID].reasoningEfforts)) {
+        expect(resolveRequestModelProfile({ model, reasoning_effort }).agentName).toBe(agentName)
+      }
+    }
   })
 
   test("falls back for inherited object keys", () => {
     for (const id of ["constructor", "toString", "__proto__", "hasOwnProperty"]) {
-      expect(resolveModelProfile(id)).toBe(resolveModelProfile(DEFAULT_MODEL_ID))
+      expect(resolveModelProfile(id)).toEqual(resolveModelProfile(DEFAULT_AGENT_NAME))
     }
   })
 })

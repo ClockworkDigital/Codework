@@ -187,7 +187,9 @@ export const MODEL_PROFILES = {
   },
 }
 
-export const DEFAULT_MODEL_ID = "CM_GPT-5.6-Sol_High"
+export const DEFAULT_MODEL_ID = "CM_GPT6.1_Sol"
+export const DEFAULT_AGENT_NAME =
+  MODEL_PROFILES[DEFAULT_MODEL_ID].reasoningEfforts[MODEL_PROFILES[DEFAULT_MODEL_ID].defaultReasoningEffort]
 
 // Retired WPP agent names that still route to their successor, so in-flight sessions and saved
 // defaults keep working after a rename. Never advertised; providerConfig strips them from the seed.
@@ -217,17 +219,17 @@ export function resolveModelProfile(modelId) {
     error.type = "invalid_model"
     throw error
   }
-  return MODEL_PROFILES[DEFAULT_MODEL_ID]
+  return resolveModelProfile(DEFAULT_AGENT_NAME)
 }
 
 export function resolveRequestModelProfile(body) {
   const override = body?.o1_code_model
-  const profile = resolveModelProfile(override || body?.model)
+  const profile = resolveModelProfile(override || body?.model || DEFAULT_MODEL_ID)
   if (!Object.hasOwn(profile, "reasoningEfforts")) {
     return override ? { ...profile, agentName: override } : profile
   }
 
-  const effort = Object.hasOwn(body, "reasoning_effort") ? body.reasoning_effort : profile.defaultReasoningEffort
+  const effort = Object.hasOwn(body ?? {}, "reasoning_effort") ? body.reasoning_effort : profile.defaultReasoningEffort
   if (typeof effort !== "string" || !Object.hasOwn(profile.reasoningEfforts, effort)) {
     const error = new Error(`reasoning_effort must be one of: ${Object.keys(profile.reasoningEfforts).join(", ")}`)
     error.statusCode = 400

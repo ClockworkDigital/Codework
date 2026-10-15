@@ -1,6 +1,6 @@
 import { WorkerPool } from "../worker-pool";
 import { WPP_COOKIE_MONSTER_PROJECT_URL } from "./wppProject.mjs";
-import { DEFAULT_MODEL_ID } from "./modelProfiles.mjs";
+import { DEFAULT_AGENT_NAME } from "./modelProfiles.mjs";
 import { wppAuth } from "../session";
 
 const DEFAULT_EXTENSION_TIMEOUT_MS = Number(process.env.O1_CODE_EXTENSION_TIMEOUT_MS || process.env.O1_CODE_TIMEOUT_MS || 900000);
@@ -325,7 +325,7 @@ export class ExtensionBridge {
         images: options.images || [],
         target: options.target || process.env.O1_CODE_TARGET || "coding-agent",
         url,
-        model: options.model || DEFAULT_MODEL_ID,
+        model: options.model || DEFAULT_AGENT_NAME,
         // Pins this turn to the OpenCode session's worker tab so its WPP thread holds context.
         sessionKey: options.sessionKey || "",
         // True when this session is a sub-agent (child) — the pool reaps its tab on a shorter TTL.
