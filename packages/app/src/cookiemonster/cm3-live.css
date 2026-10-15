@@ -469,6 +469,7 @@ html[data-color-scheme="dark"] .cm3-sidebar {
   min-height: 0;
   overflow: auto;
   scrollbar-width: thin;
+  scrollbar-color: var(--cm3-border) transparent;
 }
 
 .cm3-sidebar-scroll > aside {
@@ -868,6 +869,7 @@ html[data-color-scheme="dark"] .cm3-sidebar {
 }
 
 .cm3-live [data-component="composer"] {
+  container-type: inline-size;
   border: 1px solid var(--cm3-border);
   border-radius: 24px;
   background: var(--cm3-surface);
@@ -875,8 +877,13 @@ html[data-color-scheme="dark"] .cm3-sidebar {
 }
 
 .cm3-live [data-action="composer-model"] {
-  margin-inline-start: auto;
   font-size: 12px;
+}
+
+@container (max-width: 400px) {
+  .cm3-live .prompt-permission-toggle > span {
+    display: none;
+  }
 }
 
 @media (max-height: 700px) {

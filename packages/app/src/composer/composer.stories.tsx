@@ -11,6 +11,7 @@ import { promptLength } from "./prompt-parts"
 import { SessionPreview } from "@/session/story-model"
 import { Skill } from "@opencode/schema/skill"
 import { resolveSessionComposerSelection } from "@/session/composer/selection"
+import { SettingsProvider } from "@/settings/model"
 
 const selectedModel = {
   id: STORY_MODEL.id,
@@ -209,8 +210,7 @@ function ComposerStory(props: {
               : `Submitted: ${value}`,
           )
         },
-        onStop: () =>
-          setStory("activity", props.continueOnStop ? "POST /interrupt · resume: true" : "Stop requested"),
+        onStop: () => setStory("activity", props.continueOnStop ? "POST /interrupt · resume: true" : "Stop requested"),
       },
     },
   })
@@ -244,6 +244,13 @@ export default {
   title: "OpenCode/Composer/Flow",
   component: Composer,
   parameters: { layout: "centered" },
+  decorators: [
+    (Story: () => JSX.Element) => (
+      <SettingsProvider>
+        <Story />
+      </SettingsProvider>
+    ),
+  ],
 }
 
 export const EmptyDraft = { render: () => <ComposerStory /> }

@@ -23,3 +23,11 @@ const rows: { name: string; agents: { name: string }[]; requested?: string; expe
 test.each(rows)("resolveAgent uses $name", (row) => {
   expect(resolveAgent(row.agents, row.requested)?.name).toBe(row.expected)
 })
+
+test.each([undefined, "plan", "custom"])("build-only selection ignores a saved %s agent", (requested) => {
+  expect(resolveAgent(agents, requested, true)?.name).toBe("build")
+})
+
+test("build-only selection never falls back to Plan when Build is unavailable", () => {
+  expect(resolveAgent([{ name: "plan" }], "plan", true)).toBeUndefined()
+})

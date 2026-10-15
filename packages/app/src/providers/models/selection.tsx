@@ -17,6 +17,7 @@ import { normalizeAgentList } from "@/runtime/server/global-sync/utils"
 import { useServerSDK } from "@/runtime/server/client"
 import { ScopedKey, type ServerScope } from "@/runtime/server/scope"
 import { useConfiguredModel } from "./configured"
+import { usePlatform } from "@/runtime/platform/platform"
 
 const ModelKeySchema = Schema.Struct({
   providerID: Schema.String,
@@ -88,6 +89,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
     const providers = useProviders(() => sdk().directory)
     const models = useModels()
     const settings = useSettings()
+    const platform = usePlatform()
     const configuredModel = useConfiguredModel()
 
     const id = createMemo(() => params.id || undefined)
@@ -98,7 +100,10 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       ),
     )
 
-    const agentsVisible = createMemo(() => settings.visibility.customAgents() || hasCustomAgent(list()))
+    const agentsVisible = createMemo(
+      () => !platform.browserPanel && (settings.visibility.customAgents() || hasCustomAgent(list())),
+    )
+
     const connected = createMemo(() => new Set(providers.connected().map((item) => item.id)))
 
     const [saved, setSaved, , savedReady] = persisted(
@@ -133,7 +138,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
     }
 
     const pickAgent = (name: string | undefined) => {
-      return resolveAgent(list(), name)
+      return resolveAgent(list(), name, !!platform.browserPanel)
     }
 
     createEffect(() => {
@@ -274,7 +279,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       // Catalog availability must not replace a user's choice with a default on the next submission.
       const item =
         scope()?.model ??
-        (session?.model && (!session.agent || session.agent === agent.current()?.name)
+        (session?.model && (platform.browserPanel || !session.agent || session.agent === agent.current()?.name)
           ? { providerID: session.model.providerID, modelID: session.model.id }
           : undefined) ??
         firstModel(() => agent.current()?.model, fallback)
@@ -309,7 +314,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       if (draft?.model && validModel(draft.model)) return draft.variant
       const session = durable()
 
-      if (session?.agent && session.agent !== agent.current()?.name) return
+      if (!platform.browserPanel && session?.agent && session.agent !== agent.current()?.name) return
       const value = session?.model
 
       if (value && validModel({ providerID: value.providerID, modelID: value.id })) return value.variant ?? null

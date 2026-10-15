@@ -17,6 +17,7 @@ import { projectSettingsKey, useSettings } from "@/settings/model"
 import { useWorkspaceLocation } from "@/workspaces/location"
 import { useServerSDK } from "@/runtime/server/client"
 import { Cm3Icon } from "@/cookiemonster/cm3-icon"
+import { cookieMonsterModelProvider } from "@/cookiemonster/model-provider"
 
 export function Composer(props: {
   class?: string
@@ -54,6 +55,8 @@ export function Composer(props: {
               type="button"
               role="switch"
               aria-checked={accepting()}
+              aria-label={language.t("command.permissions.autoaccept.enable")}
+              title={language.t("command.permissions.autoaccept.enable")}
               variant="ghost-muted"
               size="normal"
               class="prompt-permission-toggle shrink-0"
@@ -115,7 +118,11 @@ function ComposerModelControl(props: {
       <Show when={props.provider}>
         {(provider) => (
           <ProviderModelIcon
-            provider={provider()}
+            provider={{
+              ...provider(),
+              canonical:
+                cookieMonsterModelProvider(provider().id, props.model.current()?.family) ?? provider().canonical,
+            }}
             class="shrink-0 opacity-40 transition-opacity duration-150 group-hover:opacity-100"
           />
         )}
