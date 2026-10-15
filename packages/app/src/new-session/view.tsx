@@ -1,7 +1,7 @@
 import { useDialog } from "@opencode/ui/context/dialog"
 import { Tooltip } from "@opencode/ui/tooltip"
 import { Icon } from "@opencode/ui/icon"
-import { Show, createMemo, createSignal } from "solid-js"
+import { For, Show, createMemo, createSignal } from "solid-js"
 import { Schema } from "effect"
 import createPresence from "solid-presence"
 import { Composer } from "@/composer/composer"
@@ -21,6 +21,14 @@ import { Persist, persisted } from "@/runtime/persistence/storage"
 import { Persistence } from "@/runtime/persistence/schema"
 import type { NewSessionWorkspaceController } from "./workspace/controller"
 import { NewSessionWordmark } from "./wordmark"
+import { usePlatform } from "@/runtime/platform/platform"
+import { useTheme } from "@opencode/ui/theme"
+import { displayName } from "@opencode/ui/project-avatar"
+import { useComposerState } from "@/composer/persistence"
+import { promptLength } from "@/composer/prompt-parts"
+import { Cm3Icon } from "@/cookiemonster/cm3-icon"
+import cookieMonsterBannerLight from "@/assets/cookie-monster-banner-light.svg"
+import cookieMonsterBannerDark from "@/assets/cookie-monster-banner-dark.svg"
 
 const providerTipDismissalDuration = 30 * 24 * 60 * 60 * 1000
 
@@ -39,6 +47,17 @@ export function NewSessionView(props: {
   project: PromptProjectController
   workspace: NewSessionWorkspaceController
 }) {
+  const platform = usePlatform()
+  const language = useLanguage()
+  const theme = useTheme()
+  const prompt = useComposerState()
+
+  const starters = [
+    { icon: "magnifying-glass", title: "quietCompanion.trace", prompt: "quietCompanion.tracePrompt" },
+    { icon: "code", title: "quietCompanion.build", prompt: "quietCompanion.buildPrompt" },
+    { icon: "eye", title: "quietCompanion.review", prompt: "quietCompanion.reviewPrompt" },
+  ] as const
+
   const [onboarding, setOnboarding, , onboardingReady] = persisted(
     Persist.global("workspace-onboarding"),
     WorkspaceOnboardingSchema,
@@ -61,16 +80,31 @@ export function NewSessionView(props: {
           active={props.composer.state.drag === "active"}
           input={props.composer.model.selection.current()?.capabilities.input}
         />
-        <div class="absolute inset-x-0 top-[25.375%] flex justify-center px-6">
+        <div class="new-session-content absolute inset-x-0 top-[25.375%] flex justify-center px-6">
           <div class={NEW_SESSION_CONTENT_WIDTH}>
-            <NewSessionWordmark />
+            <Show when={platform.browserPanel} fallback={<NewSessionWordmark />}>
+              <img
+                class="cm3-landing-logo"
+                src={theme.mode() === "dark" ? cookieMonsterBannerDark : cookieMonsterBannerLight}
+                alt={language.t("quietCompanion.brand")}
+                width={720}
+                height={180}
+              />
+              <Show when={props.project.selected()}>
+                {(project) => (
+                  <h1 class="cm3-landing-heading">
+                    {language.t("quietCompanion.heading", { project: displayName(project()) })}
+                  </h1>
+                )}
+              </Show>
+            </Show>
             <div class="mt-8 flex flex-col gap-8">
               <Composer model={props.composer} />
               <Show when={props.project.empty()}>
                 <PromptProjectAddButton controller={props.project} />
               </Show>
               <Show when={props.project.selected()}>
-                <div class="flex min-h-7 min-w-0 flex-row flex-wrap items-center justify-center gap-0 text-v2-text-text-faint">
+                <div class="cm3-landing-project flex min-h-7 min-w-0 flex-row flex-wrap items-center justify-center gap-0 text-v2-text-text-faint">
                   <PromptProjectSelector controller={props.project} placement="bottom" />
                   <Show
                     when={props.workspace.bar.visible()}
@@ -78,7 +112,7 @@ export function NewSessionView(props: {
                       <PromptGitStatus
                         branch={props.workspace.bar.branch()}
                         noGit={!props.workspace.project.git()}
-                        class="ms-1"
+                        class="cm3-landing-git ms-1"
                       />
                     }
                   >
@@ -97,6 +131,31 @@ export function NewSessionView(props: {
                     />
                   </Show>
                 </div>
+              </Show>
+              <Show when={platform.browserPanel}>
+                <ul class="cm3-starters" aria-label={language.t("quietCompanion.suggestions")}>
+                  <For each={starters}>
+                    {(starter) => (
+                      <li>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const start = promptLength(prompt.current())
+                            const content = `${start ? "\n\n" : ""}${language.t(starter.prompt)}`
+                            prompt.set(
+                              [...prompt.current(), { type: "text", content, start, end: start + content.length }],
+                              start + content.length,
+                            )
+                            props.composer.restoreFocus()
+                          }}
+                        >
+                          <Cm3Icon name={starter.icon} />
+                          {language.t(starter.title)}
+                        </button>
+                      </li>
+                    )}
+                  </For>
+                </ul>
               </Show>
             </div>
           </div>

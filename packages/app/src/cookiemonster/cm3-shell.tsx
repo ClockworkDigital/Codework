@@ -31,6 +31,8 @@ import { useTheme } from "@opencode/ui/theme"
 import cookieMonsterBannerLight from "@/assets/cookie-monster-banner-light.svg"
 import cookieMonsterBannerDark from "@/assets/cookie-monster-banner-dark.svg"
 import { useScheduling } from "./scheduling-panel"
+import { useCommand } from "@/shell/commands/command"
+import { createMediaQuery } from "@solid-primitives/media"
 
 const PROJECT_SESSIONS_PAGE = 5
 
@@ -39,8 +41,10 @@ type ProjectChat = { key: string; title: string; updated: number } & (
   | { type: "draft"; tab: DraftTab; project: LocalProject }
 )
 
-export function Cm3Shell() {
+export function Cm3Shell(props: { onTabsMount: (element: HTMLElement) => void }) {
   const scheduling = useScheduling()
+  const command = useCommand()
+  const mobile = createMediaQuery("(max-width: 640px)")
   const home = createHomeController()
   const sessions = createHomeSessionsController(home, { registerPalette: false, allProjects: true })
   const language = useLanguage()
@@ -71,6 +75,23 @@ export function Cm3Shell() {
   onCleanup(() => {
     refs.nav?.parentElement?.style.removeProperty("--cm3-sidebar-width")
   })
+
+  command.register("cm3-sidebar", () => [
+    {
+      id: "sidebar.toggle",
+      title: language.t("command.sidebar.toggle"),
+      category: language.t("command.category.view"),
+      onSelect: () => {
+        if (mobile()) {
+          setState("navigation", (value) => !value)
+
+          return
+        }
+
+        setSidebar("collapsed", (value) => !value)
+      },
+    },
+  ])
 
   const closeNavigation = () => {
     setState("navigation", false)
@@ -580,9 +601,7 @@ export function Cm3Shell() {
             />
           </label>
           <div class="cm3-sidebar-scroll">
-            <Show when={true}>
-              <div class="cm3-sidebar-tabs" />
-            </Show>
+            <div class="cm3-sidebar-tabs" ref={props.onTabsMount} />
             <CmProjects
               projects={projects}
               onOpenProjectNewSession={openTask}

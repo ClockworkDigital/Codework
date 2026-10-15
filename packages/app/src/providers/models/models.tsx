@@ -3,6 +3,7 @@ import { filter, firstBy, flat, groupBy, mapValues, pipe, uniqueBy, values } fro
 import { createSimpleContext } from "@opencode/ui/context"
 import { useProviders } from "@/providers/catalog/providers"
 import { useGlobal } from "@/runtime/server/runtime"
+import { isSupersededCookieMonsterModel } from "@/cookiemonster/model-visibility"
 
 export type ModelKey = { providerID: string; modelID: string }
 
@@ -37,7 +38,8 @@ const createModelsController = (directory: Accessor<string | undefined>) => {
     () =>
       new Map(
         available().map(
-          (model) => [modelKey({ providerID: model.provider.id, modelID: model.id }), Date.parse(model.release_date)] as const,
+          (model) =>
+            [modelKey({ providerID: model.provider.id, modelID: model.id }), Date.parse(model.release_date)] as const,
         ),
       ),
   )
@@ -108,6 +110,8 @@ const createModelsController = (directory: Accessor<string | undefined>) => {
     if (state === "hide") return false
 
     if (state === "show") return true
+
+    if (isSupersededCookieMonsterModel(model, available())) return false
 
     if (latestSet().has(key)) return true
 

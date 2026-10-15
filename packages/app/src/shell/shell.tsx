@@ -48,23 +48,29 @@ function Workspace(props: ParentProps) {
         class="relative bg-v2-background-bg-deep flex-1 min-h-0 min-w-0 flex flex-col select-none [&_input]:select-text [&_textarea]:select-text [&_[contenteditable]]:select-text"
         style={{
           // Mobile panels only need clearance for their outer border.
-          "--shell-inline-inset": mobile() ? "1px" : "8px",
+          "--shell-inline-inset": platform.browserPanel ? "0px" : mobile() ? "1px" : "8px",
           // A bottom mobile titlebar leaves main's top edge to the safe area. Native Windows chrome supplies the gap;
           // retain outer-outline clearance.
-          "--shell-top-inset": bottomTitlebar()
+          "--shell-top-inset":
+            platform.browserPanel || bottomTitlebar()
+              ? "0px"
+              : platform.platform === "desktop" && platform.os === "windows"
+                ? "1px"
+                : "8px",
+          "--shell-bottom-inset": platform.browserPanel
             ? "0px"
-            : platform.platform === "desktop" && platform.os === "windows"
-              ? "1px"
-              : "8px",
-          "--shell-bottom-inset": bottomTitlebar()
-            ? "8px"
-            : "max(0px, calc(8px - var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px))))",
+            : bottomTitlebar()
+              ? "8px"
+              : "max(0px, calc(8px - var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px))))",
         }}
       >
-        <Titlebar verticalTabs={verticalTabs() ? { mount: state.tabsMount } : undefined} />
+        <Titlebar
+          sidebarTabs={platform.browserPanel ? state.tabsMount : undefined}
+          verticalTabs={verticalTabs() ? { mount: state.tabsMount } : undefined}
+        />
         <div class="flex flex-1 min-h-0 min-w-0 flex-row">
           <Show when={platform.browserPanel}>
-            <Cm3Shell />
+            <Cm3Shell onTabsMount={(element) => setState("tabsMount", element)} />
           </Show>
           <Show when={verticalTabs()}>
             <aside

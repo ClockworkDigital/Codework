@@ -31,9 +31,12 @@ const AutoApprovePermissionsSetting: Component = () => {
     >
       <div data-action="settings-auto-accept-permissions">
         <Switch
+          hideLabel
           checked={settings.permissions.autoApproveDefault()}
           onChange={(checked) => settings.permissions.setAutoApproveDefault(checked)}
-        />
+        >
+          {language.t("command.permissions.autoaccept.enable")}
+        </Switch>
       </div>
     </SettingsRow>
   )
@@ -243,7 +246,9 @@ export const SettingsGeneral: Component = () => {
       <h3 class="settings-section-title">{language.t("settings.general.section.general")}</h3>
       <SettingsList>
         <LanguageSetting />
-        <TabLayoutSetting />
+        <Show when={!platform.browserPanel}>
+          <TabLayoutSetting />
+        </Show>
 
         <WorkspaceDestinationSetting />
         <AutoApprovePermissionsSetting />
@@ -254,9 +259,12 @@ export const SettingsGeneral: Component = () => {
         >
           <div data-action="settings-show-custom-agents">
             <Switch
+              hideLabel
               checked={settings.general.showCustomAgents()}
               onChange={(checked) => settings.general.setShowCustomAgents(checked)}
-            />
+            >
+              {language.t("settings.general.row.showCustomAgents.title")}
+            </Switch>
           </div>
         </SettingsRow>
 
@@ -269,7 +277,9 @@ export const SettingsGeneral: Component = () => {
             description={language.t("settings.general.row.pinchZoom.description")}
           >
             <div data-action="settings-pinch-zoom">
-              <Switch checked={pinchZoom.latest} onChange={onPinchZoomChange} />
+              <Switch hideLabel checked={pinchZoom.latest} onChange={onPinchZoomChange}>
+                {language.t("settings.general.row.pinchZoom.title")}
+              </Switch>
             </div>
           </SettingsRow>
         </Show>
@@ -283,9 +293,12 @@ export const SettingsGeneral: Component = () => {
           >
             <div data-action="settings-mobile-titlebar-bottom">
               <Switch
+                hideLabel
                 checked={settings.general.mobileTitlebarPosition() === "bottom"}
                 onChange={(checked) => settings.general.setMobileTitlebarPosition(checked ? "bottom" : "top")}
-              />
+              >
+                {language.t("settings.general.row.mobileTitlebarBottom.title")}
+              </Switch>
             </div>
           </SettingsRow>
         </Show>

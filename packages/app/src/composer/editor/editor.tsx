@@ -82,6 +82,7 @@ export type ComposerEditorProps = {
   readOnly?: boolean
   borderUnderlay?: boolean
   class?: string
+  permissionControl?: JSX.Element
   modelControl?: JSX.Element
   modelControlsVisible?: boolean
   attachKeybind?: string[]
@@ -343,6 +344,7 @@ export function ComposerEditor(props: ComposerEditorProps) {
             style={buttons()}
           >
             <div ref={controlsContent} class="flex h-full w-max min-w-full items-center gap-1">
+              {props.permissionControl}
               <Show when={view.agent} keyed>
                 {(control) => (
                   <ComposerEditorConfiguredSelect

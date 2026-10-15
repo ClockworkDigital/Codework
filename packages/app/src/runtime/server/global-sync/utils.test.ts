@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test"
 import type { AgentListOutput, ModelListOutput, Project, ProviderListOutput } from "@opencode/client/promise"
 import { directoryKey, normalizeAgentList, normalizeProjectInfo, normalizeProviderList } from "./utils"
+import { Model } from "@opencode/schema/model"
+import { Provider } from "@opencode/schema/provider"
 
 describe("normalizeAgentList", () => {
   test("adapts current agents to the app agent shape", () => {
@@ -39,6 +41,18 @@ describe("normalizeAgentList", () => {
 })
 
 describe("normalizeProviderList", () => {
+  test.each([
+    [0, ""],
+    [Date.UTC(2026, 9, 15), "2026-10-15"],
+  ])("preserves unknown model release dates for picker visibility (%p)", (released, expected) => {
+    const provider = Provider.ID.make("cookiemonster")
+    const model = Model.Info.default(provider, Model.ID.make("custom-model"))
+
+    const result = normalizeProviderList([Provider.Info.empty(provider)], [{ ...model, time: { released } }])
+
+    expect(result.all.get(provider)?.models[model.id].release_date).toBe(expected)
+  })
+
   test("groups current models into the app provider catalog", () => {
     const result = normalizeProviderList(
       [{ id: "openai", name: "OpenAI", package: "@ai-sdk/openai" }] as ProviderListOutput["data"],

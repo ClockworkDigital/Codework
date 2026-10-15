@@ -12,6 +12,11 @@ import { DialogSelectModelUnpaid } from "@/providers/models/unpaid"
 import { formatKeybind, useCommand } from "@/shell/commands/command"
 import { useLanguage } from "@/runtime/i18n/language"
 import type { ComposerModel } from "./model"
+import { usePlatform } from "@/runtime/platform/platform"
+import { projectSettingsKey, useSettings } from "@/settings/model"
+import { useWorkspaceLocation } from "@/workspaces/location"
+import { useServerSDK } from "@/runtime/server/client"
+import { Cm3Icon } from "@/cookiemonster/cm3-icon"
 
 export function Composer(props: {
   class?: string
@@ -23,6 +28,12 @@ export function Composer(props: {
   const dialog = useDialog()
   const command = useCommand()
   const language = useLanguage()
+  const platform = usePlatform()
+  const settings = useSettings()
+  const location = useWorkspaceLocation()
+  const sdk = useServerSDK()
+  const project = () => projectSettingsKey(sdk.scope, location().current?.project.id)
+  const accepting = () => settings.permissions.autoApproves(project())
 
   return (
     <div class="flex flex-col gap-3">
@@ -37,6 +48,36 @@ export function Composer(props: {
         alternateKeybind={[formatKeybind("mod", language.t), "↵"]}
         exitShellKeybind={[formatKeybind("esc", language.t)]}
         suggestionBoundary={props.suggestionBoundary}
+        permissionControl={
+          <Show when={platform.browserPanel}>
+            <Button
+              type="button"
+              role="switch"
+              aria-checked={accepting()}
+              variant="ghost-muted"
+              size="normal"
+              class="prompt-permission-toggle shrink-0"
+              onClick={() => {
+                const key = project()
+                const active = !accepting()
+
+                if (!key) {
+                  settings.permissions.setAutoApproveDefault(active)
+
+                  return
+                }
+
+                settings.permissions.setAutoApproveOverride(
+                  key,
+                  active === settings.permissions.autoApproveDefault() ? undefined : active,
+                )
+              }}
+            >
+              <Cm3Icon name={accepting() ? "toggle-right-fill" : "toggle-left"} size={24} />
+              <span>{language.t("command.permissions.autoaccept.enable")}</span>
+            </Button>
+          </Show>
+        }
         modelControl={
           <ComposerModelControl
             loading={props.model.model.loading}

@@ -36,6 +36,8 @@ import { useExtensionHost } from "@/runtime/extension/host"
 import { TitlebarItems, useTitlebarItems } from "@/runtime/extension/titlebar-items"
 import devIcon from "../../../../desktop/icons/dev/64x64.png"
 import betaIcon from "../../../../desktop/icons/beta/64x64.png"
+import { useTheme } from "@opencode/ui/theme"
+import { Cm3Icon } from "@/cookiemonster/cm3-icon"
 
 const titlebarHeight = 36
 
@@ -54,10 +56,11 @@ const macTrafficLightsTopClearance = 28
 // titlebar row stays 16px clear of it, as ChatGPT's phone header does. Without one, 8px matches the content gap below.
 const mobileTopClearance = "max(8px, min(16px, env(safe-area-inset-top, 0px) * 1000))"
 
-export function Titlebar(props: { verticalTabs?: { mount?: HTMLElement } }) {
+export function Titlebar(props: { verticalTabs?: { mount?: HTMLElement }; sidebarTabs?: HTMLElement }) {
   const platform = usePlatform()
   const command = useCommand()
   const language = useLanguage()
+  const theme = useTheme()
   const settings = useSettings()
   const openSettings = useSettingsDialog()
   const navigate = useNavigate()
@@ -534,7 +537,7 @@ export function Titlebar(props: { verticalTabs?: { mount?: HTMLElement } }) {
                   "ps-3.5": windows(),
                 }}
               >
-                <Show when={!mobile() && (!props.verticalTabs || windows())}>
+                <Show when={!platform.browserPanel && !mobile() && (!props.verticalTabs || windows())}>
                   <ChannelIndicator horizontal />
                 </Show>
                 <Show when={windows() || linux()}>
@@ -679,7 +682,7 @@ export function Titlebar(props: { verticalTabs?: { mount?: HTMLElement } }) {
                   }
                 >
                   <Show
-                    when={props.verticalTabs}
+                    when={props.verticalTabs ?? (props.sidebarTabs ? { mount: props.sidebarTabs } : undefined)}
                     fallback={
                       <>
                         <TitlebarTabStrip
@@ -713,7 +716,11 @@ export function Titlebar(props: { verticalTabs?: { mount?: HTMLElement } }) {
                         {(mount) => (
                           <Portal
                             mount={mount}
-                            ref={(element) => (element.className = "flex size-full min-h-0 flex-col")}
+                            ref={(element) =>
+                              (element.className = platform.browserPanel
+                                ? "flex min-h-0 flex-col"
+                                : "flex size-full min-h-0 flex-col")
+                            }
                           >
                             <Show when={macVerticalTabs()}>
                               <div
@@ -722,19 +729,22 @@ export function Titlebar(props: { verticalTabs?: { mount?: HTMLElement } }) {
                                 data-tauri-drag-region
                               />
                             </Show>
-                            <Show when={!windows()}>
+                            <Show when={!platform.browserPanel && !windows()}>
                               <ChannelIndicator sidebar />
                             </Show>
-                            {homeButton(true)}
-                            <RecentlyClosedTabsMenu
-                              vertical
-                              onNewTab={openNewTab}
-                              keybind={command.keybind("tab.new")}
-                            />
-                            <div class="h-4 w-full shrink-0" aria-hidden="true" />
+                            <Show when={!platform.browserPanel}>
+                              {homeButton(true)}
+                              <RecentlyClosedTabsMenu
+                                vertical
+                                onNewTab={openNewTab}
+                                keybind={command.keybind("tab.new")}
+                              />
+                              <div class="h-4 w-full shrink-0" aria-hidden="true" />
+                            </Show>
                             <div class="flex min-h-0 flex-1 flex-col gap-1">
                               <TitlebarTabStrip
                                 orientation="vertical"
+                                draftTitle={platform.browserPanel ? language.t("quietCompanion.newSession") : undefined}
                                 tabs={tabsStore}
                                 currentTab={currentTab()}
                                 onNavigate={(tab, el) => {
@@ -749,7 +759,7 @@ export function Titlebar(props: { verticalTabs?: { mount?: HTMLElement } }) {
                                 onReorder={(keys) => tabsStoreActions.reorder(keys)}
                               />
                             </div>
-                            <Show when={titlebarItems.ids().length > 0}>
+                            <Show when={!platform.browserPanel && titlebarItems.ids().length > 0}>
                               <div data-slot="vertical-tabs-footer" class="mt-2 flex w-full shrink-0 flex-col">
                                 <TitlebarItems items={titlebarItems} vertical />
                               </div>
@@ -767,6 +777,19 @@ export function Titlebar(props: { verticalTabs?: { mount?: HTMLElement } }) {
                   <div class="relative z-20 flex shrink-0 items-center justify-end gap-0 overflow-visible">
                     <TitlebarItems items={titlebarItems} />
                     <TitlebarRightMount />
+                    <Show when={platform.browserPanel}>
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-label={language.t("theme.scheme.dark")}
+                        aria-checked={theme.mode() === "dark"}
+                        title={language.t(theme.mode() === "dark" ? "theme.scheme.light" : "theme.scheme.dark")}
+                        class="flex size-8 items-center justify-center rounded hover:bg-v2-background-bg-layer-02"
+                        onClick={() => theme.setColorScheme(theme.mode() === "dark" ? "light" : "dark")}
+                      >
+                        <Cm3Icon name={theme.mode() === "dark" ? "moon" : "sun"} size={18} />
+                      </button>
+                    </Show>
                   </div>
                 </Show>
               </div>

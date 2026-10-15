@@ -43,6 +43,7 @@ const projectContextMenuID = (server: ServerConnection.Any, directory: string) =
 
 export type HomeProjectsViewProps = {
   dropdown?: boolean
+  embedded?: boolean
   renderProjectSessions?: (server: ServerConnection.Any, project: LocalProject) => JSX.Element
   language: ReturnType<typeof useLanguage>
   servers: ServerConnection.Any[]
@@ -171,9 +172,11 @@ function HomeProjectsPanel(props: HomeProjectsViewProps) {
   return (
     <aside
       class={
-        props.dropdown
-          ? "flex max-h-[min(60dvh,calc(var(--kb-popper-content-available-height)-12px))] min-h-0 min-w-0 flex-col overflow-hidden"
-          : `
+        props.embedded
+          ? "flex min-h-0 min-w-0 flex-col gap-1"
+          : props.dropdown
+            ? "flex max-h-[min(60dvh,calc(var(--kb-popper-content-available-height)-12px))] min-h-0 min-w-0 flex-col overflow-hidden"
+            : `
         mt-6 flex min-h-0 min-w-0 flex-col gap-4 overflow-hidden
         lg:sticky lg:top-14 lg:mt-14 lg:h-[calc(100cqh-56px)] lg:self-start lg:pt-[52px]
       `
@@ -301,12 +304,14 @@ function HomeProjectsPanel(props: HomeProjectsViewProps) {
           </div>
         </Show>
       </ScrollView>
-      <HomeUtilityNav
-        class="mb-8 mt-4 hidden shrink-0 lg:flex"
-        onOpenSettings={props.onOpenSettings}
-        onOpenHelp={props.onOpenHelp}
-        language={props.language}
-      />
+      <Show when={!props.embedded}>
+        <HomeUtilityNav
+          class="mb-8 mt-4 hidden shrink-0 lg:flex"
+          onOpenSettings={props.onOpenSettings}
+          onOpenHelp={props.onOpenHelp}
+          language={props.language}
+        />
+      </Show>
     </aside>
   )
 }
@@ -736,7 +741,9 @@ function HomeProjectRow(
           pointerDownSelected = undefined
         }}
       >
-        <HomeProjectAvatar project={props.project} />
+        <Show when={props.embedded} fallback={<HomeProjectAvatar project={props.project} />}>
+          <Icon name="folder" size="small" />
+        </Show>
         <span data-slot="home-row-label" class={HOME_PROJECT_NAV_LABEL}>
           {displayName(props.project)}
         </span>

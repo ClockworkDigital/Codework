@@ -251,6 +251,7 @@ function DraftTabSlot(props: {
 
 export function TitlebarTabStrip(props: {
   orientation?: "horizontal" | "vertical"
+  draftTitle?: string
   tabs: Tab[]
   currentTab: Tab | undefined
   onNavigate: (tab: Tab, el?: HTMLDivElement) => void
@@ -406,7 +407,7 @@ export function TitlebarTabStrip(props: {
                     index={visibleIndex()}
                     active={props.currentTab === tab}
                     orientation={vertical() ? "vertical" : "horizontal"}
-                    title={language.t("session.tab.session")}
+                    title={props.draftTitle ?? language.t("session.tab.session")}
                     onNavigate={(element) => {
                       ref = element
                       props.onNavigate(tab, element)

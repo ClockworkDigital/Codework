@@ -11,6 +11,7 @@ export function CmProjects(props: {
 }) {
   return (
     <HomeProjectsView
+      embedded
       dropdown={props.dropdown}
       language={props.projects.copy.language}
       servers={props.projects.server.list()}

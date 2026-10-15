@@ -1,4 +1,8 @@
 export const cookiemonster = {
+  "command.sidebar.toggle": "Toggle sidebar",
+  "sidebar.nav.projectsAndSessions": "Projects and sessions",
+  "sidebar.resize": "Resize sidebar",
+  "quietCompanion.newSession": "New session",
   "schedules.title": "Scheduled",
   "schedules.panelTitle": "Scheduling",
   "schedules.closePanel": "Close Scheduling",
