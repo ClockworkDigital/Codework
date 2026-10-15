@@ -30,6 +30,15 @@ export function currentToolOutput(tool: SessionMessageAssistantTool) {
   return text || undefined
 }
 
+export function currentToolImages(tool: SessionMessageAssistantTool) {
+  // File reads already have a path-based preview in their dedicated renderer.
+  if (tool.name === "read" || !("content" in tool.state)) return []
+
+  return (
+    tool.state.content?.flatMap((item) => (item.type === "file" && item.mime.startsWith("image/") ? [item] : [])) ?? []
+  )
+}
+
 export function currentToolError(tool: SessionMessageAssistantTool) {
   if (tool.state.status !== "error") return undefined
 

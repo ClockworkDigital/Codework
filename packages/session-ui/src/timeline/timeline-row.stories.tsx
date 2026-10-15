@@ -4,6 +4,7 @@ import { createStore } from "solid-js/store"
 import type { SessionDocument } from "../document"
 import { SessionTimeline } from "./session-timeline"
 import type { ReasoningMode } from "./projection"
+import { timelinePresets } from "./detail"
 import { CurrentSessionProviders, CurrentSessionTimelineStory } from "../storybook/current-session-story"
 import {
   CURRENT_SESSION_ID,
@@ -205,7 +206,10 @@ function RetryAndRecoverStory() {
             ? {
                 attempt: 2,
                 at: 1_900_000_000_000,
-                error: { type: "ProviderRateLimitError" as const, message: "Rate limit reached. Retrying with backoff." },
+                error: {
+                  type: "ProviderRateLimitError" as const,
+                  message: "Rate limit reached. Retrying with backoff.",
+                },
               }
             : undefined,
           time: { created: STORY_TIME, completed: finished ? STORY_TIME + 300 : undefined },
@@ -603,6 +607,62 @@ const RichUserAttachments = {
   ),
 }
 
+function GeneratedImagesStory() {
+  const [state, setState] = createStore({ completed: false, quiet: false })
+
+  const document = createMemo(
+    () =>
+      ({
+        ...thinkingDocument,
+        status: { type: state.completed ? "idle" : "busy" },
+        messages: [
+          thinkingDocument.messages[0]!,
+          {
+            id: "msg_generated_images",
+            type: "assistant",
+            agent: "build",
+            model: STORY_MODEL,
+            time: { created: STORY_TIME, completed: state.completed ? STORY_TIME + 1000 : undefined },
+            content: [
+              {
+                type: "tool",
+                id: "tool_generated_images",
+                name: "image_generation",
+                time: { created: STORY_TIME },
+                state: state.completed
+                  ? {
+                      status: "completed",
+                      input: {},
+                      content: [
+                        { type: "text", text: "Generated two images." },
+                        ...["first.png", "second.png"].map((name) => ({
+                          type: "file" as const,
+                          name,
+                          mime: "image/png",
+                          uri: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+                        })),
+                        { type: "file", mime: "application/json", uri: "data:application/json;base64,e30=" },
+                      ],
+                    }
+                  : { status: "running", input: {}, metadata: {} },
+              },
+            ],
+          },
+        ],
+      }) satisfies SessionDocument,
+  )
+
+  return (
+    <section class="mx-auto flex w-full max-w-[720px] flex-col gap-4 p-6">
+      <button onClick={() => setState("completed", true)}>Complete generation</button>
+      <button onClick={() => setState("quiet", !state.quiet)}>Toggle quiet timeline</button>
+      <CurrentSessionProviders document={document()}>
+        <SessionTimeline document={document()} timelineDetail={timelinePresets[state.quiet ? 3 : 2].value} />
+      </CurrentSessionProviders>
+    </section>
+  )
+}
+
 const conversationScenarios = {
   reasoning: AgentReasoning,
   hidden: WorkingWithoutReasoningDetails,
@@ -613,6 +673,7 @@ const conversationScenarios = {
   interruption: InterruptedTurn,
   models: AliasedModelNotices,
   attachments: RichUserAttachments,
+  images: { render: GeneratedImagesStory },
 }
 
 export const Conversation = {

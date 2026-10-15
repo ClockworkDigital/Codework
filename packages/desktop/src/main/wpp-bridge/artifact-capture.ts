@@ -32,6 +32,58 @@ export type WppArtifact = {
   extension: string
 }
 
+/** Decode WPP's image-generation resource polling responses. */
+export function parseWppResource(text: string) {
+  try {
+    const value: unknown = JSON.parse(text)
+    if (!record(value) || !record(value.data)) return
+    const data = value.data
+    const status = data.status
+    if (
+      typeof data.resourceId !== "string" ||
+      (status !== "IN_PROGRESS" && status !== "AVAILABLE" && status !== "FAILED")
+    )
+      return
+    const output = record(data.output) ? data.output : undefined
+    return {
+      id: data.resourceId,
+      status,
+      error: typeof output?.fail === "string" ? output.fail : undefined,
+      artifacts: Array.isArray(output?.success)
+        ? output.success.flatMap((url) => (typeof url === "string" ? (parseWppArtifact(url) ?? []) : []))
+        : [],
+    }
+  } catch {
+    return undefined
+  }
+}
+
+function record(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+}
+
+export function wppImagePrompts(text: string) {
+  return Array.from(
+    text.matchAll(/<wpp_artifact\b(?=[^>]*\btype\s*=\s*["']image["'])[^>]*>([\s\S]*?)<\/wpp_artifact>/gi),
+    (match) => imagePrompt(match[1]),
+  )
+}
+
+export function wppResourcePrompt(text: string) {
+  try {
+    const value: unknown = JSON.parse(text)
+    return record(value) && record(value.input) && typeof value.input.prompt === "string"
+      ? imagePrompt(value.input.prompt)
+      : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function imagePrompt(text: string) {
+  return text.replace(/\s+/g, " ").trim()
+}
+
 // Images first (the shipped v1 scope). Video rides the same /resource/ rail with a video extension,
 // so the map is here to make the fast-follow a one-line change, but VIDEO is gated off by default.
 const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "webp", "gif"])
@@ -63,6 +115,7 @@ export function parseWppArtifact(
   // Bucket may be virtual-hosted ("<bucket>.s3.<region>.amazonaws.com") or path-style
   // ("s3.<region>.amazonaws.com/<bucket>/…"); accept either so the predicate isn't brittle.
   const host = url.hostname.toLowerCase()
+  if (url.protocol !== "https:" || !host.endsWith(".amazonaws.com")) return null
   const isVirtualHosted = host.startsWith(`${WPP_ARTIFACT_BUCKET}.s3.`) || host.startsWith(`${WPP_ARTIFACT_BUCKET}.s3-`)
   const isPathStyle = host.startsWith("s3.") && url.pathname.startsWith(`/${WPP_ARTIFACT_BUCKET}/`)
 
@@ -76,7 +129,9 @@ export function parseWppArtifact(
   // and its absence signals this isn't the self-contained artifact GET we can persist.
   if (!url.searchParams.has("X-Amz-Signature")) return null
 
-  const fileName = decodeURIComponent(key.split("/").pop() || "")
+  const fileName = decodedFileName(key)
+  if (!fileName) return null
+  if (fileName.includes("/") || fileName.includes("\\")) return null
   const extension = fileName.includes(".") ? fileName.split(".").pop()!.toLowerCase() : ""
   const kind = artifactKind(extension, options.includeVideo === true)
 
@@ -91,6 +146,14 @@ function artifactKind(extension: string, includeVideo: boolean): ArtifactKind | 
   if (includeVideo && VIDEO_EXTENSIONS.has(extension)) return "video"
 
   return null
+}
+
+function decodedFileName(key: string) {
+  try {
+    return decodeURIComponent(key.split("/").pop() || "")
+  } catch {
+    return undefined
+  }
 }
 
 function safeUrl(value: string | null | undefined): URL | null {

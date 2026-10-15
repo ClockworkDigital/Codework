@@ -34,6 +34,9 @@ const PROJECT_AGENTS = [
   "CM_Gemini-3.7-Flash_Low",
   "CM_Gemini-3.7-Flash_Medium",
   "CM_Gemini-3.7-Flash_High",
+  "CM_Gemini4_Low",
+  "CM_Gemini4_Medium",
+  "CM_Gemini4_High",
 ]
 
 const FAMILIES = [
@@ -43,6 +46,7 @@ const FAMILIES = [
   "CM_GPT-5.6 Sol",
   "CM_Opus5.5",
   "CM_Gemini-3.7-Flash",
+  "CM_Gemini4",
 ]
 
 describe("CookieMonster model profiles", () => {
@@ -151,6 +155,7 @@ describe("CookieMonster model profiles", () => {
       "max",
     ])
     expect(Object.keys(MODEL_PROFILES["CM_Gemini-3.7-Flash"].reasoningEfforts)).toEqual(["low", "medium", "high"])
+    expect(Object.keys(MODEL_PROFILES.CM_Gemini4.reasoningEfforts)).toEqual(["low", "medium", "high"])
     for (const model of FAMILIES.slice(1)) {
       for (const agentName of Object.values(MODEL_PROFILES[model].reasoningEfforts)) {
         expect(PROJECT_AGENTS).toContain(agentName)
@@ -161,6 +166,8 @@ describe("CookieMonster model profiles", () => {
       ["CM_Opus5.5", "low"],
       ["CM_Gemini-3.7-Flash", "xhigh"],
       ["CM_Gemini-3.7-Flash", "max"],
+      ["CM_Gemini4", "xhigh"],
+      ["CM_Gemini4", "max"],
     ]) {
       expect(() => resolveRequestModelProfile({ model, reasoning_effort })).toThrow(
         expect.objectContaining({ statusCode: 400, type: "invalid_reasoning_effort" }),

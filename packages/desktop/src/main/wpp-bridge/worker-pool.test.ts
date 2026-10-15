@@ -41,7 +41,10 @@ test("concurrent jobs retain their own worker correlation and log retirement rea
     busy: false,
     lastUsed: Date.now(),
     controller: { runJob: () => new Promise((resolve) => completions.set(id, resolve)) },
-    netWitness: { summarizeWindow: () => ({ cdpRequestSeen: true, cdpStatus: 200, cdpFinished: true }) },
+    netWitness: {
+      collectArtifacts: async () => [],
+      summarizeWindow: () => ({ cdpRequestSeen: true, cdpStatus: 200, cdpFinished: true }),
+    },
   }))
 
   workers.forEach((worker) => Reflect.get(pool, "workers").set(worker.id, worker))
@@ -295,6 +298,7 @@ describe("WorkerPool cancellation", () => {
         runJob: async () => ({ ok: false, diagnostics: { phase: "no-network-response" } }),
       },
       netWitness: {
+        collectArtifacts: async () => [],
         summarizeWindow: () => {
           settling.resolve()
 
@@ -371,7 +375,7 @@ describe("WorkerPool cancellation", () => {
           return probe.promise
         },
       },
-      netWitness: { summarizeWindow: () => ({}) },
+      netWitness: { collectArtifacts: async () => [], summarizeWindow: () => ({}) },
       agent: "CM_Opus5.5-High",
       protocolAgent: "",
       sessionKey: "session",
@@ -410,7 +414,7 @@ describe("WorkerPool cancellation", () => {
       controller: {
         runJob: () => new Promise(() => {}),
       },
-      netWitness: { summarizeWindow: () => ({}) },
+      netWitness: { collectArtifacts: async () => [], summarizeWindow: () => ({}) },
       agent: "CM_GPT-5.6 Sol - High",
       protocolAgent: "CM_GPT-5.6 Sol - High",
       sessionKey: "session",
@@ -477,7 +481,7 @@ describe("WorkerPool capture failures", () => {
             type,
           }),
         },
-        netWitness: { summarizeWindow: () => ({}) },
+        netWitness: { collectArtifacts: async () => [], summarizeWindow: () => ({}) },
         agent: "CM_GPT-5.6 Sol - High",
         protocolAgent: "CM_GPT-5.6 Sol - High",
         sessionKey: "session",
@@ -530,6 +534,7 @@ describe("WorkerPool capture failures", () => {
         }),
       },
       netWitness: {
+        collectArtifacts: async () => [],
         // First poll unfinished (triggers await); second finishes so the verdict is parser-miss
         // rather than an instant unfinished-stream failure.
         summarizeWindow: () => {
@@ -599,7 +604,7 @@ describe("WorkerPool retirement", () => {
           },
         },
         controller: { runJob: async () => ({ ok: false, type: "o1_code_thread_desync", error: "lost" }) },
-        netWitness: { summarizeWindow: () => ({}) },
+        netWitness: { collectArtifacts: async () => [], summarizeWindow: () => ({}) },
         agent: "CM_Opus5.5-High",
         protocolAgent: "CM_Opus5.5-High",
         sessionKey,

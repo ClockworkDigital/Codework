@@ -4,18 +4,7 @@ import { acquireThreadTurn, decideThreadMode, commitThread, resetThread, threadC
 import { extensionBridge } from "./extensionBridge.mjs";
 import { chooseAssistantResponse } from "./toolCallNormalizer.mjs";
 import { StreamGate } from "./streamGate.mjs";
-import {
-  createChatCompletionResponse,
-  openChatCompletionStream,
-  writeChatCompletionBody,
-  writeChatCompletionError,
-  writeChatCompletionStream,
-  streamChunkBase,
-  writeContentDelta,
-  writeContentBody,
-  writeToolCallChunks,
-  finishChatCompletion
-} from "./streamAdapter.mjs";
+import { ChatCompletions } from "./streamAdapter.mjs";
 import { writeRunLog } from "./logging.mjs";
 import { redact } from "./policy.mjs";
 import { collectImageInputs } from "./imageInputs.mjs";
@@ -87,8 +76,8 @@ export function listModels() {
   };
 }
 
-export async function handleChatCompletions(request, response, body, { bridge = extensionBridge, signal } = {}) {
-  const id = `chatcmpl_${crypto.randomUUID().replace(/-/g, "")}`;
+export async function handleChatCompletions(request, response, body, { bridge = extensionBridge, signal, adapter = ChatCompletions } = {}) {
+  const id = `${adapter.idPrefix}_${crypto.randomUUID().replace(/-/g, "")}`;
   const created = Math.floor(Date.now() / 1000);
   const model = body.model || DEFAULT_MODEL_ID;
   const profile = resolveRequestModelProfile(body);
@@ -110,7 +99,7 @@ export async function handleChatCompletions(request, response, body, { bridge = 
     }).usage;
 
     if (body.stream) {
-      await writeChatCompletionStream(response, {
+      await adapter.writeChatCompletionStream(response, {
         id,
         model,
         created,
@@ -123,7 +112,7 @@ export async function handleChatCompletions(request, response, body, { bridge = 
       return;
     }
 
-    writeJson(response, 200, createChatCompletionResponse({
+    writeJson(response, 200, adapter.createChatCompletionResponse({
       id,
       model,
       created,
@@ -171,9 +160,8 @@ export async function handleChatCompletions(request, response, body, { bridge = 
   let retainedContext = continueThread ? threadContextUsage(sessionKey) : undefined;
   const purpose = isCompaction ? "compaction" : "chat";
   let prompt = serializeChatCompletionRequest(body, { purpose, sinceIndex: thread.sinceIndex });
-  // The full conversation is replayed, but images are only attached for the
-  // latest user turn — earlier images remain text placeholders in the serialized history.
-  const images = collectImageInputs(latestUserMessages(body));
+  // Responses must also reattach prior generated images when rebuilding a lost WPP thread.
+  const images = collectImageInputs(adapter.replayImages && !continueThread ? body.messages : latestUserMessages(body));
   let context = buildContextMetrics(body, { prompt, serializableMessages, images });
 
   if (prompt.length > maxPromptChars()) {
@@ -210,7 +198,7 @@ export async function handleChatCompletions(request, response, body, { bridge = 
     return;
   }
 
-  const streamBase = streamChunkBase({ id, model, created });
+  const streamBase = adapter.streamChunkBase({ id, model, created });
   // Live streaming is gated off for compaction: its summary must be sanitized as a whole
   // (sanitizeCompactionSummary) before any text is emitted, so we never stream it incrementally.
   // Tool-bearing turns stream through a one-sentence quarantine. Completed safe sentences flow
@@ -235,6 +223,7 @@ export async function handleChatCompletions(request, response, body, { bridge = 
     subagent,
     continueThread: runContinueThread,
     images,
+    directory: request.headers?.["x-opencode-directory"] ? decodeURIComponent(request.headers["x-opencode-directory"]) : undefined,
     signal,
     // React to live progress frames by streaming prose deltas as they land. The bridge owns the
     // subscription lifecycle (subscribe on enqueue, unsubscribe when the job settles), so a late
@@ -244,7 +233,7 @@ export async function handleChatCompletions(request, response, body, { bridge = 
           const { delta } = streamSession.update(frame.finalText);
           if (delta) {
             attempt.streamed = true;
-            writeContentDelta(response, streamBase, delta);
+            adapter.writeContentDelta(response, streamBase, delta);
           }
       }
       : undefined
@@ -322,7 +311,7 @@ export async function handleChatCompletions(request, response, body, { bridge = 
     recoverIncompleteTask(await recoverMissingRequiredToolCall(run));
 
   if (body.stream) {
-    openChatCompletionStream(response, { id, model, created });
+    adapter.openChatCompletionStream(response, { id, model, created });
 
     try {
       o1CodeRun = await validateBridgeRun(await runBridgeTurn(prompt, continueThread));
@@ -374,7 +363,7 @@ export async function handleChatCompletions(request, response, body, { bridge = 
         // A bridge failure is not a successful assistant turn. Preserve the stream protocol but
         // emit its error envelope so OpenCode surfaces a provider failure instead of persisting the
         // diagnostic as text and terminating on finish_reason=stop.
-        writeChatCompletionError(response, failure);
+        adapter.writeChatCompletionError(response, failure);
         return;
       }
     }
@@ -453,6 +442,8 @@ export async function handleChatCompletions(request, response, body, { bridge = 
       }
     : stripTaskCompleteMarker(chooseAssistantResponse(finalText, toolCallParts, o1CodeRun.response.alternateAssistantTexts));
   if (!isCompaction) {
+    normalized.images = o1CodeRun.response.images ?? [];
+    if (normalized.images.length) normalized.content = (normalized.content ?? "").replace(/<wpp_artifact\b[^>]*>[\s\S]*?<\/wpp_artifact>/gi, "").trim();
     normalizeToolCallArguments(normalized.tool_calls, body.tools);
   }
   const finishReason = normalized.finish_reason || o1CodeRun.request?.finishReason || "stop";
@@ -515,6 +506,7 @@ export async function handleChatCompletions(request, response, body, { bridge = 
   if (body.stream) {
     if (streamSession) {
       finalizeStreamedCompletion(response, streamBase, {
+        adapter,
         streamSession,
         normalized,
         finishReason,
@@ -526,11 +518,12 @@ export async function handleChatCompletions(request, response, body, { bridge = 
     }
 
     // No live session (compaction): emit the sanitized content as a whole body.
-    writeChatCompletionBody(response, {
+    adapter.writeChatCompletionBody(response, {
       id,
       model,
       created,
       content: normalized.content || "",
+      images: normalized.images,
       tool_calls: normalized.tool_calls,
       finishReason,
       usage,
@@ -539,7 +532,7 @@ export async function handleChatCompletions(request, response, body, { bridge = 
     return;
   }
 
-  writeJson(response, 200, createChatCompletionResponse({
+  writeJson(response, 200, adapter.createChatCompletionResponse({
     id,
     model,
     created,
@@ -639,6 +632,7 @@ function alternateAssistantTexts(run) {
 // already contains tool progress, a prose-only response is allowed to be the final findings answer.
 export function shouldRecoverMissingRequiredToolCall(body, run, { isCompaction = false } = {}) {
   if (isCompaction || !Array.isArray(body?.tools) || body.tools.length === 0) return false;
+  if (run?.response?.images?.length && body?.tool_choice?.type !== "function") return false;
   if (!explicitlyRequiresToolUse(body)) return false;
 
   const finalText = run?.response?.finalText || run?.finalText || "";
@@ -665,7 +659,7 @@ export function shouldRecoverIncompleteTask(body, run, { isCompaction = false } 
   const normalized = chooseAssistantResponse(finalText, toolCallParts, alternateAssistantTexts(run));
   if (normalized?.tool_calls?.length) return false;
   const content = normalized?.content || "";
-  return !hasTaskCompleteMarker(content)
+  return (!hasTaskCompleteMarker(content) && !run?.response?.images?.length)
     || hasExplicitIncompleteTaskClaim(content, { forwardLooking: commentaryPhaseEnabled(body) });
 }
 
@@ -795,6 +789,7 @@ function createStreamSession({ sentenceQuarantine = false } = {}) {
 // Always terminates the stream via finishChatCompletion. The caller must unsubscribe from progress
 // BEFORE calling this so a late frame can't interleave a delta after finish_reason.
 function finalizeStreamedCompletion(response, streamBase, {
+  adapter,
   streamSession,
   normalized,
   finishReason,
@@ -807,28 +802,29 @@ function finalizeStreamedCompletion(response, streamBase, {
 
   if (Array.isArray(tool_calls) && tool_calls.length > 0) {
     if (content) {
-      writeContentBody(response, streamBase, content);
+      adapter.writeContentBody(response, streamBase, content);
     }
-    writeToolCallChunks(response, streamBase, tool_calls);
+    adapter.writeToolCallChunks(response, streamBase, tool_calls);
   } else if (recoveryReplay) {
     // The recovery response is a new cumulative text origin. Append it in full after any benign
     // commentary already emitted from the discarded answer instead of diffing unrelated strings.
-    writeContentBody(response, streamBase, content);
+    adapter.writeContentBody(response, streamBase, content);
   } else if (streamSession.hasStreamed()) {
     // Emit the authoritative content past what we've already streamed live.
     const trailing = streamSession.trailingDiff(content);
     if (trailing) {
-      writeContentDelta(response, streamBase, trailing);
+      adapter.writeContentDelta(response, streamBase, trailing);
     }
   } else {
-    writeContentBody(response, streamBase, content);
+    adapter.writeContentBody(response, streamBase, content);
   }
 
-  finishChatCompletion(response, streamBase, {
+  adapter.finishChatCompletion(response, streamBase, {
     finishReason,
     usage,
     includeUsage,
     content,
+    images: normalized.images,
     tool_calls
   });
 }

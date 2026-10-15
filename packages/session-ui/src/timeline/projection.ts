@@ -14,6 +14,7 @@ import {
   currentToolFailed,
   currentToolGroupedRead,
   currentToolHasLoadedFiles,
+  currentToolImages,
 } from "../message/current-tool-state"
 import { TimelineRow, type PartGroup, type PartRef, type TimelineRowMap } from "./timeline-row"
 import { timelineCategory, timelineNoticeRequired, type TimelineDetail } from "./detail"
@@ -798,6 +799,8 @@ function renderable(content: Content, showReasoning: boolean, detail?: TimelineD
 
   if (content.name === "todowrite") return false
 
+  if (currentToolImages(content).length) return true
+
   if (content.name === "question") return content.state.status !== "streaming" && content.state.status !== "running"
 
   if (detail && detail[timelineCategory(content)!].placement === "hidden") return false
@@ -891,6 +894,8 @@ function toolGroupType(
   hasContextGroup: boolean,
   detail?: TimelineDetail,
 ) {
+  if (currentToolImages(content).length) return undefined
+
   if (detail) {
     if (content.name === "question" && !currentToolFailed(content)) return undefined
     const category = timelineCategory(content)!

@@ -1,5 +1,23 @@
 import { expect, story } from "../../storybook/playwright/story"
 
+story("shows generated images outside tool groups and opens keyboard previews", async ({ mount, page }) => {
+  const timeline = await mount("current-session-timeline-rows--conversation", { args: { scenario: "images" } })
+  await timeline.getByRole("button", { name: "Complete generation" }).click()
+  const images = timeline.locator('[data-component="tool-images"] img')
+  await expect(images).toHaveCount(2)
+  await expect(images.first()).toBeVisible()
+  await expect.poll(() => images.first().evaluate((image: HTMLImageElement) => image.naturalWidth)).toBe(1)
+  await expect(images.first().locator('xpath=ancestor::*[@data-component="context-tool-group-list"]')).toHaveCount(0)
+  await images.first().focus()
+  await images.first().press("Enter")
+  const preview = page.locator('[data-component="image-preview"]')
+  await expect(preview.locator("img")).toHaveAttribute("alt", "first.png")
+  await page.keyboard.press("Escape")
+  await expect(preview).toHaveCount(0)
+  await timeline.getByRole("button", { name: "Toggle quiet timeline" }).click()
+  await expect(images.first()).toBeVisible()
+})
+
 // Moved from packages/app/e2e/regression/session-timeline-projection.spec.ts
 story("renders every admitted tool family and hides timeline-only exclusions", async ({ mount }) => {
   const timeline = await mount("current-session-research-agents--agent-research", { args: { scenario: "workflow" } })

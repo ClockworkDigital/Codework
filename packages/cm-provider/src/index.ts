@@ -16,7 +16,7 @@ export default Plugin.define({
           id: providerID,
           name: "CookieMonster",
           activation: "enabled",
-          package: "@opencode/ai/providers/openai-compatible",
+          package: "@opencode/ai/providers/openai/responses",
           settings: {
             baseURL: `http://${process.env.O1_CODE_PROXY_HOST ?? "127.0.0.1"}:${process.env.O1_CODE_PROXY_PORT ?? "8787"}/v1`,
             apiKey: "cookiemonster-local",
@@ -26,6 +26,7 @@ export default Plugin.define({
           const profile = resolveModelProfile(id)
           return {
             ...Model.Info.default(providerID, Model.ID.make(id)),
+            capabilities: { tools: true, input: ["text", "image"], output: ["text", "image"] },
             family: Model.Family.make(
               id.startsWith("CM_Opus") ? "claude" : id.startsWith("CM_Gemini") ? "gemini" : "gpt",
             ),

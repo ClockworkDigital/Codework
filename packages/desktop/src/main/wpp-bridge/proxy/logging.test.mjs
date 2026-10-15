@@ -20,6 +20,7 @@ describe("runLogRecord", () => {
       diagnostics: { domMessage: { text: "private DOM response" } },
       response: {
         finalText: "private assistant text",
+        images: [{ data: "private base64 image", url: "private signed artifact URL" }],
         toolCallParts: { call1: { name: "read", arguments: "private tool arguments" } },
         chunks: [{ text: "private streamed chunk" }],
         events: [{ text: "private event text" }],
@@ -60,6 +61,8 @@ describe("runLogRecord", () => {
     expect(JSON.stringify(out)).not.toContain("private composer value")
     expect(JSON.stringify(out)).not.toContain("private composer preview")
     expect(JSON.stringify(out)).not.toContain("private DOM response")
+    expect(JSON.stringify(out)).not.toContain("private base64 image")
+    expect(JSON.stringify(out)).not.toContain("private signed artifact URL")
   })
 
   test("retains payloads only when explicitly enabled", () => {

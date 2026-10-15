@@ -35,6 +35,10 @@ const families = [
     id: "CM_Gemini-3.7-Flash",
     fixed: ["CM_Gemini-3.7-Flash_Low", "CM_Gemini-3.7-Flash_Medium", "CM_Gemini-3.7-Flash_High"],
   },
+  {
+    id: "CM_Gemini4",
+    fixed: ["CM_Gemini4_Low", "CM_Gemini4_Medium", "CM_Gemini4_High"],
+  },
 ]
 
 const available = families.map((family) => ({ id: family.id, provider: { id: "cookiemonster" } }))

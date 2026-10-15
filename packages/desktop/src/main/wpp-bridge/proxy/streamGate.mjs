@@ -145,13 +145,13 @@ function sentenceReleaseEnd(text, maxEnd) {
 // Literal prefixes the tool-call markers begin with, used both to locate a complete marker and to
 // hold back a partial one at a frame boundary. Kept in one place so the live gate and
 // leadingLooksLikeToolCall can't drift apart on what counts as a tool call.
-const TOOL_CALL_MARKER_PREFIXES = ["<function_calls", "<invoke", "{\"type\":\"tool_call\""];
+const TOOL_CALL_MARKER_PREFIXES = ["<function_calls", "<invoke", "<wpp_artifact", "{\"type\":\"tool_call\""];
 
 // Index of the first complete tool-call marker anywhere in the text, or -1. The JSON form tolerates
 // whitespace the literal prefix doesn't (e.g. `{ "type" : "tool_call"`).
 function firstToolCallMarker(text) {
   const value = String(text || "");
-  const match = value.match(/<function_calls\b|<invoke\b|\{\s*"type"\s*:\s*"tool_call"/i);
+  const match = value.match(/<function_calls\b|<invoke\b|<wpp_artifact\b|\{\s*"type"\s*:\s*"tool_call"/i);
   return match ? match.index : -1;
 }
 
@@ -194,7 +194,7 @@ export function leadingLooksLikeToolCall(text) {
     return true;
   }
 
-  if (/^<function_calls\b/i.test(candidate) || /^<invoke\b/i.test(candidate)) {
+  if (/^<function_calls\b/i.test(candidate) || /^<invoke\b/i.test(candidate) || /^<wpp_artifact\b/i.test(candidate)) {
     return true;
   }
 

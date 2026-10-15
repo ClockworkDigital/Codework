@@ -7,6 +7,7 @@
 
 import { mkdir as fsMkdir, writeFile as fsWriteFile } from "node:fs/promises"
 import { isAbsolute, join } from "node:path"
+import { createHash } from "node:crypto"
 import type { WppArtifact } from "./artifact-capture"
 
 export type PersistedArtifact = {
@@ -14,12 +15,15 @@ export type PersistedArtifact = {
   kind: WppArtifact["kind"]
   path: string
   bytes: number
+  mime: string
+  data: string
 }
 
 export type ResolveDeps = {
   fetch?: typeof globalThis.fetch
   writeFile?: (path: string, data: Uint8Array) => Promise<void>
   mkdir?: (path: string) => Promise<void>
+  signal?: AbortSignal
 }
 
 // Files land under this subdir of the resolved target directory so a generation never scatters
@@ -52,7 +56,12 @@ export async function persistArtifacts(
 ): Promise<PersistedArtifact[]> {
   if (artifacts.length === 0) return []
 
-  const doFetch = deps.fetch ?? globalThis.fetch
+  const doFetch: typeof fetch = (url, options) =>
+    (deps.fetch ?? fetch)(url, {
+      ...options,
+      redirect: "error",
+      signal: deps.signal ? AbortSignal.any([deps.signal, AbortSignal.timeout(30_000)]) : AbortSignal.timeout(30_000),
+    })
   const writeFile = deps.writeFile ?? ((path, data) => fsWriteFile(path, data))
   const mkdir = deps.mkdir ?? (async (path) => void (await fsMkdir(path, { recursive: true })))
 
@@ -77,8 +86,26 @@ async function persistOne(
 
   if (bytes.byteLength === 0) return null
 
-  const path = join(targetDir, artifact.fileName)
-  await writeFile(path, bytes)
+  // WPP's GPT Image outputs reuse names such as 0.png across distinct resource jobs.
+  const path = join(
+    targetDir,
+    `${createHash("sha256").update(new URL(artifact.url).pathname).digest("hex").slice(0, 12)}-${artifact.fileName}`,
+  )
+  if (
+    !(await writeFile(path, bytes).then(
+      () => true,
+      () => false,
+    ))
+  )
+    return null
 
-  return { url: artifact.url, kind: artifact.kind, path, bytes: bytes.byteLength }
+  const mime = `image/${artifact.extension === "jpg" ? "jpeg" : artifact.extension}`
+  return {
+    url: artifact.url,
+    kind: artifact.kind,
+    path,
+    bytes: bytes.byteLength,
+    mime,
+    data: Buffer.from(bytes).toString("base64"),
+  }
 }

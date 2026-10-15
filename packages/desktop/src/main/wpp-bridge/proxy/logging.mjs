@@ -68,9 +68,10 @@ const PAYLOAD_FIELDS = new Set([
   "value",
   "valuePreview",
   "thinkingText",
+  "data",
   "ignoredAssistantErrorText",
 ])
-const PAYLOAD_COLLECTION_FIELDS = new Set(["chunks", "events", "unparsed", "toolCallParts"])
+const PAYLOAD_COLLECTION_FIELDS = new Set(["chunks", "events", "unparsed", "toolCallParts", "images"])
 
 function omitNestedPayloads(value) {
   if (Array.isArray(value)) return value.map(omitNestedPayloads)

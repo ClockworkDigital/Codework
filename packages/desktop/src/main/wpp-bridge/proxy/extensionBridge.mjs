@@ -323,6 +323,7 @@ export class ExtensionBridge {
       payload: {
         prompt,
         images: options.images || [],
+        directory: options.directory,
         target: options.target || process.env.O1_CODE_TARGET || "coding-agent",
         url,
         model: options.model || DEFAULT_AGENT_NAME,
@@ -526,6 +527,7 @@ function buildRunEnvelope(prompt, options, result, startedAt, transport = "exten
     },
     response: {
       finalText: result.finalText || result.response?.finalText || "",
+      images: result.images || [],
       toolCallParts: result.toolCallParts || result.response?.toolCallParts || {},
       alternateAssistantTexts:
         result.alternateAssistantTexts || result.response?.alternateAssistantTexts || [],

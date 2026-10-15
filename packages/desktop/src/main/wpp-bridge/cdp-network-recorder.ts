@@ -2,6 +2,7 @@ import type { WebContents } from "electron"
 import { installInRootAndChildTargets } from "./cdp-targets"
 import { isWppModelRequest } from "./model-request-filter"
 import type { CdpNetworkSummary } from "./capture-verdict"
+import { parseWppArtifact, parseWppResource, wppResourcePrompt } from "./artifact-capture"
 
 type CdpRecord = {
   key: string
@@ -31,6 +32,12 @@ const MAX_RECORDS = 100
 
 export type NetworkWitness = {
   summarizeWindow: (sinceMs: number) => CdpNetworkSummary
+  collectArtifacts: (
+    sinceMs: number,
+    signal?: AbortSignal,
+    timeoutMs?: number,
+    prompts?: readonly string[],
+  ) => Promise<NonNullable<ReturnType<typeof parseWppArtifact>>[]>
 }
 
 // Register Network.enable on the shared target hub. Caller must armTargetAttach after all
@@ -38,9 +45,57 @@ export type NetworkWitness = {
 export async function installNetworkWitness(contents: WebContents): Promise<NetworkWitness> {
   const dbg = contents.debugger
   const reducer = createCdpNetworkReducer()
+  const artifacts = new Map<string, { started: number; artifact: NonNullable<ReturnType<typeof parseWppArtifact>> }>()
+  const requests = new Map<string, { started: number; prompt?: string }>()
+  const reading = new Set<Promise<void>>()
+  const resources = new Map<
+    string,
+    { started: number; prompt?: string; resource: NonNullable<ReturnType<typeof parseWppResource>> }
+  >()
+  let resourceStarted = 0
+  let artifactUpdated = 0
 
   dbg.on("message", (_event, method, params, sessionId) => {
     reducer.handle(method, params, typeof sessionId === "string" ? sessionId : undefined)
+    const key = `${sessionId ?? ""}:${params.requestId}`
+    if (method === "Network.loadingFinished" && requests.has(key)) {
+      const request = requests.get(key)!
+      requests.delete(key)
+      const pending = dbg
+        .sendCommand("Network.getResponseBody", { requestId: params.requestId }, sessionId)
+        .then(
+          (body) => {
+            const resource = parseWppResource(body.body)
+            if (!resource) return
+            resources.set(resource.id, { ...request, resource })
+            for (const artifact of resource.artifacts)
+              artifacts.set(new URL(artifact.url).pathname, { started: request.started, artifact })
+            if (resources.size > MAX_RECORDS) resources.delete(resources.keys().next().value!)
+          },
+          () => {},
+        )
+        .finally(() => reading.delete(pending))
+      reading.add(pending)
+    }
+    if (method === "Network.loadingFailed") requests.delete(key)
+    if (method !== "Network.requestWillBeSent") return
+    const value = params as { request?: { url?: string; method?: string; postData?: string } }
+    const request = value.request
+    if (!request?.url) return
+    const url = URL.parse(request.url)
+    if (
+      request.method === "POST" &&
+      url?.hostname.endsWith(".wpp.ai") &&
+      /^\/v1\/tools\/.+\/results\/.+\/resources/.test(url.pathname)
+    ) {
+      resourceStarted = Date.now()
+      requests.set(key, { started: resourceStarted, prompt: wppResourcePrompt(request.postData ?? "") })
+    }
+    const artifact = request.method === "GET" ? parseWppArtifact(request.url) : null
+    if (!artifact) return
+    artifactUpdated = Date.now()
+    artifacts.set(new URL(artifact.url).pathname, { started: artifactUpdated, artifact })
+    if (artifacts.size > MAX_RECORDS) artifacts.delete(artifacts.keys().next().value!)
   })
 
   await installInRootAndChildTargets(contents, async (sessionId) => {
@@ -49,6 +104,43 @@ export async function installNetworkWitness(contents: WebContents): Promise<Netw
 
   return {
     summarizeWindow: (sinceMs) => reducer.summarizeWindow(sinceMs),
+    collectArtifacts: async (sinceMs, signal, timeoutMs = 120_000, prompts = []) => {
+      signal?.throwIfAborted()
+      const started = Date.now()
+      // Resource jobs outlive the model stream; their output URLs can arrive before the page displays an image.
+      while (resourceStarted >= sinceMs || prompts.length > 0) {
+        signal?.throwIfAborted()
+        // WPP starts and abandons jobs for partial streamed prompts. Only the final artifact prompts own this response.
+        const belongs = (entry: { started: number; prompt?: string }) =>
+          entry.started >= sinceMs &&
+          (!prompts.length || (entry.prompt !== undefined && prompts.includes(entry.prompt)))
+        const current = Array.from(resources.values()).filter(belongs)
+        const pending =
+          reading.size > 0 ||
+          Array.from(requests.values()).some(belongs) ||
+          current.some((entry) => entry.resource.status === "IN_PROGRESS") ||
+          prompts.some((prompt) => !current.some((entry) => entry.prompt === prompt))
+        if (!pending && Date.now() - Math.max(resourceStarted, artifactUpdated) >= 1500) {
+          const failed = current.find((entry) => entry.resource.status === "FAILED")
+          if (failed)
+            throw Object.assign(new Error(failed.resource.error ?? "WPP image generation failed."), {
+              type: "wpp_image_generation_failed",
+              statusCode: 502,
+            })
+          if (prompts.length) return current.flatMap((entry) => entry.resource.artifacts)
+          break
+        }
+        if (Date.now() - started >= timeoutMs)
+          throw Object.assign(new Error("WPP generated images did not become available before the request deadline."), {
+            type: "wpp_image_timeout",
+            statusCode: 504,
+          })
+        await new Promise((resolve) => setTimeout(resolve, 250))
+      }
+      return Array.from(artifacts.values())
+        .filter((entry) => entry.started >= sinceMs)
+        .map((entry) => entry.artifact)
+    },
   }
 }
 

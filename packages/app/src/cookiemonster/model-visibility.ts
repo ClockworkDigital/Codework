@@ -22,6 +22,9 @@ const cookieMonsterFamilies = new Map([
   ["CM_Gemini-3.7-Flash_Low", "CM_Gemini-3.7-Flash"],
   ["CM_Gemini-3.7-Flash_Medium", "CM_Gemini-3.7-Flash"],
   ["CM_Gemini-3.7-Flash_High", "CM_Gemini-3.7-Flash"],
+  ["CM_Gemini4_Low", "CM_Gemini4"],
+  ["CM_Gemini4_Medium", "CM_Gemini4"],
+  ["CM_Gemini4_High", "CM_Gemini4"],
 ])
 
 export function isSupersededCookieMonsterModel(

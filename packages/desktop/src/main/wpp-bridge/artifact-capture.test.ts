@@ -1,5 +1,16 @@
 import { describe, expect, test } from "bun:test"
-import { isWppArtifactRequest, parseWppArtifact } from "./artifact-capture"
+import { isWppArtifactRequest, parseWppArtifact, wppImagePrompts, wppResourcePrompt } from "./artifact-capture"
+
+test("matches final image artifact prompts to the resource requests WPP creates", () => {
+  expect(wppImagePrompts('<wpp_artifact type="image" identifier="test"> A blue\n circle. </wpp_artifact>')).toEqual([
+    "A blue circle.",
+  ])
+  expect(wppImagePrompts('<wpp_artifact type="article">Text.</wpp_artifact>')).toEqual([])
+  expect(wppResourcePrompt('{"type":"AZURE_GPT_IMAGE_2","input":{"prompt":"A blue circle."},"feature":"CHAT"}')).toBe(
+    "A blue circle.",
+  )
+  expect(wppResourcePrompt("malformed")).toBeUndefined()
+})
 
 // Real presigned resolve URL captured live (reqid=1008): a "plain blue circle" generation. Query
 // signature params are truncated here — only their presence matters to the predicate.
@@ -81,6 +92,12 @@ describe("parseWppArtifact", () => {
     expect(parseWppArtifact("")).toBeNull()
     expect(parseWppArtifact(null)).toBeNull()
     expect(parseWppArtifact(undefined)).toBeNull()
+    expect(parseWppArtifact(GENERATED_IMAGE_URL.replace(".png?", "%ZZ.png?"))).toBeNull()
+    expect(parseWppArtifact(GENERATED_IMAGE_URL.replace(".png?", "%2fescape.png?"))).toBeNull()
+    expect(
+      parseWppArtifact(GENERATED_IMAGE_URL.replace(".amazonaws.com", ".amazonaws.com.attacker.example")),
+    ).toBeNull()
+    expect(parseWppArtifact(GENERATED_IMAGE_URL.replace("https:", "http:"))).toBeNull()
   })
 })
 

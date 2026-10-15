@@ -53,6 +53,44 @@ test("creates opencode.json with the exact CookieMonster project roster", async 
   await rm(dir, { recursive: true, force: true })
 })
 
+test("migrates the shipped Chat Completions provider to Responses without changing user model settings", async () => {
+  const { dir, file } = await tmpFile()
+
+  try {
+    await writeFile(
+      file,
+      JSON.stringify({
+        provider: {
+          cookiemonster: {
+            ...COOKIE_MONSTER_PROVIDER,
+            npm: "@ai-sdk/openai-compatible",
+            models: {
+              "CM_GPT6.1_Sol": {
+                name: "My Sol",
+                modalities: { input: ["text"], output: ["text"] },
+                limit: { context: 123456, output: 5000 },
+              },
+            },
+          },
+        },
+      }),
+    )
+    await ensureO1CodeProvider(file)
+    const provider = JSON.parse(await readFile(file, "utf8")).provider.cookiemonster
+    expect(provider.npm).toBe("@opencode/ai/providers/openai/responses")
+    expect(provider.models["CM_GPT6.1_Sol"]).toMatchObject({
+      name: "My Sol",
+      modalities: { input: ["text"], output: ["text", "image"] },
+      limit: { context: 123456, output: 5000 },
+    })
+    const first = await readFile(file, "utf8")
+    await ensureO1CodeProvider(file)
+    expect(await readFile(file, "utf8")).toBe(first)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
 test("advertises only the Sol 6.1 family with explicit native variants and a medium default", () => {
   const models = JSON.parse(o1CodeConfigContent()).provider.cookiemonster.models
   const family = models["CM_GPT6.1_Sol"]
@@ -370,7 +408,9 @@ for (const hasRenamedModel of [false, true]) {
 
       expect(models["CM_Opus 5 - High"]).toBeUndefined()
       expect(models["CM_Opus5.5-High"]).toEqual(
-        hasRenamedModel ? renamed : COOKIE_MONSTER_PROVIDER.models["CM_Opus5.5-High"],
+        hasRenamedModel
+          ? { ...renamed, modalities: COOKIE_MONSTER_PROVIDER.models["CM_Opus5.5-High"].modalities }
+          : COOKIE_MONSTER_PROVIDER.models["CM_Opus5.5-High"],
       )
       expect(Object.keys(models).sort()).toEqual([...MODEL_IDS, "custom"].sort())
       expect(models.custom).toEqual(other)

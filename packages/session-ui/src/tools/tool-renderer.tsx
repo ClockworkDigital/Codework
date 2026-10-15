@@ -51,6 +51,7 @@ import type {
 import {
   currentToolError,
   currentToolGroupedRead,
+  currentToolImages,
   currentToolInput,
   currentToolMetadata,
   currentToolOutput,
@@ -729,6 +730,7 @@ export function CurrentContextToolGroup(props: {
                                         input={currentToolInput(tool())}
                                         metadata={currentToolMetadata(tool())}
                                         output={currentToolOutput(tool())}
+                                        images={currentToolImages(tool())}
                                         error={currentToolError(tool())}
                                         status={tool().state.status}
                                         defaultOpen={props.toolDefaultOpen?.(tool()) ?? false}
@@ -1122,6 +1124,7 @@ export interface ToolProps {
   tool: string
   sessionID?: string
   output?: string
+  images?: ReturnType<typeof currentToolImages>
   status?: string
   hideDetails?: boolean
   defaultOpen?: boolean
@@ -1413,8 +1416,38 @@ export function ToolDisplay(
             <Dynamic component={render()} {...props} />
           </Match>
         </Switch>
+        <Show when={props.images?.length}>
+          <ToolImages images={props.images!} onContentRendered={props.onContentRendered} />
+        </Show>
       </div>
     </Show>
+  )
+}
+
+function ToolImages(props: { images: ReturnType<typeof currentToolImages>; onContentRendered?: () => void }) {
+  const i18n = useI18n()
+  const previewImages = createImagePreview()
+  let root!: HTMLDivElement
+
+  createEffect(() => {
+    props.images
+    previewImages(root)
+    props.onContentRendered?.()
+  })
+
+  return (
+    <div ref={root} data-component="tool-images">
+      <For each={props.images}>
+        {(image) => (
+          <img
+            src={image.uri}
+            alt={image.name || i18n.t("ui.imagePreview.alt")}
+            onLoad={() => props.onContentRendered?.()}
+            onError={() => props.onContentRendered?.()}
+          />
+        )}
+      </For>
+    </div>
   )
 }
 

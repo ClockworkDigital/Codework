@@ -118,6 +118,18 @@ export const MODEL_PROFILES = {
     agentName: "CM_Gemini-3.7-Flash_High",
     toolFormat: "xml",
   },
+  CM_Gemini4_Low: {
+    agentName: "CM_Gemini4_Low",
+    toolFormat: "xml",
+  },
+  CM_Gemini4_Medium: {
+    agentName: "CM_Gemini4_Medium",
+    toolFormat: "xml",
+  },
+  CM_Gemini4_High: {
+    agentName: "CM_Gemini4_High",
+    toolFormat: "xml",
+  },
   "CM_GPT6.1_Sol": {
     defaultReasoningEffort: "medium",
     reasoningEfforts: {
@@ -182,6 +194,15 @@ export const MODEL_PROFILES = {
       low: "CM_Gemini-3.7-Flash_Low",
       medium: "CM_Gemini-3.7-Flash_Medium",
       high: "CM_Gemini-3.7-Flash_High",
+    },
+    toolFormat: "xml",
+  },
+  CM_Gemini4: {
+    defaultReasoningEffort: "medium",
+    reasoningEfforts: {
+      low: "CM_Gemini4_Low",
+      medium: "CM_Gemini4_Medium",
+      high: "CM_Gemini4_High",
     },
     toolFormat: "xml",
   },

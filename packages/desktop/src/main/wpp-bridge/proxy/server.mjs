@@ -1,5 +1,6 @@
 import http from "node:http";
 import { handleChatCompletions, listModels, writeJson } from "./openaiCompat.mjs";
+import { handleResponses } from "./responses.mjs";
 import { extensionBridge } from "./extensionBridge.mjs";
 import { renderStatusPage } from "./statusPage.mjs";
 import { shouldIgnoreListenError } from "./server-startup.mjs";
@@ -102,7 +103,7 @@ async function route(request, response, actions = {}) {
     return;
   }
 
-  if (request.method === "POST" && url.pathname === "/v1/chat/completions") {
+  if (request.method === "POST" && ["/v1/chat/completions", "/v1/responses"].includes(url.pathname)) {
     writeCors(response, request);
     const controller = new AbortController();
     const abort = () => {
@@ -112,7 +113,8 @@ async function route(request, response, actions = {}) {
     response.once("close", abort);
     try {
       const body = await readJson(request);
-      await handleChatCompletions(request, response, body, { signal: controller.signal });
+      const handle = url.pathname === "/v1/responses" ? handleResponses : handleChatCompletions;
+      await handle(request, response, body, { signal: controller.signal });
     } finally {
       request.removeListener("aborted", abort);
       response.removeListener("close", abort);

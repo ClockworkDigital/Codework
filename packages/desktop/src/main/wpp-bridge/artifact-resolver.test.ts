@@ -41,6 +41,22 @@ describe("artifactTargetDir", () => {
 })
 
 describe("persistArtifacts", () => {
+  test("skips a disk write failure and forwards cancellation to the signed download", async () => {
+    const signal = new AbortController().signal
+    const result = await persistArtifacts([IMAGE], "/target", {
+      signal,
+      fetch: async (_url, options) => {
+        expect(options?.signal).toBeDefined()
+        expect(options?.redirect).toBe("error")
+        return fakeResponse(new Uint8Array([1]))
+      },
+      mkdir: async () => {},
+      writeFile: async () => {
+        throw new Error("disk full")
+      },
+    })
+    expect(result).toEqual([])
+  })
   test("returns [] for an empty batch without touching fs", async () => {
     let mkdirCalls = 0
     const result = await persistArtifacts([], "/target", { mkdir: async () => void (mkdirCalls += 1) })
@@ -63,8 +79,38 @@ describe("persistArtifacts", () => {
     })
 
     expect(fetched).toEqual([IMAGE.url])
-    expect(writes).toEqual([{ path: join("/target", "pic.png"), bytes: 4 }])
-    expect(result).toEqual([{ url: IMAGE.url, kind: "image", path: join("/target", "pic.png"), bytes: 4 }])
+    expect(writes).toEqual([{ path: join("/target", "0a7182e61934-pic.png"), bytes: 4 }])
+    expect(result).toEqual([
+      {
+        url: IMAGE.url,
+        kind: "image",
+        path: join("/target", "0a7182e61934-pic.png"),
+        bytes: 4,
+        mime: "image/png",
+        data: "AQIDBA==",
+      },
+    ])
+  })
+
+  test("keeps separate resource jobs that both name their output 0.png", async () => {
+    const writes: string[] = []
+    const result = await persistArtifacts(
+      ["first", "second"].map((job) => ({
+        ...IMAGE,
+        url: IMAGE.url.replace("/x/y/pic.png", `/${job}/0.png`),
+        fileName: "0.png",
+      })),
+      "/target",
+      {
+        fetch: async () => fakeResponse(new Uint8Array([1])),
+        mkdir: async () => {},
+        writeFile: async (path) => {
+          writes.push(path)
+        },
+      },
+    )
+    expect(result).toHaveLength(2)
+    expect(new Set(writes).size).toBe(2)
   })
 
   test("skips an item whose fetch rejects, keeping the rest (best-effort)", async () => {
@@ -82,7 +128,7 @@ describe("persistArtifacts", () => {
     })
 
     expect(result).toHaveLength(1)
-    expect(result[0].path).toBe(join("/target", "good.png"))
+    expect(result[0].path.endsWith("-good.png")).toBe(true)
   })
 
   test("skips a non-ok HTTP response", async () => {

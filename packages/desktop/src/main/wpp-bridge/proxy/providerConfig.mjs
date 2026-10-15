@@ -69,7 +69,7 @@ function projectModel(agentName) {
     cost: agentName.startsWith("CM_Opus") ? OPUS_COST : GPT_COST,
     modalities: {
       input: ["text", "image"],
-      output: ["text"],
+      output: ["text", "image"],
     },
     limit: {
       context: O1_CODE_CONTEXT_LIMIT,
@@ -79,7 +79,7 @@ function projectModel(agentName) {
 }
 
 export const COOKIE_MONSTER_PROVIDER = {
-  npm: "@ai-sdk/openai-compatible",
+  npm: "@opencode/ai/providers/openai/responses",
   name: "CookieMonster",
   options: {
     baseURL: "http://127.0.0.1:8787/v1",
@@ -119,7 +119,7 @@ function isLegacyO1CodeProvider(provider) {
 
 function isCookieMonsterProvider(provider) {
   return (
-    provider?.npm === COOKIE_MONSTER_PROVIDER.npm &&
+    [COOKIE_MONSTER_PROVIDER.npm, "@ai-sdk/openai-compatible"].includes(provider?.npm) &&
     provider?.name === COOKIE_MONSTER_PROVIDER.name &&
     provider?.options?.baseURL === COOKIE_MONSTER_PROVIDER.options.baseURL &&
     provider?.options?.apiKey === COOKIE_MONSTER_PROVIDER.options.apiKey
@@ -227,6 +227,10 @@ export async function ensureO1CodeProvider(file = o1CodeConfigFile()) {
     }
 
     if (!isCookieMonsterProvider(config.provider[key])) continue
+    if (config.provider[key].npm !== value.npm) {
+      config.provider[key].npm = value.npm
+      changed = true
+    }
 
     const existingModels = config.provider[key]?.models
     if (!existingModels || typeof existingModels !== "object" || Array.isArray(existingModels)) continue
@@ -252,9 +256,15 @@ export async function ensureO1CodeProvider(file = o1CodeConfigFile()) {
           : {}
       const mergedCost = { ...seedModel.cost, ...existingCost }
       const family = existingModel.family ?? seedModel.family
-      if (JSON.stringify(existingCost) === JSON.stringify(mergedCost) && existingModel.family === family) continue
+      const modalities = { ...seedModel.modalities, ...existingModel.modalities, output: seedModel.modalities.output }
+      if (
+        JSON.stringify(existingCost) === JSON.stringify(mergedCost) &&
+        existingModel.family === family &&
+        JSON.stringify(existingModel.modalities) === JSON.stringify(modalities)
+      )
+        continue
 
-      existingModels[modelKey] = { ...existingModel, family, cost: mergedCost }
+      existingModels[modelKey] = { ...existingModel, family, cost: mergedCost, modalities }
       changed = true
     }
   }

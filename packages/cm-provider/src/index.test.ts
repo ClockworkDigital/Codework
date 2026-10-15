@@ -25,8 +25,16 @@ test("V2 registers the CookieMonster roster and official Figma tools and skills"
         .sort(),
     ).toEqual([...MODEL_IDS].sort())
     expect(models.find((model) => model.providerID === "cookiemonster")).toMatchObject({
-      capabilities: { tools: true, input: ["text", "image"], output: ["text"] },
+      capabilities: { tools: true, input: ["text", "image"], output: ["text", "image"] },
       limit: { context: 250_000, output: 128_000 },
+    })
+    expect(models.find((model) => model.providerID === "cookiemonster" && model.id === "CM_Gemini4")).toMatchObject({
+      settings: { reasoningEffort: "medium" },
+      variants: [
+        { id: "low", settings: { reasoningEffort: "low" } },
+        { id: "medium", settings: { reasoningEffort: "medium" } },
+        { id: "high", settings: { reasoningEffort: "high" } },
+      ],
     })
     expect((await host.mcp.list()).data).toEqual(expect.arrayContaining([expect.objectContaining({ name: "figma" })]))
     expect((await host.skill.list()).data.map((skill) => skill.id)).toContain("figma-design-to-code")
@@ -36,30 +44,49 @@ test("V2 registers the CookieMonster roster and official Figma tools and skills"
 })
 
 test.each(["native", "legacy"] as const)(
-  "V2 reaches WPP with stable runtime identity through %s provider config",
+  "V2 persists WPP images with stable runtime identity through %s provider config",
   async (kind) => {
     const directory = await mkdtemp(join(tmpdir(), "cm-v2-request-"))
     const headers: Headers[] = []
     const server = Bun.serve({
       port: 0,
       async fetch(request) {
-        expect(new URL(request.url).pathname).toBe("/v1/chat/completions")
+        expect(new URL(request.url).pathname).toBe("/v1/responses")
         const body: unknown = await request.json()
         expect(body).toMatchObject({ model: "CM_GPT6_Sol_High", stream: true })
         headers.push(request.headers)
+        const image = {
+          type: "image_generation_call",
+          id: `image_${headers.length}`,
+          status: "completed",
+          output_format: "png",
+          result: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+        }
+        const response = {
+          id: `resp_${headers.length}`,
+          object: "response",
+          created_at: 0,
+          status: "completed",
+          model: "CM_GPT6_Sol_High",
+          output: [image],
+          usage: { input_tokens: 10, output_tokens: 2, total_tokens: 12 },
+        }
         return new Response(
           [
-            { choices: [{ index: 0, delta: { role: "assistant", content: "ready" }, finish_reason: null }] },
+            { type: "response.created", response: { ...response, status: "in_progress", output: [] } },
             {
-              choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
-              usage: { prompt_tokens: 10, completion_tokens: 2 },
+              type: "response.output_item.added",
+              output_index: 0,
+              item: { ...image, result: null, status: "in_progress" },
             },
+            { type: "response.output_item.done", output_index: 0, item: image },
+            { type: "response.completed", response },
           ]
             .map(
-              (chunk) =>
-                `data: ${JSON.stringify({ id: "cm-test", object: "chat.completion.chunk", created: 0, ...chunk })}\n\n`,
+              (event, sequence_number) =>
+                `event: ${event.type}\ndata: ${JSON.stringify({ ...event, sequence_number })}\n\n`,
             )
-            .join("") + "data: [DONE]\n\n",
+            .join(""),
           { headers: { "content-type": "text/event-stream" } },
         )
       },
@@ -83,7 +110,6 @@ test.each(["native", "legacy"] as const)(
               : {
                   providers: {
                     cookiemonster: {
-                      package: "@opencode/ai/providers/openai-compatible",
                       settings: { baseURL: `${server.url}v1`, apiKey: "local" },
                       models: { CM_GPT6_Sol_High: {} },
                     },
@@ -96,7 +122,7 @@ test.each(["native", "legacy"] as const)(
         plugins: [cookiemonster],
       })
       const session = await host.sessions.create({ title: "WPP transport", location: { directory } })
-      for (const text of ["Say ready", "Say ready again"]) {
+      for (const text of ["Generate an image", "Generate another image"]) {
         await host.sessions.prompt({ sessionID: session.id, text })
         await host.sessions.wait({ sessionID: session.id })
         expect((await host.sessions.get({ sessionID: session.id })).outcome).toBe("succeeded")
@@ -104,7 +130,18 @@ test.each(["native", "legacy"] as const)(
           (await host.message.list({ sessionID: session.id })).data.some(
             (message) =>
               message.type === "assistant" &&
-              message.content.some((part) => part.type === "text" && part.text === "ready"),
+              message.content.some(
+                (part) =>
+                  part.type === "tool" &&
+                  part.name === "image_generation" &&
+                  part.state.status === "completed" &&
+                  part.state.content?.some(
+                    (item) =>
+                      item.type === "file" &&
+                      item.mime === "image/png" &&
+                      item.uri.startsWith("data:image/png;base64,"),
+                  ),
+              ),
           ),
         ).toBe(true)
       }

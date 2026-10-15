@@ -2,6 +2,12 @@ import { describe, expect, test } from "bun:test"
 import { StreamGate } from "./streamGate.mjs"
 
 describe("StreamGate sentence quarantine", () => {
+  test("keeps image-artifact markup out of streamed prose, including split opening tags", () => {
+    const gate = new StreamGate()
+    expect(gate.update("Here is the requested image.\n<wpp_").delta).toBe("Here is the requested image.\n")
+    expect(gate.update('Here is the requested image.\n<wpp_artifact type="image">A blue circle.').delta).toBe("")
+    expect(gate.state).toBe("suppressed")
+  })
   test("streams a completed sentence only after the next sentence begins", () => {
     const gate = new StreamGate({ sentenceQuarantine: true })
 

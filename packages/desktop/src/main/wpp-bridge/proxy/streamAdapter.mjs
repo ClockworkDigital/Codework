@@ -230,3 +230,17 @@ function normalizeUsage(usage, message = {}) {
 function toolCallsForUsage(toolCalls) {
   return Array.isArray(toolCalls) && toolCalls.length > 0 ? JSON.stringify(toolCalls) : "";
 }
+
+export const ChatCompletions = {
+  idPrefix: "chatcmpl",
+  createChatCompletionResponse,
+  openChatCompletionStream,
+  writeChatCompletionBody,
+  writeChatCompletionError,
+  writeChatCompletionStream,
+  streamChunkBase,
+  writeContentDelta,
+  writeContentBody,
+  writeToolCallChunks,
+  finishChatCompletion,
+};

@@ -1,5 +1,160 @@
-import { describe, expect, test } from "bun:test"
-import { createCdpNetworkReducer, reduceCdpNetworkEvent, summarizeCdpWindow } from "./cdp-network-recorder"
+// SAFETY: The synthetic WebContents emits real CDP wire events into the production witness.
+/* oxlint-disable anti-slop/no-chained-type-assertions, anti-slop/require-safety-comment-for-type-assertion */
+import { describe, expect, test, setSystemTime } from "bun:test"
+import { EventEmitter } from "node:events"
+import type { WebContents } from "electron"
+import {
+  createCdpNetworkReducer,
+  installNetworkWitness,
+  reduceCdpNetworkEvent,
+  summarizeCdpWindow,
+} from "./cdp-network-recorder"
+
+test("generated artifacts wait for async resources and remain scoped to the submitted job", async () => {
+  const dbg = Object.assign(new EventEmitter(), { isAttached: () => true, sendCommand: async () => ({}) })
+  const contents = { debugger: dbg } as unknown as WebContents
+  const witness = await installNetworkWitness(contents)
+  const url = "https://wpp-ai-base-prd-persistentdatabucket.s3.eu-west-1.amazonaws.com/resource/test/"
+  const request = (name: string) =>
+    dbg.emit(
+      "message",
+      {},
+      "Network.requestWillBeSent",
+      { request: { method: "GET", url: `${url}${name}.png?X-Amz-Signature=test` } },
+      "iframe-1",
+    )
+
+  try {
+    setSystemTime(1000)
+    request("previous-job")
+    setSystemTime(2000)
+    dbg.emit(
+      "message",
+      {},
+      "Network.requestWillBeSent",
+      {
+        requestId: "resource",
+        request: { method: "POST", url: "https://open-web-assistant-cs.wpp.ai/v1/tools/image/results/job/resources" },
+      },
+      "iframe-1",
+    )
+    const pending = witness.collectArtifacts(1500)
+    setSystemTime(2100)
+    request("first")
+    request("first")
+    setSystemTime(2300)
+    request("second")
+    setSystemTime(4000)
+    dbg.emit("message", {}, "Network.loadingFinished", { requestId: "resource" }, "iframe-1")
+    expect((await pending).map((artifact) => artifact.fileName)).toEqual(["first.png", "second.png"])
+    expect(witness.summarizeWindow(1500).cdpRequestSeen).toBe(false)
+    await expect(witness.collectArtifacts(1500, AbortSignal.abort())).rejects.toBeDefined()
+  } finally {
+    setSystemTime()
+  }
+})
+
+for (const status of ["AVAILABLE", "FAILED"]) {
+  test(`observes the resource job's terminal ${status} result even before the page fetches an image`, async () => {
+    const url =
+      "https://wpp-ai-base-prd-persistentdatabucket.s3.eu-west-1.amazonaws.com/resource/image/0.png?X-Amz-Signature=test"
+    const bodies = [
+      { data: { resourceId: "image-job", status: "IN_PROGRESS" } },
+      { data: { resourceId: "image-job", status, output: { success: [url], fail: "No images were generated" } } },
+    ]
+    const dbg = Object.assign(new EventEmitter(), {
+      isAttached: () => true,
+      sendCommand: async () => ({ body: JSON.stringify(bodies.shift()) }),
+    })
+    const witness = await installNetworkWitness({ debugger: dbg } as unknown as WebContents)
+    const poll = () => {
+      dbg.emit(
+        "message",
+        {},
+        "Network.requestWillBeSent",
+        {
+          requestId: "poll",
+          request: {
+            method: "POST",
+            url: "https://open-web-agent-builder-cs.wpp.ai/v1/tools/project/results/chat/resources",
+          },
+        },
+        "iframe-1",
+      )
+      dbg.emit("message", {}, "Network.loadingFinished", { requestId: "poll" }, "iframe-1")
+    }
+
+    try {
+      setSystemTime(1000)
+      poll()
+      await Promise.resolve()
+      await Promise.resolve()
+      const pending = witness.collectArtifacts(500)
+      setSystemTime(2000)
+      poll()
+      await Promise.resolve()
+      await Promise.resolve()
+      setSystemTime(4000)
+      if (status === "FAILED")
+        await expect(pending).rejects.toMatchObject({
+          type: "wpp_image_generation_failed",
+          message: "No images were generated",
+        })
+      if (status === "AVAILABLE") expect((await pending).map((artifact) => artifact.url)).toEqual([url])
+    } finally {
+      setSystemTime()
+    }
+  })
+}
+
+test("ignores abandoned jobs for partial streamed artifact prompts and keeps equal filenames from final jobs", async () => {
+  const url = "https://wpp-ai-base-prd-persistentdatabucket.s3.eu-west-1.amazonaws.com/resource/"
+  const prompts = ["A single blue circle.", "A single green square."]
+  const bodies = [
+    { data: { resourceId: "partial", status: "IN_PROGRESS" } },
+    ...prompts.map((_, index) => ({
+      data: {
+        resourceId: `final-${index}`,
+        status: "AVAILABLE",
+        output: { success: [`${url}${index}/0.png?X-Amz-Signature=test`] },
+      },
+    })),
+  ]
+  const dbg = Object.assign(new EventEmitter(), {
+    isAttached: () => true,
+    sendCommand: async () => ({ body: JSON.stringify(bodies.shift()) }),
+  })
+  const witness = await installNetworkWitness({ debugger: dbg } as unknown as WebContents)
+
+  try {
+    setSystemTime(1000)
+    for (const prompt of ["A single", ...prompts]) {
+      dbg.emit(
+        "message",
+        {},
+        "Network.requestWillBeSent",
+        {
+          requestId: prompt,
+          request: {
+            method: "POST",
+            url: "https://open-web-assistant-cs.wpp.ai/v1/tools/project/results/chat/resources",
+            postData: JSON.stringify({ input: { prompt } }),
+          },
+        },
+        "iframe-1",
+      )
+      dbg.emit("message", {}, "Network.loadingFinished", { requestId: prompt }, "iframe-1")
+      await Promise.resolve()
+      await Promise.resolve()
+    }
+    setSystemTime(4000)
+    const result = await witness.collectArtifacts(500, AbortSignal.timeout(1000), 1000, prompts)
+    expect(result.map((artifact) => artifact.fileName)).toEqual(["0.png", "0.png"])
+    expect(result.map((artifact) => new URL(artifact.url).pathname)).toEqual(["/resource/0/0.png", "/resource/1/0.png"])
+  } finally {
+    setSystemTime()
+  }
+})
 
 describe("cdp network reducer", () => {
   test("summarizes a completed model request", () => {
