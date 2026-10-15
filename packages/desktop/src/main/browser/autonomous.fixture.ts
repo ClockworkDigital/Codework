@@ -5,6 +5,7 @@ import { once } from "node:events"
 import { createServer } from "node:http"
 import { BrowserWindow, dialog, session } from "electron"
 import type { ToolContext } from "@cookiemonster/cm-browser/tool"
+import type { BrowserTabs } from "@cookiemonster/cm-browser/panel"
 import { browserTools } from "../../../../cm-browser/src/tools"
 import { routeBrowserRequest } from "./router"
 import { browserCommand, browserLinkContext, browserViewport, registerBrowserOwner } from "./tabs"
@@ -31,6 +32,36 @@ export async function autonomousBrowserSmoke() {
   const owner = registerBrowserOwner(win)
   const panels = desktopPanelFixture(owner)
   const task = "autonomous-browser"
+  const send = win.webContents.send
+  let activeID: string | undefined
+  let replaceContext = false
+
+  const render: typeof win.webContents.send = (channel, ...args) => {
+    send.call(win.webContents, channel, ...args)
+
+    if (channel !== "browser-tabs") return
+    const value = args[0] as BrowserTabs
+
+    if (value.sessionID !== task || !value.activeID || value.activeID === activeID) return
+    activeID = value.activeID
+    // The live renderer replaces its viewport lease when a different browser panel mounts.
+    queueMicrotask(() => {
+      if (replaceContext) {
+        browserLinkContext(owner, task, "replacement")
+
+        return
+      }
+
+      browserViewport(owner, {
+        sessionID: task,
+        lease: value.activeID!,
+        bounds: { x: 0, y: 0, width: 760, height: 540 },
+      })
+    })
+  }
+
+  win.webContents.send = render
+
   const original = dialog.showMessageBox
   let confirmations = 0
   let leave = false
@@ -85,15 +116,16 @@ export async function autonomousBrowserSmoke() {
     win.show()
     browserLinkContext(owner, task, "autonomous")
     await session.fromPartition(BROWSER_PARTITION).cookies.set({ url, name: "cm_session", value: "signed-in-fixture" })
+    const privateID = (await browserCommand(owner, task, { op: "new" })).activeID!
     const tabID = (await text("browser_create_tab", {})).split(" ")[1]
     assert(tabID)
     assert.equal(owner.attached?.id, tabID, "Create waits for native blank-tab readiness")
+    win.webContents.send = send
     await run("desktop_set_panel", { view: "review" })
     assert.equal(Boolean(owner.attached), false)
     await run("desktop_set_panel", { view: "hidden" })
     await run("desktop_set_panel", { view: "browser", tabID })
     assert.equal(owner.attached?.id, tabID)
-    const privateID = (await browserCommand(owner, task, { op: "new" })).activeID!
     await run("browser_select_tab", { tabID })
     viewport()
     assert.match(await text("browser_navigate", { tabID, url }), /signed-in-fixture/)
@@ -154,10 +186,19 @@ export async function autonomousBrowserSmoke() {
     await run("browser_close_tab", { tabID })
     assert.equal(owner.groups.get(task)?.tabs.length, 1)
 
+    replaceContext = true
+    win.webContents.send = render
+    await assert.rejects(text("browser_create_tab", {}), /access_denied/)
+    win.webContents.send = send
+    assert(
+      owner.groups.get(task)?.tabs.every((tab) => !tab.agentAccess),
+      "Context replacement cannot inherit pending tab access",
+    )
+
     // A saved task must not force manual restoration before autonomous browsing.
     const recovered = "autonomous-recovered"
     saveTabs({ sessionID: recovered, tabs: [{ url, title: "Saved private tab" }], active: 0, closed: [] })
-    browserViewport(owner, { sessionID: task, lease: "autonomous", bounds: null })
+    browserViewport(owner, { sessionID: task, lease: owner.viewport!.lease, bounds: null })
     browserLinkContext(owner, recovered, "recovered")
     context.sessionID = recovered
     const restoredAgent = (await text("browser_create_tab", {})).split(" ")[1]

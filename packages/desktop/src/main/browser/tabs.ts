@@ -3284,6 +3284,7 @@ function resolveNativeTabAction(sessionID: string, request: TabRequest): NativeT
   if (owner.panelRequest) return undefined
   const ownerID = owner.win.webContents.id
   const epoch = owner.taskEpoch
+  const link = owner.linkContext
   const lifecycle = owner.screenshotEpoch
   const group = owner.groups.get(sessionID)
   const activeID = group?.activeID
@@ -3421,7 +3422,9 @@ function resolveNativeTabAction(sessionID: string, request: TabRequest): NativeT
             browserAgentEpoch() !== accessEpoch ||
             browserTaskPaused(sessionID) ||
             browserTaskEpoch(sessionID) !== taskEpoch ||
-            owner.taskEpoch !== epoch ||
+            // Mounting the new panel replaces its viewport lease within this task.
+            owner.linkContext !== link ||
+            (owner.viewport && owner.viewport.sessionID !== sessionID) ||
             owner.screenshotEpoch !== lifecycle ||
             owner.shutting ||
             !owner.win.isVisible() ||

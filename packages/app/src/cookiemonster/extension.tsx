@@ -135,7 +135,15 @@ const setup: Setup<typeof definition> = (ctx) => {
 
     if (pending !== request || ctx.signal.aborted) return
 
-    if (await browser.acknowledgePanel?.(request)) {
+    const acknowledgement = { id: request.id, sessionID: request.sessionID }
+
+    if (
+      await browser.acknowledgePanel?.(
+        request.view === "browser"
+          ? { ...acknowledgement, view: request.view, tabID: request.tabID }
+          : { ...acknowledgement, view: request.view },
+      )
+    ) {
       pending = undefined
 
       return
