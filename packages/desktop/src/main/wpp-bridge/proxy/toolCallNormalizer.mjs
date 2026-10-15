@@ -227,6 +227,7 @@ export function parseAnthropicXmlToolCalls(content) {
   }
 
   const calls = [];
+  const identities = new Map();
   const invokeRegex = /<invoke\b([^>]*)>([\s\S]*?)<\/invoke>/gi;
   let match;
 
@@ -235,7 +236,20 @@ export function parseAnthropicXmlToolCalls(content) {
     const name = attributes.name;
     if (!name) continue;
     const body = match[2];
-    calls.push(normalizeAnthropicInvoke({ id: attributes.id || "", name, args: extractInvokeParameters(body, name) }));
+    const call = normalizeAnthropicInvoke({ id: attributes.id || "", name, args: extractInvokeParameters(body, name) });
+    if (call.id) {
+      const signature = JSON.stringify(call);
+      if (identities.has(call.id)) {
+        if (identities.get(call.id) !== signature) {
+          throw Object.assign(new Error("The WPP agent reused a tool call ID for different calls."), {
+            statusCode: 502, type: "o1_code_conflicting_tool_call"
+          });
+        }
+        continue;
+      }
+      identities.set(call.id, signature);
+    }
+    calls.push(call);
   }
 
   return calls.length > 0 ? calls : null;

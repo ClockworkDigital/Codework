@@ -21,7 +21,7 @@ describe("WPP Responses compatibility", () => {
           stream,
         },
         {
-        bridge: bridge('<wpp_artifact type="image">Draw blue circles.</wpp_artifact>\nHere are the circles.', [
+          bridge: bridge('<wpp_artifact type="image">Draw blue circles.</wpp_artifact>\nHere are the circles.', [
             { mime: "image/png", data: PNG },
             { mime: "image/jpeg", data: "AQID" },
           ]),
@@ -120,6 +120,73 @@ describe("WPP Responses compatibility", () => {
     expect(result.output).toHaveLength(1)
     expect(result.output[0]).toMatchObject({ type: "function_call", name: "read", arguments: "{}" })
   })
+
+  for (const ids of [["call_read"], ["call_read", "call_read"], ["call_read", "call_other"]])
+    test(`the production parser receives one lifecycle per XML identity: ${ids.join(", ")}`, async () => {
+      const calls = ids
+        .map((id) => `<invoke id="${id}" name="read"><parameter name="filePath">a.txt</parameter></invoke>`)
+        .join("")
+      const server = createServer(async (request, response) => {
+        await handleResponses(request, response, await readJson(request), {
+          bridge: bridge(`<function_calls>${calls}</function_calls>`),
+        })
+      })
+      await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve))
+      const ai = AI.make()
+      try {
+        const model = OpenAI.configure({
+          apiKey: "fixture",
+          baseURL: `http://127.0.0.1:${server.address().port}/v1`,
+        }).responses("CM_GPT6.1_Sol")
+        const response = await ai.llm.generate({
+          model,
+          messages: [{ role: "user", content: [{ type: "text", text: "Read a.txt." }] }],
+          tools: [
+            {
+              name: "read",
+              description: "Read a file",
+              inputSchema: { type: "object", properties: { filePath: { type: "string" } } },
+            },
+          ],
+        })
+        for (const type of ["tool-input-start", "tool-input-end", "tool-call"])
+          expect(response.events.filter((event) => event.type === type).map((event) => event.id)).toEqual([
+            ...new Set(ids),
+          ])
+      } finally {
+        await ai.dispose()
+        await new Promise((resolve) => server.close(resolve))
+      }
+    })
+
+  for (const [name, file] of [
+    ["read", "b.txt"],
+    ["write", "a.txt"],
+  ])
+    test(`rejects a reused XML identity with conflicting payload: ${name} ${file}`, async () => {
+      const response = writer()
+      await handleResponses(
+        { headers: {} },
+        response,
+        {
+          model: "CM_GPT6.1_Sol",
+          stream: true,
+          input: "Read a file.",
+          tools: [{ type: "function", name: "read", parameters: { type: "object" } }],
+        },
+        {
+          bridge: bridge(`<function_calls>
+      <invoke id="call_read" name="read"><parameter name="filePath">a.txt</parameter></invoke>
+      <invoke id="call_read" name="${name}"><parameter name="filePath">${file}</parameter></invoke>
+    </function_calls>`),
+        },
+      )
+      expect(events(response).at(-1)).toMatchObject({
+        type: "response.failed",
+        response: { error: { code: "o1_code_conflicting_tool_call" } },
+      })
+      expect(events(response).some((event) => event.item?.type === "function_call")).toBe(false)
+    })
 
   test("returns image-only output and rejects unsupported inputs before running WPP", async () => {
     const response = writer()
