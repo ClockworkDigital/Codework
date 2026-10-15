@@ -24,6 +24,7 @@ export function SessionTabAvatar(props: {
 
   return (
     <SessionTabAvatarView
+      sessionID={props.sessionId}
       project={props.project}
       directory={props.directory}
       unread={state.unread()}
@@ -33,6 +34,7 @@ export function SessionTabAvatar(props: {
 }
 
 export function SessionTabAvatarView(props: {
+  sessionID?: string
   project?: LocalProject
   directory: string
   unread: boolean
@@ -50,7 +52,7 @@ export function SessionTabAvatarView(props: {
         />
       }
     >
-      <SessionProgressIndicatorV2 />
+      <SessionProgressIndicatorV2 animationKey={props.sessionID} />
     </Show>
   )
 }

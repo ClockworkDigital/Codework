@@ -1,5 +1,6 @@
 import { createUniqueId, splitProps, type ComponentProps } from "solid-js"
 import "./session-progress-indicator-v2.css"
+import { Loading, useLoadingAnimations } from "@opencode/ui/loading"
 
 const frames = new URL("./session-progress-indicator-v2-1x.png", import.meta.url).href
 
@@ -10,8 +11,10 @@ const dots = Array.from({ length: 25 }, (_, index) => {
   return `M${x} ${y}h2v2h-2z`
 }).join("")
 
-export function SessionProgressIndicatorV2(props: ComponentProps<"svg">) {
-  const [local, rest] = splitProps(props, ["class", "classList", "width", "height"])
+export function SessionProgressIndicatorV2(props: ComponentProps<"svg"> & { animationKey?: string }) {
+  if (useLoadingAnimations()) return <Loading {...props} data-component="session-progress-indicator-v2" />
+
+  const [local, rest] = splitProps(props, ["class", "classList", "width", "height", "animationKey"])
   const id = createUniqueId()
   const filter = `session-progress-indicator-filter-${id}`
   const clip = `session-progress-indicator-clip-${id}`

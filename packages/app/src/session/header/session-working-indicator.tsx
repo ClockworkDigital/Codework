@@ -37,7 +37,7 @@ export function SessionWorkingIndicator(props: { sessionID?: string }) {
           "animate-out fade-out fill-mode-forwards": presence.animate() && !presence.show(),
         }}
       >
-        <SessionProgressIndicatorV2 class="shrink-0" />
+        <SessionProgressIndicatorV2 animationKey={props.sessionID} class="shrink-0" />
       </span>
     </Show>
   )

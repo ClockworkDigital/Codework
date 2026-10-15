@@ -124,7 +124,7 @@ export function BrowserTabStrip(props: {
                   <Show
                     when={!tab.loading}
                     fallback={
-                      <Show when={import.meta.env.VITE_CM_BRAND} fallback={<span data-slot="browser-tab-spinner" />}>
+                      <Show when={import.meta.env.CM_BRAND} fallback={<span data-slot="browser-tab-spinner" />}>
                         <Spinner class="size-3.5" />
                       </Show>
                     }

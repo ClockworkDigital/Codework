@@ -18,6 +18,8 @@ import { TabsProvider } from "@/shell/tabs/tabs"
 import { ErrorPage } from "@/shell/errors/error"
 import { AppRoutes, File, preloadRoute } from "@/shell/routes/routes"
 import { ExtensionRoot } from "@/runtime/extension/root"
+import { LoadingAnimationProvider } from "@opencode/ui/loading"
+import { cmLoading } from "@/cookiemonster/cm-loading"
 
 export { preloadRoute }
 
@@ -53,34 +55,36 @@ export function AppBaseProviders(
   }>,
 ) {
   return (
-    <MetaProvider>
-      <Font />
-      <ThemeProvider
-        onThemeApplied={(_, mode, scheme) => {
-          props.onThemeApplied?.(mode, scheme)
-        }}
-      >
-        <LanguageProvider locale={props.locale} onNativeTranslations={props.onNativeTranslations}>
-          <UiI18nBridge>
-            <ErrorBoundary
-              fallback={(error) => {
-                void import("@sentry/solid").then(({ captureException }) => captureException(error))
+    <LoadingAnimationProvider value={import.meta.env.CM_BRAND ? cmLoading : undefined}>
+      <MetaProvider>
+        <Font />
+        <ThemeProvider
+          onThemeApplied={(_, mode, scheme) => {
+            props.onThemeApplied?.(mode, scheme)
+          }}
+        >
+          <LanguageProvider locale={props.locale} onNativeTranslations={props.onNativeTranslations}>
+            <UiI18nBridge>
+              <ErrorBoundary
+                fallback={(error) => {
+                  void import("@sentry/solid").then(({ captureException }) => captureException(error))
 
-                return <ErrorPage error={error} />
-              }}
-            >
-              <QueryProvider>
-                <DialogProvider>
-                  <ExtensionRoot>
-                    <FileComponentProvider component={File}>{props.children}</FileComponentProvider>
-                  </ExtensionRoot>
-                </DialogProvider>
-              </QueryProvider>
-            </ErrorBoundary>
-          </UiI18nBridge>
-        </LanguageProvider>
-      </ThemeProvider>
-    </MetaProvider>
+                  return <ErrorPage error={error} />
+                }}
+              >
+                <QueryProvider>
+                  <DialogProvider>
+                    <ExtensionRoot>
+                      <FileComponentProvider component={File}>{props.children}</FileComponentProvider>
+                    </ExtensionRoot>
+                  </DialogProvider>
+                </QueryProvider>
+              </ErrorBoundary>
+            </UiI18nBridge>
+          </LanguageProvider>
+        </ThemeProvider>
+      </MetaProvider>
+    </LoadingAnimationProvider>
   )
 }
 

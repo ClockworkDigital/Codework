@@ -251,6 +251,7 @@ export function SessionRunningMenu(props: {
                     >
                       {/* Built-in agents have theme tokens; any other agent keeps the neutral color. */}
                       <SessionProgressIndicatorV2
+                        animationKey={item.sessionID}
                         class="shrink-0"
                         style={{
                           color: item.agent ? `var(--v2-agent-${item.agent.toLowerCase()}-solid, ${neutral})` : neutral,

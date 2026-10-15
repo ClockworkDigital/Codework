@@ -1,0 +1,19 @@
+[data-loading-animation] {
+  display: block;
+  flex-shrink: 0;
+  animation: none !important;
+}
+
+[data-slot="loading-still"] {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-slot="loading-motion"] {
+    display: none;
+  }
+
+  [data-slot="loading-still"] {
+    display: block;
+  }
+}

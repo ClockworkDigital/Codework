@@ -412,7 +412,7 @@ test("tab preview opens cold, switches immediately between tabs, and closes outs
   const preview = page.locator('[data-component="session-tab-popover"]')
   await expect(rows.locator("[data-titlebar-tab-title]")).toHaveText([a.title, b.title, c.title, d.title])
   await page.clock.install()
-  await page.clock.pauseAt(new Date())
+  await page.clock.pauseAt(new Date(Date.now() + 1000))
   await tabB.hover()
   await page.clock.runFor(700)
   await expect(preview).toHaveCount(0)

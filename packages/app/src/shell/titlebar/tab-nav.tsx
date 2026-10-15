@@ -17,6 +17,8 @@ import { SessionProgressIndicatorV2 } from "@opencode/session-ui/v2/session-prog
 import type { SessionInfo } from "@opencode/client/promise"
 import { sessionTabTitle } from "./tab-title"
 import { TabPreviewPopover } from "./tab-popover"
+import { usePlatform } from "@/runtime/platform/platform"
+import { Cm3Icon } from "@/cookiemonster/cm3-icon"
 import "./tab-nav.css"
 
 // MouseEvent.button uses 1 for the middle/wheel button.
@@ -40,6 +42,7 @@ export function TabNavItem(props: {
   orientation?: "horizontal" | "vertical"
 }) {
   const language = useLanguage()
+  const platform = usePlatform()
   const [menu, setMenu] = createStore({ open: false, rename: false })
   const [editing, setEditing] = createSignal(false)
   const [titleOverflowing, setTitleOverflowing] = createSignal(false)
@@ -309,6 +312,7 @@ export function TabNavItem(props: {
           >
             {(session) => (
               <SessionTabAvatarView
+                sessionID={session.id}
                 project={project()}
                 directory={session.location.directory}
                 unread={false}
@@ -371,13 +375,17 @@ export function TabNavItem(props: {
         <IconButton
           size="small"
           variant="ghost-muted"
-          class="hover-reveal relative z-10 group-hover:opacity-100 group-has-[:focus-visible]:opacity-100 group-data-[active=true]:opacity-100 group-data-[editing=true]:opacity-100"
+          class="cm3-sidebar-session-close hover-reveal relative z-10 group-hover:opacity-100 group-has-[:focus-visible]:opacity-100 group-data-[active=true]:opacity-100 group-data-[editing=true]:opacity-100"
           onPointerDown={(event) => {
             event.preventDefault()
             event.stopPropagation()
           }}
           onClick={closeTab}
-          icon={<Icon name="xmark-small" />}
+          icon={
+            <Show when={platform.browserPanel} fallback={<Icon name="xmark-small" />}>
+              <Cm3Icon name="x" size={14} />
+            </Show>
+          }
           aria-label={language.t("common.closeTab")}
         />
       </div>
@@ -441,6 +449,7 @@ export function DraftTabItem(props: {
   orientation?: "horizontal" | "vertical"
 }) {
   const language = useLanguage()
+  const platform = usePlatform()
 
   const closeTab = (event: MouseEvent) => {
     event.preventDefault()
@@ -533,9 +542,13 @@ export function DraftTabItem(props: {
             event.preventDefault()
             event.stopPropagation()
           }}
-          class="hover-reveal relative z-10 group-hover:opacity-100 group-data-[active=true]:opacity-100 group-data-[editing=true]:opacity-100"
+          class="cm3-sidebar-session-close hover-reveal relative z-10 group-hover:opacity-100 group-data-[active=true]:opacity-100 group-data-[editing=true]:opacity-100"
           onClick={closeTab}
-          icon={<Icon name="xmark-small" />}
+          icon={
+            <Show when={platform.browserPanel} fallback={<Icon name="xmark-small" />}>
+              <Cm3Icon name="x" size={14} />
+            </Show>
+          }
           aria-label={language.t("common.closeTab")}
         />
       </div>

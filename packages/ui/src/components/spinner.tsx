@@ -1,4 +1,5 @@
 import { ComponentProps, For } from "solid-js"
+import { Loading, useLoadingAnimations } from "./loading"
 
 const outerIndices = new Set([1, 2, 4, 7, 8, 11, 13, 14])
 
@@ -19,6 +20,8 @@ export function Spinner(props: {
   classList?: ComponentProps<"div">["classList"]
   style?: ComponentProps<"div">["style"]
 }) {
+  if (useLoadingAnimations()) return <Loading {...props} width={18} height={18} data-component="spinner" />
+
   return (
     <svg
       {...props}

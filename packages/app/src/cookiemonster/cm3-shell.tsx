@@ -168,9 +168,7 @@ export function Cm3Shell(props: { onTabsMount: (element: HTMLElement) => void })
       .filter((record) => `${sessionLabel(record.session)} ${record.projectName}`.toLowerCase().includes(value))
   })
 
-  const records = createMemo(() => (state.search.trim() ? searchRecords() : sessions.data.records()))
   const pinnedRecords = createMemo(() => searchRecords().filter((record) => sessions.session.isPinned(record.session)))
-  const recentRecords = createMemo(() => records().filter((record) => !sessions.session.isPinned(record.session)))
 
   const drafts = createMemo(() =>
     tabs.store.filter((tab): tab is DraftTab => tab.type === "draft" && tab.server === sessions.session.server()),
@@ -321,7 +319,11 @@ export function Cm3Shell(props: { onTabsMount: (element: HTMLElement) => void })
   }
 
   const renderSession = (record: Accessor<HomeSessionRecord>, recent = false) => {
-    const avatar = useSessionTabAvatarState(sessions.session.server, () => record().session.id)
+    const avatar = useSessionTabAvatarState(
+      sessions.session.server,
+      () => record().session.id,
+      () => true,
+    )
 
     const description = () => {
       if (avatar.hasQuestions()) return language.t("sidebar.session.status.question")
@@ -362,6 +364,7 @@ export function Cm3Shell(props: { onTabsMount: (element: HTMLElement) => void })
         >
           <div class="size-4 shrink-0" aria-hidden="true">
             <SessionTabAvatarView
+              sessionID={record().session.id}
               project={record().project}
               directory={record().session.location.directory}
               unread={avatar.unread()}
@@ -601,7 +604,10 @@ export function Cm3Shell(props: { onTabsMount: (element: HTMLElement) => void })
             />
           </label>
           <div class="cm3-sidebar-scroll">
-            <div class="cm3-sidebar-tabs" ref={props.onTabsMount} />
+            <section aria-label={language.t("sidebar.session.open")}>
+              <p class="cm3-sidebar-section">{language.t("sidebar.session.open")}</p>
+              <div class="cm3-sidebar-tabs" ref={props.onTabsMount} />
+            </section>
             <CmProjects
               projects={projects}
               onOpenProjectNewSession={openTask}
@@ -692,24 +698,6 @@ export function Cm3Shell(props: { onTabsMount: (element: HTMLElement) => void })
                 <For each={pinnedRecords()}>{(record) => renderSession(() => record, true)}</For>
               </section>
             </Show>
-            <section aria-label={language.t("sidebar.project.recentSessions")}>
-              <p class="cm3-sidebar-section">{language.t("sidebar.project.recentSessions")}</p>
-              <For each={recentRecords()}>{(record) => renderSession(() => record, true)}</For>
-              <Show
-                when={!sessions.data.loading()}
-                fallback={<p role="status">{language.t("quietCompanion.loading")}</p>}
-              >
-                <Show when={sessions.data.error()}>
-                  <p role="alert">{language.t("common.requestFailed")}</p>
-                  <button type="button" onClick={() => void sessions.data.retry()}>
-                    {language.t("browser.action.reload")}
-                  </button>
-                </Show>
-                <Show when={!chats().length && !pinnedRecords().length && !sessions.data.error()}>
-                  <p role="status">{language.t("quietCompanion.noThreads")}</p>
-                </Show>
-              </Show>
-            </section>
           </div>
           <div class="cm3-sidebar-footer">
             <WppAuthControl />

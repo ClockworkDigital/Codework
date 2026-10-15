@@ -386,7 +386,8 @@ html[data-color-scheme="dark"] .cm3-sidebar {
   flex: 1;
 }
 
-.cm3-sidebar :is(.cm3-sidebar-session-pin, .cm3-sidebar-session-archive, .cm3-sidebar-session-menu) {
+.cm3-sidebar
+  :is(.cm3-sidebar-session-pin, .cm3-sidebar-session-archive, .cm3-sidebar-session-menu, .cm3-sidebar-session-close) {
   display: grid;
   place-items: center;
   flex: none;
@@ -399,19 +400,27 @@ html[data-color-scheme="dark"] .cm3-sidebar {
   cursor: pointer;
 }
 
-.cm3-sidebar :is(.cm3-sidebar-session-pin, .cm3-sidebar-session-archive, .cm3-sidebar-session-menu):hover {
+.cm3-sidebar
+  :is(
+    .cm3-sidebar-session-pin,
+    .cm3-sidebar-session-archive,
+    .cm3-sidebar-session-menu,
+    .cm3-sidebar-session-close
+  ):hover {
   background: var(--cm3-selected);
   color: var(--cm3-text);
 }
 
 @media (hover: hover) {
-  .cm3-sidebar :is(.cm3-sidebar-session-pin, .cm3-sidebar-session-archive, .cm3-sidebar-session-menu) {
+  .cm3-sidebar
+    :is(.cm3-sidebar-session-pin, .cm3-sidebar-session-archive, .cm3-sidebar-session-menu, .cm3-sidebar-session-close) {
     opacity: 0;
     pointer-events: none;
   }
 
   .cm3-sidebar-session:is(:hover, :focus-within)
-    :is(.cm3-sidebar-session-pin, .cm3-sidebar-session-archive, .cm3-sidebar-session-menu),
+    :is(.cm3-sidebar-session-pin, .cm3-sidebar-session-archive, .cm3-sidebar-session-menu, .cm3-sidebar-session-close),
+  .cm3-sidebar-tabs [data-titlebar-tab]:is(:hover, :focus-within) .cm3-sidebar-session-close,
   .cm3-sidebar-session-pin[aria-pressed="true"] {
     opacity: 1;
     pointer-events: auto;
@@ -544,13 +553,26 @@ html[data-color-scheme="dark"] .cm3-sidebar {
 
 .cm3-sidebar-tabs [data-titlebar-tab] [data-slot="tab-link"] {
   background: transparent;
-  padding-inline-end: 24px;
+  padding-inline-end: 32px;
 }
 
 .cm3-sidebar-tabs [data-titlebar-tab] [data-slot="tab-close"] {
-  top: 50%;
-  transform: translateY(-50%);
+  inset-block: 0;
+  inset-inline-end: 0;
+  width: 32px;
+  height: 28px;
+  margin-block: auto;
   background: transparent;
+}
+
+.cm3-sidebar-tabs [data-slot="tab-unread-slot"] {
+  inset-inline-end: 4px;
+  width: 28px;
+}
+
+.cm3-sidebar
+  :is([data-slot="tab-unread-dot"], [data-slot="tab-avatar-unread-dot"], [data-slot="project-avatar-unread-dot"]) {
+  background: var(--cm3-focus);
 }
 
 .cm3-sidebar-section {

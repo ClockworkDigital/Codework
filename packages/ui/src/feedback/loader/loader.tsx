@@ -1,7 +1,10 @@
 import { splitProps, type ComponentProps } from "solid-js"
 import "./loader.css"
+import { Loading, useLoadingAnimations } from "../../components/loading"
 
 export function Loader(props: ComponentProps<"svg">) {
+  if (useLoadingAnimations()) return <Loading {...props} data-component="loader-v2" />
+
   const [local, rest] = splitProps(props, ["class", "classList", "width", "height"])
 
   return (
