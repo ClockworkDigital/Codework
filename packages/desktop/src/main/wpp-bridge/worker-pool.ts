@@ -791,7 +791,8 @@ async function waitForAssistantBridge(
   controller: Controller,
   signal?: AbortSignal,
 ) {
-  const deadline = Date.now() + 30000
+  // Slow links can still be downloading assistant assets after the project shell is ready.
+  const deadline = Date.now() + 240000
   // Require the composer to report ready for two CONSECUTIVE polls before declaring the bridge
   // usable. inspectChat runs inside the assistant iframe, so its readiness reflects the real chat
   // composer (the only cross-origin-safe truth — the host-page iframe.src attribute is stale under

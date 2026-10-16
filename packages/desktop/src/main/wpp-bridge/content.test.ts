@@ -1,12 +1,12 @@
 // SAFETY: This fixture owns its synthetic native objects, runtime probes and malformed inputs; partial shapes deliberately exercise the production guards.
 /* oxlint-disable anti-slop/no-reflect-get, anti-slop/no-runtime-typeof, anti-slop/no-unsafe-dictionary-type, no-restricted-globals */
-import { describe, expect, test } from "bun:test"
+import { describe, expect, setSystemTime, test } from "bun:test"
 import { join } from "node:path"
 import vm from "node:vm"
 
 type ContentHarness = {
   beginNetworkCapture: () => { runId: string }
-  waitForNetworkResponse: (input: { runId: string }) => Promise<unknown>
+  waitForNetworkResponse: (input: { runId: string; timeoutMs?: number }) => Promise<unknown>
   deliver: (record: Record<string, unknown>) => void
   timers: Map<number, () => void>
   imageAttachmentDesync: (error: Error) => Error & { statusCode?: number; type?: string }
@@ -50,6 +50,36 @@ test.each(["done", "finishReason"])("settles captured %s without waiting for the
     expect(await waiting).toEqual(result)
     expect(h.timers.size).toBe(0)
   } finally {
+    h.timers.forEach((callback) => callback())
+    await waiting
+  }
+})
+
+test("keeps a slow active request alive beyond the two-minute response window", async () => {
+  const h = await loadContentHarness()
+  const capture = h.beginNetworkCapture()
+  const started = Date.now()
+  const record = { id: "slow", runId: capture.runId, method: "POST", finalText: "", byteCount: 1, done: false }
+  h.deliver(record)
+  let settled = false
+  const waiting = h.waitForNetworkResponse({ runId: capture.runId, timeoutMs: 180000 }).then((result) => {
+    settled = true
+    return result
+  })
+  try {
+    for (let elapsed = 400; elapsed <= 135000; elapsed += 400) {
+      setSystemTime(started + elapsed)
+      h.timers.values().next().value?.()
+      await Promise.resolve()
+      await Promise.resolve()
+    }
+    expect(settled).toBe(false)
+    h.deliver({ ...record, finalText: "complete after a slow response", done: true })
+    expect(await waiting).toMatchObject({ finalText: "complete after a slow response", done: true })
+    expect(h.timers.size).toBe(0)
+  } finally {
+    setSystemTime()
+    h.deliver({ ...record, finalText: "cleanup", done: true })
     h.timers.forEach((callback) => callback())
     await waiting
   }

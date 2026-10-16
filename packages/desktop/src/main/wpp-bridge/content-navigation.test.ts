@@ -100,18 +100,18 @@ describe("WPP Assistant side-panel navigation", () => {
     },
   )
 
-  test("waits for a new greeting body to finish before accepting reset", async () => {
+  test.each([1500, 15000, 45000])("waits %s ms for a slow greeting body before accepting reset", async (delay) => {
     const h = await harness()
     h.state.greeting = true
     h.state.onTick = () => {
-      if (h.state.time === 1500) {
+      if (h.state.time === delay) {
         h.state.pending = 0
         h.state.changedAt = h.state.time
       }
     }
 
     await h.hooks.startFreshChat()
-    expect(h.state.time).toBeGreaterThanOrEqual(2500)
+    expect(h.state.time).toBeGreaterThanOrEqual(delay + 1000)
     expect(h.state.assistants).toHaveLength(1)
   })
 
