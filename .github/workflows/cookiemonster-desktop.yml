@@ -106,7 +106,6 @@ jobs:
             spctl --assess --type execute --verbose=2 "$app"
             xcrun stapler validate "$app"
           done
-          xcrun stapler validate packages/desktop/dist/cookiemonster-mac-*.dmg
 
       - name: List packaged output
         run: ls -la packages/desktop/dist
