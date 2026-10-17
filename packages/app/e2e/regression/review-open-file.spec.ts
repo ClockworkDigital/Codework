@@ -63,7 +63,10 @@ test("opens and searches project files inline", async ({ page }) => {
   })
   await page.addInitScript(
     ({ directory, server, sessionID }) => {
-      localStorage.setItem("settings.v3", JSON.stringify({ general: { newLayoutDesigns: true } }))
+      localStorage.setItem(
+        "settings.v3",
+        JSON.stringify({ general: { newLayoutDesigns: true, quietCompanion: false } }),
+      )
       localStorage.setItem(
         "opencode.global.dat:server",
         JSON.stringify({
@@ -135,7 +138,9 @@ test("opens and searches project files inline", async ({ page }) => {
   await expect(tabs.getByRole("tab", { name: "nested.ts" })).toHaveCount(1)
   await expect(tabs.getByRole("tab", { name: "Open file" })).toHaveAttribute("data-selected", "")
   await expect(sidebarToggle).toBeDisabled()
-  await tabs.locator("#session-side-panel-review-tab").click()
+  await tabs.getByRole("button", { name: "New tab", exact: true }).click()
+  await panel.getByRole("button", { name: "Review", exact: true }).click()
+  await expect(tabs.locator("#session-side-panel-review-tab")).toHaveAttribute("data-selected", "")
   await expect(sidebarToggle).toBeEnabled()
   await tabs.getByRole("tab", { name: "Open file" }).click()
   await page.keyboard.press("Control+w")
