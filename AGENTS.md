@@ -155,7 +155,7 @@ const table = sqliteTable("session", {
 ## Checks
 
 - Choose checks from the changed behavior and its affected consumers. Start with focused tests and lint; run `bun typecheck` from affected package directories when types or code change. Never run `tsc` directly.
-- `bun run check` from the repository root is the canonical full lint and type-check verification. Use it when the change has broad impact or a required hook or CI gate calls for it; do not run it after every edit or duplicate a successful equivalent hook or CI run for the same code.
+- `bun run check` from the repository root is the canonical full lint and type-check verification. On branches without a `check` script, use `bun run lint` and `bun run typecheck` from the root. Use full verification when the change has broad impact or a required hook or CI gate calls for it; do not run it after every edit or duplicate a successful equivalent hook or CI run for the same code.
 - Documentation-only changes need a diff and formatting review, not application tests, typechecks, or builds. Workflow-only changes need workflow validation and checks of the behavior they alter, not unrelated product suites.
 - Broaden validation only for affected dependencies, shared contracts, required gates, or concrete failure evidence. After a pass, rerun only checks whose inputs changed or whose result remains uncertain. Run expensive builds, benchmarks, and full suites serially when they would compete for local resources.
 - Keep required hooks and protected-branch checks intact. If an unrelated failure blocks merging, report the blocker and repair scope; do not bypass it or claim the PR is ready. Record what passed, what was not checked, and any remaining blocker.
