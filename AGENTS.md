@@ -5,6 +5,13 @@
 - Local `main` ref may not exist; use `dev` or `origin/dev` for diffs.
 - Adding a dependency: `bunfig.toml` sets `minimumReleaseAge` (3 days), so a just-published package version is skipped by the installer until it is 3 days old unless its name is in `minimumReleaseAgeExcludes`.
 
+## Scope and Pushes
+
+- Keep each change tied to the requested outcome, including the callers, fixtures, and tests it affects. Classify failures as caused by the change, pre-existing, or infrastructure-related before expanding the fix.
+- Report unrelated baseline failures with evidence and a separate repair proposal; do not silently fold them into the PR. If baseline repairs are authorized, define the repair scope up front and reassess it when new failures materially expand the work. Report the added work and expected validation cost before continuing that expansion.
+- Batch related fixes and their focused checks locally before pushing. Avoid pushing individual test or fixture fixes while a useful CI run is still collecting results; push sooner only when the current run cannot provide useful evidence or the user requests it.
+- Once a batch is pushed, keep the commit stable while required CI completes. For a confirmed transient failure, retry only failed jobs on the same commit where supported; do not create a commit just to restart CI or repeatedly retry an unexplained failure.
+
 ## Branch Names
 
 Use a short branch name of at most three words, separated by hyphens. Do not use slashes or type prefixes such as `feat/` or `fix/`.
@@ -145,9 +152,13 @@ const table = sqliteTable("session", {
 - Test actual implementation, do not duplicate logic into tests
 - Tests cannot run from repo root (guard: `do-not-run-tests-from-root`); run from package dirs like `packages/opencode`.
 
-## Type Checking
+## Checks
 
-- Always run `bun typecheck` from package directories (e.g., `packages/opencode`), never `tsc` directly. Root `bun run typecheck` runs `turbo typecheck` across every package. The desktop package's `typecheck` is `tsgo -b` (TS native preview), not `tsc`.
+- Choose checks from the changed behavior and its affected consumers. Start with focused tests and lint; run `bun typecheck` from affected package directories when types or code change. Never run `tsc` directly.
+- `bun run check` from the repository root is the canonical full lint and type-check verification. Use it when the change has broad impact or a required hook or CI gate calls for it; do not run it after every edit or duplicate a successful equivalent hook or CI run for the same code.
+- Documentation-only changes need a diff and formatting review, not application tests, typechecks, or builds. Workflow-only changes need workflow validation and checks of the behavior they alter, not unrelated product suites.
+- Broaden validation only for affected dependencies, shared contracts, required gates, or concrete failure evidence. After a pass, rerun only checks whose inputs changed or whose result remains uncertain. Run expensive builds, benchmarks, and full suites serially when they would compete for local resources.
+- Keep required hooks and protected-branch checks intact. If an unrelated failure blocks merging, report the blocker and repair scope; do not bypass it or claim the PR is ready. Record what passed, what was not checked, and any remaining blocker.
 
 ## Linting
 

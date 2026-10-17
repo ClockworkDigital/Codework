@@ -1,7 +1,7 @@
 ## Priorities
 
 - Prioritise, in this order: stability, simplicity, performance.
-- Before changing session or timeline code, record a production benchmark baseline and compare it after the change.
+- For session or timeline changes that can affect rendering cost, scrolling, loading, or memory use, record a relevant production benchmark baseline and compare it after the change. Explain the performance risk being measured; copy, test-fixture, and behavior fixes without a performance impact need focused correctness checks only.
 
 ## Debugging
 
