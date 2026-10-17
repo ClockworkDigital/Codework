@@ -1,9 +1,9 @@
-import { expect, test } from "bun:test"
+import { test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { join, resolve } from "node:path"
 import { tmpdir } from "node:os"
 import { createServer } from "node:http"
-import { chromium } from "@playwright/test"
+import { chromium, expect } from "@playwright/test"
 import { build } from "vite"
 import solid from "vite-plugin-solid"
 
@@ -118,10 +118,9 @@ test("cookie loaders retain their choice, inherit colour tokens, animate, and re
     ).toEqual(before)
     await page.emulateMedia({ reducedMotion: "no-preference" })
     const first = await page.locator('[data-case="flip-3d"] svg').screenshot({ animations: "allow" })
-    // Allow the embedded SVG image to advance several projected vector frames.
-    await page.waitForTimeout(220)
-    const next = await page.locator('[data-case="flip-3d"] svg').screenshot({ animations: "allow" })
-    expect(first.equals(next)).toBe(false)
+    await expect
+      .poll(async () => first.equals(await page.locator('[data-case="flip-3d"] svg').screenshot({ animations: "allow" })))
+      .toBe(false)
     await page.screenshot({ path: join(directory, "preview.png"), fullPage: true })
   } finally {
     await browser.close()
