@@ -12,8 +12,14 @@ for (const newLayoutDesigns of [false, true]) {
   test(`CM3 Review opens explicitly and reorders like other tabs in ${newLayoutDesigns ? "new" : "legacy"} layout`, async ({
     page,
   }) => {
-    if (!newLayoutDesigns) await page.clock.install({ time: new Date("2026-09-01T10:00:00Z") })
-    await mockStressTimeline(page)
+    if (!newLayoutDesigns) await page.clock.setFixedTime(new Date("2026-09-01T10:00:00Z"))
+    await mockOpenCodeServer(page, {
+      sessions: fixture.sessions.filter((session) => session.id === fixture.sourceID),
+      provider: fixture.provider,
+      directory: fixture.directory,
+      project: fixture.project,
+      pageMessages,
+    })
     await installStressSessionTabs(page, { sessionIDs: [fixture.sourceID] })
     await page.addInitScript((newLayoutDesigns) => {
       localStorage.setItem("settings.v3", JSON.stringify({ general: { newLayoutDesigns, quietCompanion: true } }))
@@ -38,7 +44,7 @@ for (const newLayoutDesigns of [false, true]) {
     if (!from || !to) throw new Error("Expected visible Review and Context tabs")
     await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2)
     await page.mouse.down()
-    await page.mouse.move(to.x + to.width / 2, to.y + to.height / 2, { steps: 8 })
+    await page.mouse.move(to.x + to.width - 2, to.y + to.height / 2, { steps: 8 })
     await page.mouse.up()
     await expect
       .poll(() =>

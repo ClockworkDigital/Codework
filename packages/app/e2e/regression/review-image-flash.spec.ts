@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test"
 import { base64Encode } from "@opencode-ai/core/util/encode"
+import { openPanelReview } from "../utils/side-panel"
 import { mockOpenCodeServer } from "../utils/mock-server"
 import { expectAppVisible, expectSessionTitle } from "../utils/waits"
 
@@ -138,6 +139,7 @@ async function openReview(page: Page) {
   await page.goto(`/${base64Encode(directory)}/session/${sessionID}`)
   await expectSessionTitle(page, title)
   await page.getByRole("button", { name: "Toggle review" }).click()
+  await openPanelReview(page)
   await expectAppVisible(page.locator('#review-panel [data-component="session-review-v2"]'))
   await expectAppVisible(page.getByRole("button", { name: /preview\.png/ }))
 }
