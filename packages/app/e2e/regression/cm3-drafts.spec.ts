@@ -201,6 +201,37 @@ test("CM3 drafts become one saved chat after submission", async ({ page }) => {
   await expect(projectChats(page).locator(`[data-session-id="${fixture.sourceID}"]`)).toHaveCount(1)
 })
 
+test("CM3 failed first submission retains the draft and options for one retry", async ({ page }) => {
+  await setup(page)
+  const attempts: string[] = []
+  await page.route(/\/session(?:\?.*)?$/, async (route) => {
+    if (route.request().method() !== "POST") return route.fallback()
+    attempts.push(route.request().postData() ?? "")
+    return route.fulfill({
+      status: attempts.length === 1 ? 500 : 200,
+      json: attempts.length === 1 ? { message: "Qualification create failed" } : fixture.sessions[0],
+    })
+  })
+  await page.route(/\/session\/[^/]+\/prompt_async(?:\?.*)?$/, (route) => route.fulfill({ status: 204 }))
+  await page.goto("/new-session?draftId=draft_cm3_list")
+  await expect(composer(page)).toBeEditable()
+  await composer(page).fill("Keep this first prompt")
+  await expect(page.getByRole("button", { name: "Claude Opus 4.6", exact: true })).toBeVisible()
+  await composer(page).press("Enter")
+  await expect(page.getByText("Qualification create failed", { exact: true })).toBeVisible()
+  await expect(composer(page)).toHaveText("Keep this first prompt")
+  await expect(page.getByRole("button", { name: "Claude Opus 4.6", exact: true })).toBeVisible()
+  expect(attempts).toHaveLength(1)
+  const admitted = page.waitForRequest(
+    (request) =>
+      request.method() === "POST" && new URL(request.url()).pathname === `/session/${fixture.sourceID}/prompt_async`,
+  )
+  await composer(page).press("Enter")
+  expect((await admitted).postDataJSON()).toMatchObject({ parts: [{ type: "text", text: "Keep this first prompt" }] })
+  await expect(page).toHaveURL(stressSessionHref(fixture.sourceID))
+  expect(attempts).toHaveLength(2)
+})
+
 test("CM3 drafts stay under their own project and server", async ({ page }) => {
   await setup(page)
   const remote = `http://cm3-drafts.test:${process.env.PLAYWRIGHT_SERVER_PORT}`

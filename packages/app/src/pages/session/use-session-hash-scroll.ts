@@ -21,6 +21,7 @@ export const useSessionHashScroll = (input: {
   revealMessage?: (id: string) => void
   scheduleScrollState: (el: HTMLDivElement) => void
   consumePendingMessage: (key: string) => string | undefined
+  consumeScrollRestoration?: () => boolean
 }) => {
   const visibleUserMessages = createMemo(() => input.visibleUserMessages())
   const messageById = createMemo(() => new Map(visibleUserMessages().map((m) => [m.id, m])))
@@ -101,6 +102,7 @@ export const useSessionHashScroll = (input: {
   const applyHash = (behavior: ScrollBehavior) => {
     const hash = location.hash.slice(1)
     if (!hash) {
+      if (input.consumeScrollRestoration?.()) return
       input.autoScroll.forceScrollToBottom()
       const el = input.scroller()
       if (el) input.scheduleScrollState(el)

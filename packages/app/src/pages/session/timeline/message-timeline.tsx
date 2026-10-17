@@ -88,7 +88,10 @@ type FramedTimelineRow = Exclude<TimelineRow.TimelineRow, { _tag: "TurnGap" }>
 type TimelineRowByTag<T extends TimelineRow.TimelineRow["_tag"]> = Extract<TimelineRow.TimelineRow, { _tag: T }>
 
 const timelineFallbackItemSize = 60
-const timelineCache = new Map<string, { measurements: VirtualItem[]; toolOpen: Record<string, boolean | undefined> }>()
+const timelineCache = new Map<
+  string,
+  { measurements: VirtualItem[]; toolOpen: Record<string, boolean | undefined>; scrollTop?: number }
+>()
 
 const taskDescription = (part: PartType, sessionID: string) => {
   if (part.type !== "tool" || part.tool !== "task") return
@@ -142,7 +145,7 @@ function TimelineThinkingRow(props: { reasoningHeading?: string; showReasoningSu
   )
 }
 
-function TimelineDiffSummaryRow(props: { diffs: SummaryDiff[] }) {
+function TimelineDiffSummaryRow(props: { diffs: SummaryDiff[]; onOpenReview?: () => void }) {
   const language = useLanguage()
   const maxFiles = 10
   const [state, setState] = createStore({
@@ -161,9 +164,15 @@ function TimelineDiffSummaryRow(props: { diffs: SummaryDiff[] }) {
       data-show-all={showAll() || undefined}
     >
       <div data-slot="session-turn-diffs-header">
-        <span data-slot="session-turn-diffs-label">
+        <Dynamic
+          component={props.onOpenReview ? "button" : "span"}
+          type={props.onOpenReview ? "button" : undefined}
+          onClick={props.onOpenReview}
+          data-slot="session-turn-diffs-label"
+          class="rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-border-focus"
+        >
           {language.plural("ui.sessionTurn.diffs.changed", props.diffs.length)}
-        </span>
+        </Dynamic>
         <DiffChanges changes={props.diffs} />
         <Show when={overflow() > 0}>
           <span data-slot="session-turn-diffs-toggle" onClick={() => setState("showAll", !showAll())}>
@@ -237,8 +246,10 @@ function TimelineDiffView(props: { diff: SummaryDiff }) {
 
 export function MessageTimeline(props: {
   actions?: UserActions
+  onOpenReview?: () => void
   scroll: { overflow: boolean; bottom: boolean; jump: boolean }
   onResumeScroll: () => void
+  onRestoreScroll: () => void
   setScrollRef: (el: HTMLDivElement | undefined) => void
   onScheduleScrollState: (el: HTMLDivElement) => void
   onAutoScrollHandleScroll: () => void
@@ -269,6 +280,7 @@ export function MessageTimeline(props: {
   const { params, sessionKey } = useSessionKey()
   const ownerSessionKey = sessionKey()
   const cached = timelineCache.get(ownerSessionKey)
+  const restoredScroll = settings.general.quietCompanion() && props.shouldAnchorBottom() ? cached?.scrollTop : undefined
   const initialMeasurements = cached?.measurements
   const coldBottomMount = !initialMeasurements?.length && props.shouldAnchorBottom()
   const platform = usePlatform()
@@ -419,7 +431,7 @@ export function MessageTimeline(props: {
     },
     getScrollElement: () => listRoot() ?? null,
     observeElementOffset: observeElementOffsetReconnectAware,
-    initialOffset: () => (props.shouldAnchorBottom() ? Number.MAX_SAFE_INTEGER : 0),
+    initialOffset: () => restoredScroll ?? (props.shouldAnchorBottom() ? Number.MAX_SAFE_INTEGER : 0),
     initialMeasurementsCache: initialMeasurements,
     estimateSize: () => timelineFallbackItemSize,
     scrollToFn: (offset, options, instance) => {
@@ -542,7 +554,11 @@ export function MessageTimeline(props: {
   onCleanup(() => {
     clearPrependAnchor()
     timelineCache.delete(ownerSessionKey)
-    timelineCache.set(ownerSessionKey, { measurements: virtualizer.takeSnapshot(), toolOpen: { ...toolOpen } })
+    timelineCache.set(ownerSessionKey, {
+      measurements: virtualizer.takeSnapshot(),
+      toolOpen: { ...toolOpen },
+      scrollTop: settings.general.quietCompanion() && !props.shouldAnchorBottom() ? listRoot()?.scrollTop : undefined,
+    })
     while (timelineCache.size > 16) timelineCache.delete(timelineCache.keys().next().value!)
     if (resizePinFrame !== undefined) cancelAnimationFrame(resizePinFrame)
     if (overscanFrame !== undefined) cancelAnimationFrame(overscanFrame)
@@ -570,6 +586,10 @@ export function MessageTimeline(props: {
     if (root === listRoot()) return
     setListRoot(root)
     props.setScrollRef(root)
+    if (restoredScroll !== undefined) {
+      props.onRestoreScroll()
+      virtualizer.scrollToOffset(restoredScroll)
+    }
   }
 
   const handleListWheel = (event: WheelEvent & { currentTarget: HTMLDivElement }) => {
@@ -1206,7 +1226,7 @@ export function MessageTimeline(props: {
         return (
           <TimelineRowFrame row={diffSummaryRow}>
             <div data-slot="session-turn-message-container" class="w-full px-4 md:px-5">
-              <TimelineDiffSummaryRow diffs={diffSummaryRow().diffs} />
+              <TimelineDiffSummaryRow diffs={diffSummaryRow().diffs} onOpenReview={props.onOpenReview} />
             </div>
           </TimelineRowFrame>
         )

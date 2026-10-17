@@ -1981,6 +1981,7 @@ export default function Page() {
     },
   )
 
+  let restoringScroll = false
   const { clearMessageHash, scrollToMessage } = useSessionHashScroll({
     sessionKey,
     sessionID: () => params.id,
@@ -1999,6 +2000,11 @@ export default function Page() {
         autoScroll.resume()
         scrollToEnd()
       },
+    },
+    consumeScrollRestoration: () => {
+      const restored = restoringScroll
+      restoringScroll = false
+      return restored
     },
     scroller: () => scroller,
     anchor,
@@ -2103,8 +2109,24 @@ export default function Page() {
               {(_id) => (
                 <MessageTimeline
                   actions={actions}
+                  onOpenReview={
+                    settings.general.quietCompanion()
+                      ? () => {
+                          if (!isDesktop()) {
+                            setStore("mobileTab", "changes")
+                            return
+                          }
+                          openReviewPanel()
+                          tabs().setActive("review")
+                        }
+                      : undefined
+                  }
                   scroll={ui.scroll}
                   onResumeScroll={resumeScroll}
+                  onRestoreScroll={() => {
+                    restoringScroll = true
+                    autoScroll.pause()
+                  }}
                   setScrollRef={setScrollRef}
                   onScheduleScrollState={scheduleScrollState}
                   onAutoScrollHandleScroll={autoScroll.handleScroll}

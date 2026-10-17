@@ -44,9 +44,19 @@ export function NewSessionView(props: {
     <div class="@container relative flex flex-col min-h-0 h-full flex-1">
       <div
         data-component="session-new-design"
-        class="relative flex-1 min-h-0 overflow-hidden rounded-[10px] bg-v2-background-bg-deep"
+        class="relative flex-1 min-h-0 rounded-[10px] bg-v2-background-bg-deep"
+        classList={{
+          "flex flex-col overflow-y-auto": settings.general.quietCompanion(),
+          "overflow-hidden": !settings.general.quietCompanion(),
+        }}
       >
-        <div class="absolute inset-x-0 top-[25.375%] flex justify-center px-6">
+        <div
+          class="flex justify-center px-6"
+          classList={{
+            "grow shrink-0 items-center py-12": settings.general.quietCompanion(),
+            "absolute inset-x-0 top-[25.375%]": !settings.general.quietCompanion(),
+          }}
+        >
           <div class={NEW_SESSION_CONTENT_WIDTH}>
             <Show
               when={settings.general.quietCompanion() || import.meta.env.VITE_CM_BRAND}
@@ -126,6 +136,7 @@ export function NewSessionStatus(props: { mount: Accessor<HTMLElement | null>; v
 }
 
 function ProviderTip() {
+  const settings = useSettings()
   const language = useLanguage()
   const dialog = useDialog()
   const sdk = useSDK()
@@ -155,7 +166,13 @@ function ProviderTip() {
 
   return (
     <Show when={presence.present()}>
-      <div class="pointer-events-none absolute inset-x-0 bottom-4 flex justify-center px-10">
+      <div
+        class="pointer-events-none flex justify-center px-10"
+        classList={{
+          "relative shrink-0 pb-4": settings.general.quietCompanion(),
+          "absolute inset-x-0 bottom-4": !settings.general.quietCompanion(),
+        }}
+      >
         <div
           ref={setRef}
           data-component="provider-tip"

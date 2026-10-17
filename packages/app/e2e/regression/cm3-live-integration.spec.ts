@@ -9,9 +9,7 @@ import { expectSessionTitle } from "../utils/waits"
 import { mockOpenCodeServer } from "../utils/mock-server"
 
 for (const newLayoutDesigns of [false, true]) {
-  test(`CM3 Review opens explicitly and reorders like other tabs in ${newLayoutDesigns ? "new" : "legacy"} layout`, async ({
-    page,
-  }) => {
+  test(`CM3 Review opens explicitly and reorders with new layout preference ${newLayoutDesigns}`, async ({ page }) => {
     await mockStressTimeline(page)
     await installStressSessionTabs(page, { sessionIDs: [fixture.sourceID] })
     await page.addInitScript((newLayoutDesigns) => {
@@ -174,6 +172,7 @@ for (const newLayoutDesigns of [false, true]) {
   test(`CM3 attaches panel tabs beside the full-height chat in ${newLayoutDesigns ? "new" : "legacy"} layout`, async ({
     page,
   }) => {
+    if (!newLayoutDesigns) await page.clock.setFixedTime(new Date("2026-09-01T10:00:00Z"))
     await mockStressTimeline(page)
     await installStressSessionTabs(page, { sessionIDs: [fixture.sourceID] })
     await page.addInitScript((newLayoutDesigns) => {
@@ -853,7 +852,9 @@ test("CM3 uses the live session and preserves its editor across UI switches", as
   await expect(page.locator(".cm3-live")).toHaveCount(0)
   await expect(input).toHaveText("Preserve this live draft")
   expect(await input.evaluate((element, original) => element === original, editor)).toBe(true)
-  await page.keyboard.press("ControlOrMeta+Comma")
+  await page.keyboard.press(
+    await page.evaluate(() => (/Mac|iPod|iPhone|iPad/.test(navigator.platform) ? "Meta+," : "Control+,")),
+  )
   const toggle = page.locator('[data-action="settings-quiet-companion"]').getByRole("switch")
   await expect(toggle).toBeVisible()
   await toggle.press("Space")
@@ -890,7 +891,9 @@ test("CM3 landing suggestions edit the real project draft", async ({ page }, tes
   })
   await page.goto("/new-session?draftId=draft_cm3_live")
   await expect(page.locator('[data-cm3-thread="false"]')).toBeVisible()
-  await expect(page.getByRole("heading", { name: "What should we build in SmokeProject?", exact: true })).toBeVisible()
+  await expect(
+    page.getByRole("heading", { name: `What should we build in ${fixture.project.name}?`, exact: true }),
+  ).toBeVisible()
   const input = page.locator('[data-component="prompt-input"][contenteditable="true"]')
   await expect(input).toHaveCount(1)
   await page.getByRole("button", { name: "Trace a bug", exact: true }).click()
@@ -917,6 +920,32 @@ for (const scheme of ["light", "dark"] as const) {
       const composer = page.locator('[data-cm3-region="composer"]')
       await expect(composer).toBeVisible()
       await expect(page.locator("html")).toHaveAttribute("data-color-scheme", scheme)
+      const contrast = await page.locator(".cm3-live").evaluate((element) => {
+        const style = getComputedStyle(element)
+        const luminance = (token: string) => {
+          const color = style.getPropertyValue(token).trim().replace("#", "")
+          const channels = [0, 2, 4].map((offset) => {
+            const channel = Number.parseInt(color.slice(offset, offset + 2), 16) / 255
+            return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4
+          })
+          return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722
+        }
+        return ["--cm3-bg", "--cm3-nav", "--cm3-surface"].flatMap((background) =>
+          ["--cm3-text", "--cm3-muted", "--cm3-focus"].map((foreground) => {
+            const light = luminance(background)
+            const dark = luminance(foreground)
+            return {
+              foreground,
+              background,
+              ratio: (Math.max(light, dark) + 0.05) / (Math.min(light, dark) + 0.05),
+            }
+          }),
+        )
+      })
+      for (const color of contrast)
+        expect(color.ratio, `${color.foreground} against ${color.background}`).toBeGreaterThanOrEqual(
+          color.foreground === "--cm3-focus" ? 3 : 4.5,
+        )
       const box = await composer.boundingBox()
       expect(box).not.toBeNull()
       expect(box!.x).toBeGreaterThanOrEqual(0)
@@ -961,7 +990,7 @@ for (const newLayout of [true, false]) {
       localStorage.setItem("opencode-color-scheme", "dark")
       localStorage.setItem("app-version.v1", JSON.stringify({ version: "1.18.34" }))
     }, newLayout)
-    if (!newLayout) await page.clock.install({ time: new Date("2026-09-01T10:00:00Z") })
+    if (!newLayout) await page.clock.setFixedTime(new Date("2026-09-01T10:00:00Z"))
     await page.goto(
       newLayout
         ? "/new-session?draftId=draft_cm3_dark"
@@ -970,7 +999,7 @@ for (const newLayout of [true, false]) {
     await expect(page.locator('[data-cm3-thread="false"]')).toBeVisible()
     if (newLayout) {
       await expect(
-        page.getByRole("heading", { name: "What should we build in SmokeProject?", exact: true }),
+        page.getByRole("heading", { name: `What should we build in ${fixture.project.name}?`, exact: true }),
       ).toBeVisible()
     } else {
       const landing = page.locator('[data-component="cm3-legacy-landing"]')
@@ -1007,9 +1036,7 @@ test("CM3 desktop Review and sidebar search use live session state", async ({ pa
   const navigation = page.getByRole("complementary", { name: "Projects and sessions", exact: true })
   const search = navigation.getByRole("searchbox", { name: "Search threads", exact: true })
   await search.fill(fixture.expected.targetTitle)
-  const target = navigation
-    .locator(".cm3-sidebar-scroll > .cm3-sidebar-task")
-    .filter({ hasText: fixture.expected.targetTitle })
+  const target = navigation.locator('[data-action="project-session"]').filter({ hasText: fixture.expected.targetTitle })
   await expect(target).toBeVisible()
   await expect(navigation.getByRole("button", { name: fixture.expected.sourceTitle, exact: true })).toHaveCount(0)
   await target.click()
@@ -1130,8 +1157,11 @@ for (const gesture of ["Control", "Meta", "middle"] as const) {
     const toggle = page.getByRole("button", { name: "Toggle sidebar", exact: true })
     await toggle.click()
     await expect(toggle).toHaveAttribute("aria-expanded", "true")
-    const recent = page.locator(".cm3-sidebar-task").filter({ hasText: fixture.expected.targetTitle })
-    await recent.click(gesture === "middle" ? { button: "middle" } : { modifiers: [gesture] })
+    const recent = page.locator('[data-action="recent-session"]').filter({ hasText: fixture.expected.targetTitle })
+    // macOS reserves physical Control-click for its context menu even when emulating Windows.
+    if (gesture === "Control" && process.platform === "darwin")
+      await recent.dispatchEvent("click", { button: 0, ctrlKey: true })
+    else await recent.click(gesture === "middle" ? { button: "middle" } : { modifiers: [gesture] })
     const tab = page.locator(
       `.cm3-sidebar-tabs [data-titlebar-tab-link][href="${stressSessionHref(fixture.targetID)}"]`,
     )
@@ -1168,9 +1198,12 @@ test("CM3 sidebar search supports arrows, Enter, empty results and composition",
   await search.dispatchEvent("keydown", { key: "Enter", isComposing: true })
   await expect(search).toBeFocused()
   await expect(page).toHaveURL(new RegExp(fixture.sourceID))
+  const recentTarget = sidebar
+    .locator('[data-action="recent-session"]')
+    .filter({ hasText: fixture.expected.targetTitle })
   await search.press("ArrowUp")
-  await expect(target).toBeFocused()
-  await target.press("ArrowDown")
+  await expect(recentTarget).toBeFocused()
+  await recentTarget.press("ArrowDown")
   await expect(target).toBeFocused()
   await target.press("Enter")
   await expectSessionTitle(page, fixture.expected.targetTitle)
@@ -1178,15 +1211,15 @@ test("CM3 sidebar search supports arrows, Enter, empty results and composition",
   await search.press("Enter")
   await expectSessionTitle(page, fixture.expected.sourceTitle)
   await search.fill("")
-  await expect(sidebar.locator(".cm3-sidebar-task")).toHaveCount(2)
+  await expect(sidebar.locator(".cm3-sidebar-task")).toHaveCount(4)
   const source = sidebar.getByRole("button", { name: fixture.expected.sourceTitle, exact: true })
   await search.press("ArrowDown")
   await expect(target).toBeFocused()
   await target.press("ArrowDown")
   await expect(source).toBeFocused()
   await source.press("ArrowDown")
-  await expect(target).toBeFocused()
-  await target.press("ArrowUp")
+  await expect(recentTarget).toBeFocused()
+  await recentTarget.press("ArrowUp")
   await expect(source).toBeFocused()
   await source.press("Enter")
   await expectSessionTitle(page, fixture.expected.sourceTitle)

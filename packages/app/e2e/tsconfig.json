@@ -20,6 +20,8 @@
     "./regression/new-session-panel-corner.spec.ts",
     "./regression/cm3-live-integration.spec.ts",
     "./regression/cm3-drafts.spec.ts",
+    "./regression/cm3-qualification.spec.ts",
+    "./regression/interface-toggle.spec.ts",
     "./regression/cm3-scheduling.spec.ts",
     "./regression/session-timeline-context-resize.spec.ts",
     "./utils/**/*.ts"

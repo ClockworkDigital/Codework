@@ -61,6 +61,8 @@ async function expectSelectedFile(page: Page, file: string) {
 async function switchSession(page: Page, title: string) {
   await page.locator("[data-titlebar-tab-slot]", { hasText: title }).click()
   await expectSessionTitle(page, title)
+  const review = page.getByRole("button", { name: "Toggle review", exact: true })
+  if ((await review.getAttribute("aria-pressed")) === "false") await review.click()
 }
 
 async function setup(page: Page) {

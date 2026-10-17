@@ -56,7 +56,7 @@ test("keeps moving upward while drag-selecting above the timeline", async ({ pag
   })
   const scroller = page.locator(".scroll-view__viewport", { has: page.locator("[data-timeline-row]") })
   const text = page.getByText("History 79.", { exact: false })
-  await expect(text).toBeVisible()
+  await expect(text).toBeInViewport()
   await scroller.evaluate((element) => {
     element.dataset.selectionLength = "0"
     document.addEventListener("selectionchange", () => {

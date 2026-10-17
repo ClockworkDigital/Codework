@@ -16,8 +16,7 @@
     "packages/ui/src/components/file-icon.tsx",
     "packages/ui/src/components/provider-icon.tsx",
     "packages/ui/src/components/app-icon.tsx",
-    "packages/app/src/components/cm3-icon.tsx",
-    "packages/cm-ui-prototype/src/icon.ts"
+    "packages/app/src/components/cm3-icon.tsx"
   ],
   "exceptions": {
     "toggle-right-fill": {
