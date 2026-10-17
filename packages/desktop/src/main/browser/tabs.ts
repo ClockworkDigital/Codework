@@ -856,6 +856,8 @@ async function runLeaveIntent<T>(
       const leave = await intent.prompt.catch(() => false)
       if (leave) {
         await intent.settled
+        // Chromium must unwind the veto callback and restore its history entry before replay.
+        await new Promise<void>((resolve) => setImmediate(resolve))
         intent.check()
         intent.replaying = true
         return await action()

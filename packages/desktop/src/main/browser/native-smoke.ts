@@ -655,9 +655,11 @@ async function run() {
   stage("creating first tab")
   win.showInactive()
   const command = (value: Parameters<typeof browserCommand>[2]) => browserCommand(owner, "smoke", value)
-  if (process.argv.includes("--leave-confirmation")) {
-    const { leaveConfirmationSmoke } = await import("./leave-confirmation.fixture")
-    await leaveConfirmationSmoke(win, url, command, owner)
+  if (process.argv.includes("--leave-confirmation") || process.argv.includes("--leave-history")) {
+    const { leaveConfirmationSmoke, leaveHistorySmoke } = await import("./leave-confirmation.fixture")
+    await (process.argv.includes("--leave-history")
+      ? leaveHistorySmoke(url, command)
+      : leaveConfirmationSmoke(win, url, command, owner))
     stage("PASS leave confirmation")
     win.destroy()
     return

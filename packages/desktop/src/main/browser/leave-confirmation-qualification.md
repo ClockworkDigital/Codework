@@ -61,6 +61,22 @@ The initial raw `WebContentsView.sendInputEvent` character check failed both bef
 
 The user deferred custom Electron work. Page-origin link/form Leave continuation remains unsupported on stock Electron, so #48 remains open to track that deferred portion. macOS, packaged behavior and authenticated-site unsaved-state behavior remain unqualified. The running signed-in application has not been restarted for this follow-up.
 
+## macOS history retry follow-up, 17 October 2026
+
+An immediate Leave answer could retry back/forward navigation before Chromium unwound its cancellation callback and restored the original history entry. The native fixture reproduced this on unchanged `origin/dev` sources: the command returned with the source URL still loaded. Main now yields to the next event-loop iteration before revalidating authority and replaying the captured intent. This does not change page-origin navigation handling.
+
+Run the focused native regression from `packages/desktop`:
+
+```sh
+bun scripts/browser-smoke.ts --leave-history
+```
+
+The regression failed before the fix and passed afterward on macOS arm64 with Electron 44.3.0. It covers back, forward and reload with an immediate asynchronous answer; it also remains part of `--leave-confirmation`. The eight confirmation unit tests and desktop typecheck passed. Scoped lint found zero errors. The changed fixture files pass formatting; unrelated existing formatting differences in `tabs.ts` were left untouched.
+
+A separate isolated invocation of the existing page-origin fixture passed link/GET/POST draft preservation, immediate native veto, rejection of late CDP answers, independent HTTP progress and exact payload delivery from a new explicit fixture submission. Those results confirm the stock limitation, not asynchronous Leave continuation. The full leave-confirmation fixture was not qualified on this Mac; its baseline failed in the history cases, and temporary probes advancing past those cases did not complete the subsequent cancellation checks.
+
+Issue #48 remains open. The current upstream Electron implementation still resolves the beforeunload callback synchronously; no native patch or custom binary was built. This Mac has approximately 20 GB free and no Electron/Chromium build checkout. A build host is needed to implement and qualify the proposed native boundary. No installed application/server was restarted and no authenticated site data was used. Windows and packaged behavior were not checked for this follow-up.
+
 ## Preferred implementation boundary
 
 Complete support needs a supported native Electron API that retains the original beforeunload callback and gives main a one-shot asynchronous decision handle. It must continue or cancel Chromium's original pending request, including its POST body, rather than issue a replacement request. This should be developed or adopted at the Electron boundary before changing the browser's page-origin behavior; this repository does not currently own a custom Electron build.
