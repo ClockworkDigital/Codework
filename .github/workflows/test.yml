@@ -69,7 +69,8 @@ jobs:
 
       - name: Run unit tests
         timeout-minutes: 20
-        run: GITHUB_ACTIONS=false bun turbo test
+        # Browser builds and full CLI startup otherwise contend on smaller fork runners.
+        run: GITHUB_ACTIONS=false bun turbo test --concurrency=${{ github.repository == 'anomalyco/opencode' && '10' || '1' }}
         env:
           OPENCODE_EXPERIMENTAL_DISABLE_FILEWATCHER: ${{ runner.os == 'Windows' && 'true' || 'false' }}
 

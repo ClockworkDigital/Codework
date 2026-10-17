@@ -9,7 +9,8 @@ import solid from "vite-plugin-solid"
 
 test("cookie loaders retain their choice, inherit colour tokens, animate, and respect reduced motion", async () => {
   const directory = await mkdtemp(join(tmpdir(), "cm-loading-"))
-  const browser = await chromium.launch()
+  // Embedded SVG images inherit the OS motion preference independently of page emulation.
+  const browser = await chromium.launch({ args: ["--force-prefers-no-reduced-motion"] })
   const server = createServer(async (request, response) => {
     const pathname = new URL(request.url ?? "/", "http://localhost").pathname
     if (pathname === "/") {
