@@ -1,4 +1,4 @@
-import { createStore, reconcile } from "solid-js/store"
+import { createStore, produce, reconcile } from "solid-js/store"
 import { batch, createEffect, createMemo, createSignal, onCleanup } from "solid-js"
 import { createSimpleContext } from "@opencode-ai/ui/context"
 import { persisted } from "@/utils/persist"
@@ -34,7 +34,8 @@ export interface Settings {
     editToolPartsExpanded: boolean
     showCustomAgents: boolean
     mobileTitlebarPosition: "top" | "bottom"
-    quietCompanion: boolean
+    // Migrated into newLayoutDesigns for CookieMonster; retained for unbranded profiles.
+    quietCompanion?: boolean
     newLayoutDesigns?: boolean
     layoutTransitionEligible?: boolean
     agentVisibilityInitialized?: boolean
@@ -196,7 +197,6 @@ const defaultSettings: Settings = {
     editToolPartsExpanded: false,
     showCustomAgents: false,
     mobileTitlebarPosition: "top",
-    quietCompanion: true,
   },
   appearance: {
     fontSize: 14,
@@ -252,6 +252,9 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
       () => store.general?.showCustomAgents,
       defaultSettings.general.showCustomAgents,
     )
+    const branded = !!import.meta.env.VITE_CM_BRAND || !!platform.browserPanel
+    const newInterface = () =>
+      branded ? (store.general?.newLayoutDesigns ?? newLayoutDesignsDefault) : newLayoutDesigns()
     const sunset = oldInterfaceSunset
     const [oldInterfaceRetired, setOldInterfaceRetired] = createSignal(sunset ? Date.now() >= sunset.getTime() : false)
     const layoutTransitionClassified = createMemo(() => typeof store.general?.layoutTransitionEligible === "boolean")
@@ -266,6 +269,8 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
       layoutTransitionState(!!sunset, layoutTransitionEligible(), oldInterfaceRetired(), newInterfaceNoticeDismissed()),
     )
     const newLayoutDesigns = createMemo(() => {
+      // CookieMonster switches presentation without remounting the router or session providers.
+      if (branded) return true
       if (layoutUpgrade()) return true
       if (!ready() && !oldInterfaceRetired()) return legacyNewLayoutDesignsDefault
       if (!layoutTransitionClassified()) {
@@ -307,6 +312,17 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
     }
 
     createEffect(() => {
+      if (!branded || !ready() || store.general.quietCompanion === undefined) return
+      setStore(
+        "general",
+        produce((general) => {
+          general.newLayoutDesigns = general.quietCompanion
+          delete general.quietCompanion
+        }),
+      )
+    })
+
+    createEffect(() => {
       if (!launchReady() || launchState.classified) return
       setLaunchState({
         classified: true,
@@ -325,7 +341,7 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
 
     createEffect(() => {
       if (!ready() || !launchState.classified || launchState.migrationApplied) return
-      if (layoutUpgrade() && store.general?.newLayoutDesigns !== true) {
+      if (!branded && layoutUpgrade() && store.general?.newLayoutDesigns !== true) {
         setStore("general", "newLayoutDesigns", true)
       }
       setLaunchState("migrationApplied", true)
@@ -343,7 +359,7 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
     })
 
     createEffect(() => {
-      if (!ready() || !oldInterfaceRetired()) return
+      if (branded || !ready() || !oldInterfaceRetired()) return
       if (store.general?.newLayoutDesigns === true) return
       setStore("general", "newLayoutDesigns", true)
     })
@@ -433,12 +449,17 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         setMobileTitlebarPosition(value: "top" | "bottom") {
           setStore("general", "mobileTitlebarPosition", value)
         },
-        quietCompanion: withFallback(() => store.general?.quietCompanion, defaultSettings.general.quietCompanion),
+        quietCompanion: () => (branded ? newInterface() : (store.general.quietCompanion ?? true)),
         setQuietCompanion(value: boolean) {
-          setStore("general", "quietCompanion", value)
+          setStore("general", branded ? "newLayoutDesigns" : "quietCompanion", value)
         },
+        newInterface,
         newLayoutDesigns,
         setNewLayoutDesigns(value: boolean) {
+          if (branded) {
+            setStore("general", "newLayoutDesigns", value)
+            return
+          }
           const next = oldInterfaceRetired() ? true : value
           if (newLayoutDesigns() === next) return
           setStore("general", "newLayoutDesigns", next)
@@ -451,8 +472,8 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
           setStore("general", "layoutTransitionEligible", eligible)
         },
         initializeAgentVisibility,
-        layoutTransitionAvailable: createMemo(() => ready() && layoutTransition().available),
-        newInterfaceNoticeVisible: createMemo(() => ready() && layoutTransition().notice),
+        layoutTransitionAvailable: createMemo(() => ready() && (branded || layoutTransition().available)),
+        newInterfaceNoticeVisible: createMemo(() => !branded && ready() && layoutTransition().notice),
         dismissNewInterfaceNotice() {
           setStore("general", "newInterfaceNoticeDismissed", true)
         },

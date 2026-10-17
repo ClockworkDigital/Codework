@@ -1,5 +1,6 @@
 import { useTheme } from "@opencode-ai/ui/theme/context"
 import { useLanguage } from "@/context/language"
+import { usePlatform } from "@/context/platform"
 import { useSettings } from "@/context/settings"
 import { Cm3Icon } from "./cm3-icon"
 import { Show } from "solid-js"
@@ -7,6 +8,7 @@ import { WppAuthControl } from "./wpp-auth-control"
 
 export function TitlebarAppearance() {
   const settings = useSettings()
+  const platform = usePlatform()
   const language = useLanguage()
   const theme = useTheme()
   return (
@@ -21,9 +23,17 @@ export function TitlebarAppearance() {
       <button
         type="button"
         role="switch"
-        aria-label={language.t("settings.general.row.quietCompanion.title")}
+        aria-label={language.t(
+          platform.browserPanel || import.meta.env.VITE_CM_BRAND
+            ? "settings.general.row.newInterface.title"
+            : "settings.general.row.quietCompanion.title",
+        )}
         aria-checked={settings.general.quietCompanion()}
-        title={language.t("settings.general.row.quietCompanion.title")}
+        title={language.t(
+          platform.browserPanel || import.meta.env.VITE_CM_BRAND
+            ? "settings.general.row.newInterface.title"
+            : "settings.general.row.quietCompanion.title",
+        )}
         disabled={!settings.ready()}
         class="flex size-8 items-center justify-center rounded hover:bg-surface-base-hover aria-checked:bg-surface-base-hover focus-visible:outline"
         onClick={() => settings.general.setQuietCompanion(!settings.general.quietCompanion())}

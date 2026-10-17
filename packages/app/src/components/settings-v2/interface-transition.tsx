@@ -25,7 +25,9 @@ export function LayoutTransitionToggle(props: {
             description={props.description}
           >
             <div data-action="settings-new-layout-designs">
-              <Switch checked={props.checked} onChange={props.onChange} />
+              <Switch hideLabel checked={props.checked} onChange={props.onChange}>
+                {props.title}
+              </Switch>
             </div>
           </SettingsRowV2>
         </SettingsListV2>

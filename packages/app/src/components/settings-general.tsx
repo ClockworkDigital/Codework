@@ -268,15 +268,18 @@ export const SettingsGeneral: Component = () => {
         >
           <div data-action="settings-new-layout-designs">
             <Switch
-              checked={settings.general.newLayoutDesigns()}
+              hideLabel
+              checked={settings.general.newInterface()}
               onChange={(checked) => {
                 settings.general.setNewLayoutDesigns(checked)
-                if (!checked) return
+                if (platform.browserPanel || import.meta.env.VITE_CM_BRAND || !checked) return
                 void import("@/components/settings-v2").then((module) => {
                   void dialog.show(() => <module.DialogSettings />)
                 })
               }}
-            />
+            >
+              {language.t("settings.general.row.newInterface.title")}
+            </Switch>
           </div>
         </SettingsRow>
       </SettingsList>
@@ -302,24 +305,26 @@ export const SettingsGeneral: Component = () => {
     <div class="flex flex-col gap-1">
       <SettingsList>
         <SettingsWppChat />
-        <SettingsRow
-          title={language.t("settings.general.row.quietCompanion.title")}
-          description={language.t("settings.general.row.quietCompanion.description")}
-        >
-          <div data-action="settings-quiet-companion">
-            <Switch
-              hideLabel
-              disabled={!settings.ready()}
-              checked={settings.general.quietCompanion()}
-              onChange={(checked) => {
-                dialog.close()
-                settings.general.setQuietCompanion(checked)
-              }}
-            >
-              {language.t("settings.general.row.quietCompanion.title")}
-            </Switch>
-          </div>
-        </SettingsRow>
+        <Show when={!platform.browserPanel && !import.meta.env.VITE_CM_BRAND}>
+          <SettingsRow
+            title={language.t("settings.general.row.quietCompanion.title")}
+            description={language.t("settings.general.row.quietCompanion.description")}
+          >
+            <div data-action="settings-quiet-companion">
+              <Switch
+                hideLabel
+                disabled={!settings.ready()}
+                checked={settings.general.quietCompanion()}
+                onChange={(checked) => {
+                  dialog.close()
+                  settings.general.setQuietCompanion(checked)
+                }}
+              >
+                {language.t("settings.general.row.quietCompanion.title")}
+              </Switch>
+            </div>
+          </SettingsRow>
+        </Show>
 
         <SettingsRow
           title={language.t("settings.general.row.language.title")}

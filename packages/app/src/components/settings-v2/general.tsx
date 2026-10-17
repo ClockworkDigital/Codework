@@ -305,10 +305,10 @@ export const SettingsGeneralV2: Component<{
       title={language.t("settings.general.row.newInterface.title")}
       badge={language.t("settings.general.row.newInterface.badge")}
       description={language.t("settings.general.row.newInterface.description")}
-      checked={settings.general.newLayoutDesigns()}
+      checked={settings.general.newInterface()}
       onChange={(checked) => {
         settings.general.setNewLayoutDesigns(checked)
-        if (checked) return
+        if (platform.browserPanel || import.meta.env.VITE_CM_BRAND || checked) return
         void import("@/components/dialog-settings").then((module) => {
           void dialog.show(() => <module.DialogSettings />)
         })
@@ -329,24 +329,27 @@ export const SettingsGeneralV2: Component<{
     <div class="settings-v2-section">
       <SettingsListV2>
         <SettingsWppChat modern />
-        <SettingsRowV2
-          title={language.t("settings.general.row.quietCompanion.title")}
-          description={language.t("settings.general.row.quietCompanion.description")}
-        >
-          <div data-action="settings-quiet-companion">
-            <Switch
-              hideLabel
-              disabled={!settings.ready()}
-              checked={settings.general.quietCompanion()}
-              onChange={(checked) => {
-                dialog.close()
-                settings.general.setQuietCompanion(checked)
-              }}
-            >
-              {language.t("settings.general.row.quietCompanion.title")}
-            </Switch>
-          </div>
-        </SettingsRowV2>
+        <Show when={!platform.browserPanel && !import.meta.env.VITE_CM_BRAND}>
+          <SettingsRowV2
+            title={language.t("settings.general.row.quietCompanion.title")}
+            description={language.t("settings.general.row.quietCompanion.description")}
+          >
+            <div data-action="settings-quiet-companion">
+              <Switch
+                hideLabel
+                disabled={!settings.ready()}
+                checked={settings.general.quietCompanion()}
+                onChange={(checked) => {
+                  dialog.close()
+                  settings.general.setQuietCompanion(checked)
+                }}
+              >
+                {language.t("settings.general.row.quietCompanion.title")}
+              </Switch>
+            </div>
+          </SettingsRowV2>
+        </Show>
+
         <LanguageSetting />
 
         <PermissionScopeSetting controller={permissionScope} />
