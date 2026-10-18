@@ -1,6 +1,6 @@
 import { Shutdown } from "../lifecycle/shutdown"
-import { app } from "electron"
-import { Context, Effect, FileSystem, Layer, Path } from "effect"
+import { app, powerSaveBlocker } from "electron"
+import { Context, Effect, Fiber, FileSystem, Layer, Path, Ref } from "effect"
 import { BackgroundServiceState } from "./background-service-state"
 import { cleanStages } from "./cli-stages"
 import { DesktopCli } from "./desktop-cli"
@@ -20,6 +20,17 @@ export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const context = yield* Effect.context<FileSystem.FileSystem | Path.Path | DesktopCli.Service>()
+    const scope = yield* Effect.scope
+    const monitor = yield* Ref.make(Effect.void)
+
+    const watch = (endpoint: SidecarCredentials.Data) =>
+      Effect.gen(function* () {
+        const stop = yield* Ref.get(monitor)
+        yield* stop
+        const { SessionPower } = yield* Effect.promise(() => import("./session-power"))
+        const fiber = yield* SessionPower.watch(endpoint, powerSaveBlocker).pipe(Effect.scoped, Effect.forkIn(scope))
+        yield* Ref.set(monitor, Fiber.interrupt(fiber))
+      })
 
     if (import.meta.env.CM_BRAND) {
       const shutdown = yield* Shutdown.Service
@@ -33,8 +44,8 @@ export const layer = Layer.effect(
 
     return Service.of(
       yield* BackgroundServiceState.make({
-        initial: connect("initial").pipe(Effect.provide(context)),
-        reconnect: connect("reconnect").pipe(Effect.provide(context), Effect.orDie),
+        initial: connect("initial").pipe(Effect.tap(watch), Effect.provide(context)),
+        reconnect: connect("reconnect").pipe(Effect.tap(watch), Effect.provide(context), Effect.orDie),
       }),
     )
   }),
@@ -52,6 +63,13 @@ const connect = Effect.fn("BackgroundService.connect")(function* (mode: "initial
   if (isolated) process.env.XDG_STATE_HOME = app.getPath("userData")
   const client = yield* Effect.promise(() => import("@opencode/client/service"))
 
+  const env = Object.fromEntries(
+    Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined),
+  )
+
+  if (import.meta.env.CM_BRAND)
+    env.CM_SERVICE_FILE = path.join(app.getPath("userData"), "opencode", "service-cookiemonster.json")
+
   const ensure = () =>
     client.Service.ensure({
       file: import.meta.env.CM_BRAND
@@ -59,14 +77,7 @@ const connect = Effect.fn("BackgroundService.connect")(function* (mode: "initial
         : isolated && process.env.OPENCODE_DESKTOP_SERVER_CHANNEL === "local"
           ? path.join(app.getPath("userData"), "opencode", "service-local.json")
           : undefined,
-      env: {
-        ...Object.fromEntries(
-          Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined),
-        ),
-        ...(import.meta.env.CM_BRAND
-          ? { CM_SERVICE_FILE: path.join(app.getPath("userData"), "opencode", "service-cookiemonster.json") }
-          : {}),
-      },
+      env,
       version,
       // A fixed port makes a second contender fail to bind and back off; port 0 never collides, so two
       // services could boot against the same database.
