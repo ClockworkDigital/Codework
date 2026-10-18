@@ -1,0 +1,177 @@
+name: cookiemonster-desktop
+run-name: CookieMonster V2 beta ${{ inputs.beta }} (macOS arm64)
+
+on:
+  workflow_dispatch:
+    inputs:
+      beta:
+        description: "Beta number for the current desktop version"
+        required: true
+        default: "2"
+        type: string
+      publish:
+        description: "Publish the verified installer as a prerelease"
+        required: true
+        default: false
+        type: boolean
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: signed macOS arm64 beta
+    runs-on: macos-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: bash
+    env:
+      OPENCODE_CHANNEL: beta
+      OPENCODE_CLI_TARGET: aarch64-apple-darwin
+      OPENCODE_CLI_DIST: ${{ github.workspace }}/packages/cli/dist
+      CM_BRAND: "1"
+      CM_UNSIGNED: "0"
+    steps:
+      - name: Checkout release source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Resolve beta version
+        env:
+          BETA_NUMBER: ${{ inputs.beta }}
+        run: |
+          test "$RUNNER_ARCH" = ARM64
+          if [[ ! "$BETA_NUMBER" =~ ^[1-9][0-9]*$ ]]; then
+            echo "Beta number must be a positive integer." >&2
+            exit 1
+          fi
+          base=$(node -p "require('./packages/desktop/package.json').version")
+          version="${base}-beta.${BETA_NUMBER}"
+          echo "CM_VERSION=$version" >> "$GITHUB_ENV"
+          echo "OPENCODE_VERSION=$version" >> "$GITHUB_ENV"
+          echo "RELEASE_TAG=cookiemonster-v$version" >> "$GITHUB_ENV"
+
+      - name: Setup Bun and dependencies
+        timeout-minutes: 7
+        uses: ./.github/actions/setup-bun
+
+      - name: Build the matching V2 CLI for Apple Silicon
+        timeout-minutes: 8
+        run: |
+          bun packages/cli/script/build.ts --target=opencode-darwin-arm64 --skip-install
+          test "$(packages/cli/dist/cli-darwin-arm64/bin/opencode --version)" = "$CM_VERSION"
+
+      - name: Build desktop renderer and main
+        timeout-minutes: 5
+        working-directory: packages/desktop
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+        run: bun run build
+
+      - name: Test installer configuration and user installation
+        timeout-minutes: 2
+        working-directory: packages/desktop
+        env:
+          CM_BRAND: "0"
+          CM_UNSIGNED: "0"
+          OPENCODE_CHANNEL: dev
+        run: bun test --preload ./test/preload.ts --timeout 20000 electron-builder.config.test.ts src/main/macos-user-install.test.ts
+
+      - name: Import Developer ID certificate
+        uses: apple-actions/import-codesign-certs@8f3fb608891dd2244cdab3d69cd68c0d37a7fe93 # v2.0.0
+        with:
+          keychain: build
+          p12-file-base64: ${{ secrets.APPLE_CERTIFICATE }}
+          p12-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+
+      - name: Setup notarization key
+        env:
+          APPLE_API_KEY_CONTENT: ${{ secrets.APPLE_API_KEY_PATH }}
+        run: |
+          test -n "$APPLE_API_KEY_CONTENT"
+          umask 077
+          printf '%s' "$APPLE_API_KEY_CONTENT" > "$RUNNER_TEMP/apple-api-key.p8"
+
+      - name: Package, sign and notarize the application
+        timeout-minutes: 12
+        working-directory: packages/desktop
+        env:
+          CSC_KEYCHAIN: build.keychain
+          APPLE_API_KEY: ${{ runner.temp }}/apple-api-key.p8
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: bunx electron-builder --mac dmg --arm64 --publish never --config electron-builder.config.ts -c.forceCodeSigning=true -c.dmg.sign=true
+
+      - name: Notarize and staple the installer
+        timeout-minutes: 8
+        env:
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          dmg=packages/desktop/dist/cookiemonster-mac-arm64.dmg
+          xcrun notarytool submit "$dmg" --key "$RUNNER_TEMP/apple-api-key.p8" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER" --wait --timeout 7m
+          xcrun stapler staple "$dmg"
+
+      - name: Remove notarization key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/apple-api-key.p8"
+
+      - name: Verify the mounted installer and both versions
+        timeout-minutes: 3
+        run: |
+          dmg=packages/desktop/dist/cookiemonster-mac-arm64.dmg
+          hdiutil verify "$dmg"
+          codesign --verify --strict --verbose=2 "$dmg"
+          xcrun stapler validate "$dmg"
+          spctl --assess --type open --context context:primary-signature --verbose=2 "$dmg"
+          mount="$RUNNER_TEMP/cm-beta-mount"
+          mkdir "$mount"
+          hdiutil attach "$dmg" -readonly -nobrowse -mountpoint "$mount"
+          trap 'hdiutil detach "$mount"' EXIT
+          app="$mount/CookieMonster.app"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          spctl --assess --type execute --verbose=2 "$app"
+          xcrun stapler validate "$app"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")" = "$CM_VERSION"
+          test "$("$app/Contents/Resources/opencode-cli" --version)" = "$CM_VERSION"
+          test "$(cat "$app/Contents/Resources/opencode-cli.version")" = "$CM_VERSION"
+          cd packages/desktop/dist
+          shasum -a 256 cookiemonster-mac-arm64.dmg > SHA256SUMS.txt
+
+      - name: Upload verified installer
+        if: ${{ !inputs.publish }}
+        timeout-minutes: 3
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: cookiemonster-macos-arm64-beta
+          path: |
+            packages/desktop/dist/cookiemonster-mac-arm64.dmg
+            packages/desktop/dist/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Publish beta prerelease
+        if: inputs.publish
+        timeout-minutes: 3
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > "$RUNNER_TEMP/beta-notes.md" <<EOF
+          macOS Apple Silicon Beta built from **v2-upgrade** at $GITHUB_SHA.
+
+          Changes since Beta 1:
+          - Keep the system awake through full agent runs, including tools, retries and gaps between model calls, while allowing the screen to sleep.
+          - Restore **Toggle browser windows** in the **WPP: Signed in** menu.
+
+          The application and bundled V2 CLI both report **$CM_VERSION**. The app and DMG are Developer ID signed, notarized and stapled. Installer integrity, mounted app signatures, Gatekeeper acceptance and both version strings passed verification.
+
+          Installing replaces the existing CookieMonster application. Live WPP authentication and an end-to-end agent run were not exercised in this packaging job. Windows and Linux installers are not included.
+          EOF
+          gh release create "$RELEASE_TAG" packages/desktop/dist/cookiemonster-mac-arm64.dmg packages/desktop/dist/SHA256SUMS.txt --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "CookieMonster $CM_VERSION — V2" --notes-file "$RUNNER_TEMP/beta-notes.md" --prerelease --latest=false
+          echo "### [$CM_VERSION]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/$RELEASE_TAG)" >> "$GITHUB_STEP_SUMMARY"
