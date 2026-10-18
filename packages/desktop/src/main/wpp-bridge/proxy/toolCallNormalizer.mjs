@@ -1,244 +1,318 @@
 import { looksLikeIncompleteAnthropicToolCall } from "./anthropicToolFormat.mjs";
 
-export function chooseAssistantResponse(finalText, toolCallParts, alternateAssistantTexts = []) {
-  const fromText = normalizeAssistantMessage(finalText);
+// Turns model text into OpenAI tool_calls. Only the two transport protocols count, and only outside
+// Markdown code: fenced blocks and inline code hold examples, so they never run.
+// - XML: a function_calls wrapper holding invoke elements with parameter values.
+// - JSON: an object whose type is "tool_call", with tool and args fields.
+// Pass the request's tools as options.tools. XML values are then typed by each tool's schema, and a
+// JSON call must name a listed tool, so JSON that only appears in an answer stays prose.
+export function chooseAssistantResponse(finalText, toolCallParts, alternateAssistantTexts = [], options = {}) {
+  const fromText = attemptNormalize(finalText, options);
+
+  if (fromText.response?.finish_reason === "tool_calls" && fromText.response.tool_calls?.length) {
+    return fromText.response;
+  }
+
   const fromParts = normalizeFromToolCallParts(toolCallParts);
 
-  if (fromText?.finish_reason === "tool_calls" && fromText.tool_calls?.length) {
-    return fromText;
-  }
-
   if (fromParts?.tool_calls?.length) {
-    return withPreamble(fromParts, finalText);
+    return withPreamble(fromParts, finalText, options);
   }
 
-  const fromAlternate = alternateAssistantTexts
-    .map((content) => normalizeAssistantMessage(content))
+  // A malformed candidate must not hide a later valid one, so each is parsed on its own.
+  const fromAlternate = (Array.isArray(alternateAssistantTexts) ? alternateAssistantTexts : [])
+    .map((content) => attemptNormalize(content, options).response)
     .find((response) => response?.finish_reason === "tool_calls" && response.tool_calls?.length);
 
   if (fromAlternate) {
-    return withPreamble(fromAlternate, finalText);
+    return withPreamble(fromAlternate, finalText, options);
   }
 
-  return fromText;
+  if (fromText.error) {
+    throw fromText.error;
+  }
+
+  return fromText.response;
 }
 
 export function normalizeFromToolCallParts(toolCallParts) {
-  const parts = Object.values(toolCallParts || {}).filter((p) => p?.name);
+  const parts = Object.values(toolCallParts || {}).filter((part) => part?.name);
 
   if (parts.length === 0) {
     return null;
   }
 
-  const tool_calls = parts.map((part) => ({
-    id: part.id || `call_${crypto.randomUUID().replace(/-/g, "")}`,
-    type: "function",
-    function: {
-      name: part.name,
-      arguments: part.arguments || "{}"
+  return toolCallResponse(
+    null,
+    parts.map((part) => ({ id: part.id, name: part.name, arguments: part.arguments || "{}" }))
+  );
+}
+
+export function normalizeAssistantMessage(content, options = {}) {
+  if (typeof content !== "string") {
+    return proseResponse(content);
+  }
+
+  const schemas = toolSchemas(options.tools);
+  const code = markdownCodeRanges(content);
+
+  // A real XML call is emitted bare, so parse from the first marker outside Markdown code. Code
+  // fences inside its parameter values come after that marker and stay part of the values.
+  const xmlStart = firstUnfencedMarker(content, code);
+
+  if (xmlStart >= 0) {
+    const xmlContent = content.slice(xmlStart);
+    const xml = parseXmlToolCalls(xmlContent, schemas);
+
+    if (xml.incomplete || (xml.calls.length === 0 && looksLikeIncompleteAnthropicToolCall(xmlContent))) {
+      throw incompleteToolCallError();
     }
-  }));
+
+    if (xml.calls.length > 0) {
+      return toolCallResponse(content.slice(0, xmlStart).trimEnd() || null, xml.calls);
+    }
+  }
+
+  // XML markup is unambiguous, so its unknown names still reach OpenCode, which reports them to the
+  // model. JSON is checked against the request's tools because answers often contain JSON.
+  const jsonCalls = typedJsonToolCalls(content, code).filter((call) => allowedTool(call.tool, schemas));
+
+  if (jsonCalls.length > 0) {
+    return toolCallResponse(
+      null,
+      dedupeToolCalls(jsonCalls).map((call) => ({ id: call.id, name: call.tool, args: call.args }))
+    );
+  }
+
+  const whole = parseWholeMessageJson(content);
+
+  if (whole?.type === "final") {
+    return proseResponse(whole.message || "");
+  }
+
+  const delegated = delegatedSubagentCall(whole);
+
+  if (delegated && allowedTool(delegated.name, schemas)) {
+    return toolCallResponse(null, [delegated]);
+  }
+
+  return proseResponse(content);
+}
+
+export function parseAnthropicXmlToolCalls(content, options = {}) {
+  if (typeof content !== "string") {
+    return null;
+  }
+
+  const calls = parseXmlToolCalls(content, toolSchemas(options.tools)).calls;
+  return calls.length > 0 ? calls : null;
+}
+
+function attemptNormalize(content, options) {
+  try {
+    return { response: normalizeAssistantMessage(content, options) };
+  } catch (error) {
+    return { error };
+  }
+}
+
+function withPreamble(message, content, options) {
+  const text = typeof content === "string" ? content.trimEnd() : "";
+
+  if (!text) {
+    return message;
+  }
+
+  // Text that is itself a tool call, even a broken one, is not a preamble.
+  const parsed = attemptNormalize(text, options);
+  return parsed.error || parsed.response.tool_calls?.length ? message : { ...message, content: text };
+}
+
+function proseResponse(content) {
+  return { content, tool_calls: undefined, finish_reason: "stop" };
+}
+
+function toolCallResponse(content, calls) {
+  const seen = new Set();
 
   return {
-    content: null,
-    tool_calls,
+    content,
+    tool_calls: calls.map((call) => {
+      const given = call.id == null ? "" : String(call.id);
+      // OpenCode keys tool results by id, so a repeated id gets a fresh one instead of colliding.
+      const id = given && !seen.has(given) ? given : generatedCallId();
+      seen.add(id);
+      return {
+        id,
+        type: "function",
+        function: {
+          name: call.name,
+          arguments: call.arguments ?? JSON.stringify(call.args || {})
+        }
+      };
+    }),
     finish_reason: "tool_calls"
   };
 }
 
-export function normalizeAssistantMessage(content) {
-  const unwrappedContent = unwrapSingleCodeFence(content);
-  const extractionContent = unwrappedContent === content
-    ? removeCodeFencedBlocks(content)
-    : unwrappedContent;
+function generatedCallId() {
+  return `call_${crypto.randomUUID().replace(/-/g, "")}`;
+}
 
-  // A real XML tool call is emitted bare (the system prompt forbids fencing it), so parse it from
-  // the RAW text starting at the first UNFENCED <function_calls>/<invoke>. This keeps code fences
-  // INSIDE a parameter value intact — stripping them (removeCodeFencedBlocks) decapitates the
-  // closing </parameter> when the model writes a markdown/code file, dropping the `content` arg.
-  // A fenced *example* has its marker inside a fence, so it isn't found here and stays inert.
-  let xmlCalls = null;
-  let xmlPreamble = null;
-  let incompleteXml = false;
-  if (unwrappedContent !== content) {
-    xmlCalls = parseAnthropicXmlToolCalls(unwrappedContent);
-  } else {
-    const start = unfencedToolCallStart(content);
-    if (start >= 0) {
-      const xmlContent = content.slice(start);
-      xmlCalls = parseAnthropicXmlToolCalls(xmlContent);
-      xmlPreamble = content.slice(0, start).trimEnd() || null;
-      incompleteXml = !xmlCalls && looksLikeIncompleteAnthropicToolCall(xmlContent);
+function incompleteToolCallError() {
+  const error = new Error("The WPP agent returned an incomplete XML tool call.");
+  error.statusCode = 502;
+  error.type = "o1_code_incomplete_tool_call";
+  return error;
+}
+
+function toolSchemas(tools) {
+  return new Map((Array.isArray(tools) ? tools : []).flatMap((tool) => {
+    const fn = tool?.function || tool;
+    return typeof fn?.name === "string" ? [[fn.name, fn.parameters?.properties || {}]] : [];
+  }));
+}
+
+function allowedTool(name, schemas) {
+  return schemas.size === 0 || schemas.has(name);
+}
+
+// Markdown code that holds examples: fenced blocks (backtick or tilde fences, closed by a matching
+// fence or running to the end of the text, as in CommonMark) and inline code on a single line.
+// Fences are accepted at any indent so examples nested in list items stay inert too.
+function markdownCodeRanges(text) {
+  const ranges = [];
+  let fence = null;
+  let offset = 0;
+
+  for (const line of text.split("\n")) {
+    const marker = line.match(/^[ \t]*(`{3,}|~{3,})/);
+    const lineEnd = offset + line.length;
+
+    if (fence) {
+      const closes = marker
+        && marker[1][0] === fence.char
+        && marker[1].length >= fence.size
+        && !line.slice(marker[0].length).trim();
+
+      if (closes) {
+        ranges.push({ start: fence.start, end: lineEnd });
+        fence = null;
+      }
+    } else if (marker && !(marker[1][0] === "`" && line.slice(marker[0].length).includes("`"))) {
+      fence = { char: marker[1][0], size: marker[1].length, start: offset };
+    } else {
+      ranges.push(...inlineCodeRanges(line, offset));
     }
+
+    offset = lineEnd + 1;
   }
 
-  if (xmlCalls && xmlCalls.length > 0) {
-    return {
-      content: xmlPreamble,
-      tool_calls: xmlCalls.map((call) => ({
-        id: call.id || `call_${crypto.randomUUID().replace(/-/g, "")}`,
-        type: "function",
-        function: {
-          name: call.name,
-          arguments: JSON.stringify(call.args || {})
-        }
-      })),
-      finish_reason: "tool_calls"
-    };
+  if (fence) {
+    ranges.push({ start: fence.start, end: text.length });
   }
 
-  if (incompleteXml) {
-    const error = new Error("The WPP agent returned an incomplete XML tool call.");
-    error.statusCode = 502;
-    error.type = "o1_code_incomplete_tool_call";
-    throw error;
-  }
-
-  const jsonToolCalls = parseTrailingToolCallJsons(extractionContent);
-
-  if (jsonToolCalls?.length) {
-    return {
-      content: null,
-      tool_calls: toolCallsFromJsonCalls(dedupeToolCalls(jsonToolCalls)),
-      finish_reason: "tool_calls"
-    };
-  }
-
-  // A model may emit several calls as one trailing JSON array ([{...},{...}]) rather than
-  // back-to-back objects; accept that shape too.
-  const arrayToolCalls = parseTrailingToolCallArray(extractionContent);
-
-  if (arrayToolCalls?.length) {
-    return {
-      content: null,
-      tool_calls: toolCallsFromJsonCalls(dedupeToolCalls(arrayToolCalls)),
-      finish_reason: "tool_calls"
-    };
-  }
-
-  const leadingJsonToolCall = parseLeadingToolCallJson(extractionContent);
-
-  if (leadingJsonToolCall) {
-    return {
-      content: null,
-      tool_calls: toolCallsFromJsonCalls([leadingJsonToolCall]),
-      finish_reason: "tool_calls"
-    };
-  }
-
-  const embeddedJsonToolCalls = parseEmbeddedToolCallJsons(extractionContent);
-
-  if (embeddedJsonToolCalls?.length) {
-    return {
-      content: null,
-      tool_calls: toolCallsFromJsonCalls(dedupeToolCalls(embeddedJsonToolCalls)),
-      finish_reason: "tool_calls"
-    };
-  }
-
-  const parsed = parseDelegatedAgentJson(extractionContent)
-    || parseStrictJson(unwrappedContent);
-
-  if (!parsed) {
-    return {
-      content,
-      tool_calls: undefined,
-      finish_reason: "stop"
-    };
-  }
-
-  if (parsed.type === "final") {
-    return {
-      content: parsed.message || "",
-      tool_calls: undefined,
-      finish_reason: "stop"
-    };
-  }
-
-  if (parsed.type === "tool_call" && parsed.tool) {
-    return {
-      content: null,
-      tool_calls: [
-        {
-          id: parsed.id || `call_${crypto.randomUUID().replace(/-/g, "")}`,
-          type: "function",
-          function: {
-            name: parsed.tool,
-            arguments: JSON.stringify(parsed.args || {})
-          }
-        }
-      ],
-      finish_reason: "tool_calls"
-    };
-  }
-
-  return {
-    content,
-    tool_calls: undefined,
-    finish_reason: "stop"
-  };
+  return ranges;
 }
 
-function withPreamble(message, content) {
-  const text = typeof content === "string" ? content.trimEnd() : "";
+function inlineCodeRanges(line, offset) {
+  const runs = [...line.matchAll(/`+/g)];
+  const ranges = [];
 
-  if (!text || normalizeAssistantMessage(text).tool_calls?.length) {
-    return message;
+  for (let index = 0; index < runs.length; index += 1) {
+    const close = runs.findIndex((run, later) => later > index && run[0].length === runs[index][0].length);
+
+    if (close < 0) {
+      continue;
+    }
+
+    ranges.push({ start: offset + runs[index].index, end: offset + runs[close].index + runs[close][0].length });
+    index = close;
   }
 
-  return { ...message, content: text };
+  return ranges;
 }
 
-// Index of the first <function_calls>/<invoke> marker that is NOT inside a ``` fenced block, or
-// -1. Fences are paired left-to-right (open/close); a real bare tool call's marker precedes any
-// fences in its own parameter values, so it reads as unfenced, while a fenced example's marker sits
-// inside a span and is skipped.
-function unfencedToolCallStart(content) {
-  if (typeof content !== "string") {
-    return -1;
-  }
+function rangeAt(index, ranges) {
+  return ranges.find((range) => index >= range.start && index < range.end);
+}
 
-  const ticks = [];
-  const fence = /```/g;
-  let f;
-  while ((f = fence.exec(content)) !== null) {
-    ticks.push(f.index);
-  }
-
-  const spans = [];
-  for (let i = 0; i + 1 < ticks.length; i += 2) {
-    spans.push([ticks[i], ticks[i + 1] + 3]);
-  }
-
+function firstUnfencedMarker(content, code) {
   const marker = /<function_calls\b|<invoke\b/g;
-  let m;
-  while ((m = marker.exec(content)) !== null) {
-    if (!spans.some(([start, end]) => m.index >= start && m.index < end)) {
-      return m.index;
+  let match;
+
+  while ((match = marker.exec(content)) !== null) {
+    const range = rangeAt(match.index, code);
+
+    if (!range) {
+      return match.index;
     }
+
+    marker.lastIndex = Math.max(marker.lastIndex, range.end);
   }
 
   return -1;
 }
 
-export function parseAnthropicXmlToolCalls(content) {
-  if (typeof content !== "string" || !content.includes("<invoke")) {
-    return null;
-  }
-
+function parseXmlToolCalls(content, schemas) {
   const calls = [];
-  const invokeRegex = /<invoke\b([^>]*)>([\s\S]*?)<\/invoke>/gi;
+  const open = /<invoke\b([^>]*)>/gi;
+  let cursor = 0;
   let match;
 
-  while ((match = invokeRegex.exec(content)) !== null) {
+  while ((match = open.exec(content)) !== null) {
+    const bodyStart = open.lastIndex;
+    const close = invokeClose(content, bodyStart);
+
+    if (!close) {
+      return { calls, incomplete: true };
+    }
+
     const attributes = parseXmlAttributes(match[1]);
-    const name = attributes.name;
-    if (!name) continue;
-    const body = match[2];
-    calls.push(normalizeAnthropicInvoke({ id: attributes.id || "", name, args: extractInvokeParameters(body, name) }));
+    cursor = close.end;
+    open.lastIndex = close.end;
+
+    if (attributes.name) {
+      calls.push(normalizeAnthropicInvoke({
+        id: attributes.id || "",
+        name: attributes.name,
+        args: extractInvokeParameters(content.slice(bodyStart, close.start), attributes.name, schemas.get(attributes.name))
+      }));
+    }
   }
 
-  return calls.length > 0 ? calls : null;
+  return { calls, incomplete: calls.length > 0 && truncatedInvokeTail(content.slice(cursor)) };
+}
+
+// An invoke ends at the first close tag followed by another invoke, the wrapper's close tag or the
+// end of the text. A close tag inside a parameter value is followed by more value text instead.
+// Without such a close, the last close tag is used so a call followed by stray prose still parses.
+function invokeClose(content, from) {
+  const close = /<\/invoke\s*>/gi;
+  const structural = /\s*(?:<invoke\b|<\/function_calls\s*>|$)/y;
+  close.lastIndex = from;
+  let last = null;
+  let match;
+
+  while ((match = close.exec(content)) !== null) {
+    const found = { start: match.index, end: close.lastIndex };
+    structural.lastIndex = found.end;
+
+    if (structural.test(content)) {
+      return found;
+    }
+
+    last = found;
+  }
+
+  return last;
+}
+
+// After the last complete invoke, only whitespace, the wrapper's close tag or prose may follow. A
+// partial invoke opening there means the output was cut off partway through the batch.
+function truncatedInvokeTail(rest) {
+  const tail = rest.trim();
+  return tail !== "" && (tail.startsWith("<invoke") || "<invoke".startsWith(tail));
 }
 
 function parseXmlAttributes(text) {
@@ -251,45 +325,103 @@ function parseXmlAttributes(text) {
   return attributes;
 }
 
-// Extract <parameter name="X"> values from an invoke body. Each value runs from its opening tag to
-// the EARLIEST terminator: the protocol's </parameter>, a name-based close the model sometimes
-// emits instead (e.g. </content> for name="content"), or the next <parameter> opening. This
-// tolerates the common Opus failure mode of closing the final/large parameter with the wrong tag or
-// omitting it entirely, which otherwise drops the argument (observed: `write` losing `content`).
-function extractInvokeParameters(body, toolName) {
+// A parameter value is raw text up to a structural close: a close tag (the protocol's, or one named
+// after the parameter, which Opus sometimes emits instead) followed by the next parameter opening or
+// by the end of the invoke. Close tags inside the value are followed by more value text, so they no
+// longer truncate it. A CDATA-wrapped value is taken verbatim.
+function extractInvokeParameters(body, toolName, properties = {}) {
   const args = {};
-  const openRegex = /<parameter\s+name=(["'])([^"']+)\1\s*>/gi;
-  const opens = [];
-  let open;
+  let open = firstParameterOpen(body, 0);
 
-  while ((open = openRegex.exec(body)) !== null) {
-    opens.push({ name: open[2], valueStart: openRegex.lastIndex, openStart: open.index });
-  }
-
-  for (let i = 0; i < opens.length; i += 1) {
-    const { name, valueStart } = opens[i];
-    const hardEnd = i + 1 < opens.length ? opens[i + 1].openStart : body.length;
-    const slice = body.slice(valueStart, hardEnd);
-    const raw = decodeXmlEntities(trimParameterClose(slice, name));
+  while (open) {
+    const value = cdataParameterValue(body, open) || plainParameterValue(body, open);
+    const schema = Object.hasOwn(properties, open.name) ? properties[open.name] : undefined;
     // Site-tool arguments are JSON text, not a nested transport object.
-    args[name] = toolName === "browser_execute_site_tool" && name === "arguments" ? raw : coerceParameterValue(raw);
+    args[open.name] = toolName === "browser_execute_site_tool" && open.name === "arguments"
+      ? value.text
+      : coerceParameterValue(value.text, schema);
+    open = value.next;
   }
 
   return args;
 }
 
-function trimParameterClose(value, name) {
-  const ends = [];
-  const standard = value.indexOf("</parameter>");
-  if (standard >= 0) {
-    ends.push(standard);
-  }
-  const named = value.search(new RegExp(`</${escapeRegExp(name)}\\s*>`, "i"));
-  if (named >= 0) {
-    ends.push(named);
+function firstParameterOpen(body, from) {
+  const open = /<parameter\s+name=(["'])([^"']+)\1\s*>/gi;
+  open.lastIndex = from;
+  const match = open.exec(body);
+  return match ? { name: match[2], start: match.index, valueStart: open.lastIndex } : null;
+}
+
+function parameterOpenAt(body, index) {
+  const open = /\s*<parameter\s+name=(["'])([^"']+)\1\s*>/iy;
+  open.lastIndex = index;
+  const match = open.exec(body);
+  return match ? { name: match[2], start: match.index, valueStart: open.lastIndex } : null;
+}
+
+function closeTagPattern(name, flags) {
+  return new RegExp(`<\\/(?:parameter|${escapeRegExp(name)})\\s*>`, `i${flags}`);
+}
+
+function parameterBoundaryAt(body, index, name) {
+  const close = closeTagPattern(name, "y");
+  close.lastIndex = index;
+
+  if (!close.test(body)) {
+    return null;
   }
 
-  return ends.length > 0 ? value.slice(0, Math.min(...ends)) : value;
+  const next = parameterOpenAt(body, close.lastIndex);
+
+  if (next) {
+    return { next };
+  }
+
+  return body.slice(close.lastIndex).trim() === "" ? { next: null } : null;
+}
+
+function plainParameterValue(body, open) {
+  const close = closeTagPattern(open.name, "g");
+  close.lastIndex = open.valueStart;
+  let match;
+
+  while ((match = close.exec(body)) !== null) {
+    const boundary = parameterBoundaryAt(body, match.index, open.name);
+
+    if (boundary) {
+      return { text: decodeXmlEntities(body.slice(open.valueStart, match.index)), next: boundary.next };
+    }
+  }
+
+  // No structural close: the model omitted or mangled it. Keep the legacy guess of ending at the
+  // next opening or the end of the invoke, cut at the first close tag in between.
+  const next = firstParameterOpen(body, open.valueStart);
+  const slice = body.slice(open.valueStart, next ? next.start : body.length);
+  const stray = closeTagPattern(open.name, "").exec(slice);
+  return { text: decodeXmlEntities(stray ? slice.slice(0, stray.index) : slice), next };
+}
+
+function cdataParameterValue(body, open) {
+  const cdata = /\s*<!\[CDATA\[/y;
+  cdata.lastIndex = open.valueStart;
+
+  if (!cdata.test(body)) {
+    return null;
+  }
+
+  const innerStart = cdata.lastIndex;
+
+  for (let end = body.indexOf("]]>", innerStart); end >= 0; end = body.indexOf("]]>", end + 1)) {
+    const closeAt = end + 3 + body.slice(end + 3).search(/\S|$/);
+    const boundary = parameterBoundaryAt(body, closeAt, open.name);
+
+    if (boundary) {
+      return { text: body.slice(innerStart, end), next: boundary.next };
+    }
+  }
+
+  return null;
 }
 
 function escapeRegExp(text) {
@@ -316,96 +448,226 @@ function normalizeAnthropicInvoke(call) {
   return call;
 }
 
+const XML_ENTITIES = { amp: "&", lt: "<", gt: ">", quot: "\"", apos: "'" };
+
+// One pass, so an escaped ampersand is never decoded twice. Numeric references cover all of
+// Unicode; invalid ones stay as written.
 function decodeXmlEntities(text) {
-  return text
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, "\"")
-    .replace(/&apos;/g, "'")
-    .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)))
-    .replace(/&amp;/g, "&");
+  return text.replace(/&(?:#(\d+)|#x([0-9a-fA-F]+)|(amp|lt|gt|quot|apos));/g, (entity, decimal, hex, name) => {
+    if (name) {
+      return XML_ENTITIES[name];
+    }
+
+    const code = decimal ? Number(decimal) : Number.parseInt(hex, 16);
+    return code > 0 && code <= 0x10ffff && (code < 0xd800 || code > 0xdfff) ? String.fromCodePoint(code) : entity;
+  });
 }
 
-function coerceParameterValue(raw) {
-  const trimmed = raw.trim();
-
-  if (trimmed === "") {
+// A value stays the exact text unless the tool's schema rules out a string. Without a schema, keep
+// the legacy guess so unknown tools still receive booleans, numbers and JSON.
+function coerceParameterValue(raw, schema) {
+  if (schemaTypes(schema).has("string")) {
     return raw;
   }
 
+  const trimmed = raw.trim();
+
+  if (trimmed === "") return raw;
   if (trimmed === "true") return true;
   if (trimmed === "false") return false;
   if (trimmed === "null") return null;
 
-  if ((trimmed.startsWith("{") && trimmed.endsWith("}")) ||
-      (trimmed.startsWith("[") && trimmed.endsWith("]"))) {
-    try {
-      return parseJsonWithRawWindowsPathRepair(trimmed);
-    } catch {
-      return raw;
-    }
+  if ((trimmed.startsWith("{") && trimmed.endsWith("}")) || (trimmed.startsWith("[") && trimmed.endsWith("]"))) {
+    return parseJsonLenient(trimmed) ?? raw;
   }
 
-  if (/^-?\d+$/.test(trimmed)) {
-    const n = Number(trimmed);
-    if (Number.isSafeInteger(n)) return n;
-  }
-
-  if (/^-?\d+\.\d+$/.test(trimmed)) {
-    return Number(trimmed);
-  }
+  if (/^-?\d+$/.test(trimmed) && Number.isSafeInteger(Number(trimmed))) return Number(trimmed);
+  if (/^-?\d+\.\d+$/.test(trimmed)) return Number(trimmed);
 
   return raw;
 }
 
-function unwrapSingleCodeFence(content) {
-  if (typeof content !== "string") {
-    return content;
+function schemaTypes(schema) {
+  if (!schema || typeof schema !== "object") {
+    return new Set();
   }
 
-  const match = content.trim().match(/^```(?:json|xml)?\s*\n?([\s\S]*?)\n?```$/);
+  const declared = [schema.type].flat().filter((type) => typeof type === "string");
+  const values = [...(Array.isArray(schema.enum) ? schema.enum : []), ...("const" in schema ? [schema.const] : [])]
+    .map(jsonType);
+  const nested = [schema.anyOf, schema.oneOf, schema.allOf]
+    .filter(Array.isArray)
+    .flatMap((list) => list.flatMap((item) => [...schemaTypes(item)]));
 
-  return match ? match[1] : content;
+  return new Set([...declared, ...values, ...nested]);
 }
 
-function removeCodeFencedBlocks(content) {
-  if (typeof content !== "string") {
-    return content;
-  }
-
-  return content.replace(/```[\s\S]*?```/g, "");
+function jsonType(value) {
+  if (value === null) return "null";
+  if (Array.isArray(value)) return "array";
+  return typeof value;
 }
 
-function parseStrictJson(content) {
-  if (typeof content !== "string") {
-    return null;
+function typedJsonToolCalls(content, code) {
+  if (!content.includes("tool_call")) {
+    return [];
   }
 
+  return jsonObjectCandidates(content, code)
+    .map((candidate) => parseJsonLenient(candidate))
+    .filter(isTypedToolCall);
+}
+
+// Every balanced object outside Markdown code that starts like JSON. Each start is scanned on its
+// own, so a stray brace in prose cannot swallow a later call.
+function jsonObjectCandidates(content, code) {
+  const candidates = [];
+  const start = /\{\s*"/g;
+  let lastEnd = 0;
+  let match;
+
+  while ((match = start.exec(content)) !== null) {
+    const range = rangeAt(match.index, code);
+
+    // Backticks inside an accepted object's strings are data. A range they open can pair with
+    // backticks in a later object on the same line, so it must not hide that object.
+    if (range && range.start >= lastEnd) {
+      start.lastIndex = Math.max(start.lastIndex, range.end);
+      continue;
+    }
+
+    const end = matchingBrace(content, match.index);
+
+    if (end >= 0) {
+      candidates.push(content.slice(match.index, end));
+      start.lastIndex = end;
+      lastEnd = end;
+    }
+  }
+
+  return candidates;
+}
+
+function matchingBrace(text, start) {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let index = start; index < text.length; index += 1) {
+    const char = text[index];
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === "\"") {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === "\"") {
+      inString = true;
+    } else if (char === "{") {
+      depth += 1;
+    } else if (char === "}") {
+      depth -= 1;
+
+      if (depth === 0) {
+        return index + 1;
+      }
+    }
+  }
+
+  return -1;
+}
+
+function isTypedToolCall(value) {
+  return Boolean(value)
+    && typeof value === "object"
+    && value.type === "tool_call"
+    && typeof value.tool === "string"
+    && value.tool.trim() !== "";
+}
+
+// Identical calls with the same id, or with no id, are one call repeated in the text. Calls that
+// carry different ids are distinct even when their arguments match.
+function dedupeToolCalls(calls) {
+  const seen = new Set();
+
+  return calls.filter((call) => {
+    const key = JSON.stringify([call.id ?? "", call.tool, call.args ?? {}]);
+
+    if (seen.has(key)) {
+      return false;
+    }
+
+    seen.add(key);
+    return true;
+  });
+}
+
+function parseWholeMessageJson(content) {
   const trimmed = content.trim();
 
   if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) {
     return null;
   }
 
-  try {
-    return parseJsonWithRawWindowsPathRepair(trimmed);
-  } catch {
-    return null;
-  }
+  const parsed = parseJsonLenient(trimmed);
+  return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
 }
 
-function parseJsonWithRawWindowsPathRepair(content) {
-  const repaired = repairRawWindowsBackslashesInJsonStrings(content);
+// Legacy delegation shape: a reply that is only a JSON object naming a subagent, with its prompt.
+function delegatedSubagentCall(parsed) {
+  const name = typeof parsed?.name === "string" ? parsed.name.trim() : "";
 
-  if (repaired !== content) {
-    try {
-      return JSON.parse(repaired);
-    } catch {
-      // Fall through to the original parse so callers keep their existing behavior.
-    }
+  if (!isSubagentName(name) || typeof parsed.prompt !== "string") {
+    return null;
   }
 
-  return JSON.parse(content);
+  return {
+    id: "",
+    name: "task",
+    args: {
+      subagent_type: name.toLowerCase(),
+      prompt: parsed.prompt,
+      description: typeof parsed.description === "string"
+        ? parsed.description
+        : summarizeTaskDescription(parsed.prompt)
+    }
+  };
+}
+
+function isSubagentName(name) {
+  return ["explore", "general", "scout", "search"].includes(String(name).toLowerCase());
+}
+
+function summarizeTaskDescription(prompt) {
+  const text = String(prompt || "").trim().replace(/\s+/g, " ");
+
+  if (!text) {
+    return "Run subagent task";
+  }
+
+  const words = text.split(" ").slice(0, 5).join(" ");
+  return words.length > 48 ? `${words.slice(0, 45)}...` : words;
+}
+
+// Strict JSON first, so valid escapes are never rewritten. Models sometimes leave Windows path
+// backslashes unescaped, so only text that JSON rejects gets the path repair. Returns undefined
+// when neither parse succeeds.
+function parseJsonLenient(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    try {
+      return JSON.parse(repairRawWindowsBackslashesInJsonStrings(text));
+    } catch {
+      return undefined;
+    }
+  }
 }
 
 function repairRawWindowsBackslashesInJsonStrings(content) {
@@ -463,336 +725,6 @@ function repairRawWindowsBackslashesInJsonStrings(content) {
 function hasRawWindowsBackslash(value) {
   return /[A-Za-z]:/.test(value)
     && /(^|[^\\])\\(?!\\)/.test(value);
-}
-
-function parseDelegatedAgentJson(content) {
-  if (typeof content !== "string") {
-    return null;
-  }
-
-  for (const candidate of extractJsonObjects(content).reverse()) {
-    try {
-      const parsed = JSON.parse(candidate);
-      const name = typeof parsed?.name === "string" ? parsed.name.trim() : "";
-
-      if (!name || parsed?.type === "tool_call") {
-        continue;
-      }
-
-      const args = { ...parsed };
-      delete args.name;
-
-      if (isSubagentName(name) && typeof args.prompt === "string") {
-        return {
-          type: "tool_call",
-          tool: "task",
-          args: {
-            subagent_type: name.toLowerCase(),
-            prompt: args.prompt,
-            description: typeof args.description === "string"
-              ? args.description
-              : summarizeTaskDescription(args.prompt)
-          }
-        };
-      }
-
-      return {
-        type: "tool_call",
-        tool: name,
-        args
-      };
-    } catch {
-      continue;
-    }
-  }
-
-  return null;
-}
-
-function isSubagentName(name) {
-  return ["explore", "general", "scout", "search"].includes(String(name).toLowerCase());
-}
-
-function summarizeTaskDescription(prompt) {
-  const text = String(prompt || "").trim().replace(/\s+/g, " ");
-
-  if (!text) {
-    return "Run subagent task";
-  }
-
-  const words = text.split(" ").slice(0, 5).join(" ");
-  return words.length > 48 ? `${words.slice(0, 45)}...` : words;
-}
-
-function toolCallsFromJsonCalls(calls) {
-  return calls.map((call) => ({
-    id: call.id || `call_${crypto.randomUUID().replace(/-/g, "")}`,
-    type: "function",
-    function: {
-      name: call.tool,
-      arguments: JSON.stringify(call.args || {})
-    }
-  }));
-}
-
-// Accept a trailing JSON array whose elements are all tool_call objects, e.g.
-// [{"type":"tool_call","tool":"a","args":{}},{"type":"tool_call","tool":"b","args":{}}].
-function parseTrailingToolCallArray(content) {
-  if (typeof content !== "string") {
-    return null;
-  }
-
-  const arrays = extractJsonArraysWithPositions(content);
-
-  if (arrays.length === 0) {
-    return null;
-  }
-
-  const last = arrays[arrays.length - 1];
-
-  if (content.slice(last.end).trim()) {
-    return null;
-  }
-
-  let parsed;
-
-  try {
-    parsed = parseJsonWithRawWindowsPathRepair(last.text);
-  } catch {
-    return null;
-  }
-
-  if (!Array.isArray(parsed) || parsed.length === 0) {
-    return null;
-  }
-
-  if (!parsed.every((call) => call?.type === "tool_call" && call.tool)) {
-    return null;
-  }
-
-  return parsed;
-}
-
-function parseTrailingToolCallJsons(content) {
-  if (typeof content !== "string") {
-    return null;
-  }
-
-  const objects = extractJsonObjectsWithPositions(content);
-  const calls = [];
-  let cursor = content.length;
-
-  for (let index = objects.length - 1; index >= 0; index -= 1) {
-    const candidate = objects[index];
-
-    if (content.slice(candidate.end, cursor).trim()) {
-      break;
-    }
-
-    let parsed;
-
-    try {
-      parsed = parseJsonWithRawWindowsPathRepair(candidate.text);
-    } catch (err) {
-      process.stderr.write(`[toolCallNormalizer] JSON parse failed: ${err.message}\n`);
-      break;
-    }
-
-    if (!(parsed?.type === "tool_call" && parsed.tool)) {
-      break;
-    }
-
-    calls.unshift(parsed);
-    cursor = candidate.start;
-  }
-
-  return calls.length > 0 ? calls : null;
-}
-
-function parseLeadingToolCallJson(content) {
-  if (typeof content !== "string") {
-    return null;
-  }
-
-  const trimmedStart = content.search(/\S/u);
-
-  if (trimmedStart < 0) {
-    return null;
-  }
-
-  const firstObject = extractJsonObjectsWithPositions(content)
-    .find((object) => object.start === trimmedStart);
-
-  if (!firstObject) {
-    return null;
-  }
-
-  try {
-    const parsed = parseJsonWithRawWindowsPathRepair(firstObject.text);
-
-    return parsed?.type === "tool_call" && parsed.tool ? parsed : null;
-  } catch {
-    return null;
-  }
-}
-
-// Collect every {"type":"tool_call",...} object embedded anywhere in the text, regardless of
-// surrounding prose — the JSON analogue of parseAnthropicXmlToolCalls's global <invoke> scan.
-// Runs only AFTER the strict leading/trailing checks fail, so cleanly-shaped turns keep their
-// existing behavior; this is the placement-tolerance path for models that narrate around their
-// tool-call JSON ("I'll do X… {tool_call} …then Y"). Operates on the same fence-stripped
-// extraction content as the XML scan, so fenced examples stay inert (XML parity).
-function parseEmbeddedToolCallJsons(content) {
-  if (typeof content !== "string" || !content.includes("\"tool_call\"")) {
-    return null;
-  }
-
-  const calls = [];
-
-  for (const candidate of extractJsonObjectsWithPositions(content)) {
-    let parsed;
-
-    try {
-      parsed = parseJsonWithRawWindowsPathRepair(candidate.text);
-    } catch {
-      continue;
-    }
-
-    if (parsed?.type === "tool_call" && parsed.tool) {
-      calls.push(parsed);
-    }
-  }
-
-  return calls.length > 0 ? calls : null;
-}
-
-function dedupeToolCalls(calls) {
-  const seen = new Set();
-  const result = [];
-
-  for (const call of calls) {
-    const key = JSON.stringify({
-      tool: call.tool,
-      args: call.args || {}
-    });
-
-    if (seen.has(key)) {
-      continue;
-    }
-
-    seen.add(key);
-    result.push(call);
-  }
-
-  return result;
-}
-
-function extractJsonObjects(content) {
-  return extractJsonObjectsWithPositions(content).map((object) => object.text);
-}
-
-// Like extractJsonObjectsWithPositions but for top-level [...] arrays, with the same
-// string/escape awareness so brackets inside string literals are ignored.
-function extractJsonArraysWithPositions(content) {
-  const arrays = [];
-  let start = -1;
-  let depth = 0;
-  let inString = false;
-  let escaped = false;
-
-  for (let i = 0; i < content.length; i++) {
-    const char = content[i];
-
-    if (inString) {
-      if (escaped) {
-        escaped = false;
-      } else if (char === "\\") {
-        escaped = true;
-      } else if (char === "\"") {
-        inString = false;
-      }
-      continue;
-    }
-
-    if (char === "\"") {
-      inString = true;
-      continue;
-    }
-
-    if (char === "[") {
-      if (depth === 0) {
-        start = i;
-      }
-      depth += 1;
-      continue;
-    }
-
-    if (char === "]" && depth > 0) {
-      depth -= 1;
-
-      if (depth === 0 && start !== -1) {
-        arrays.push({
-          text: content.slice(start, i + 1),
-          start,
-          end: i + 1
-        });
-        start = -1;
-      }
-    }
-  }
-
-  return arrays;
-}
-
-function extractJsonObjectsWithPositions(content) {
-  const objects = [];
-  let start = -1;
-  let depth = 0;
-  let inString = false;
-  let escaped = false;
-
-  for (let i = 0; i < content.length; i++) {
-    const char = content[i];
-
-    if (inString) {
-      if (escaped) {
-        escaped = false;
-      } else if (char === "\\") {
-        escaped = true;
-      } else if (char === "\"") {
-        inString = false;
-      }
-      continue;
-    }
-
-    if (char === "\"") {
-      inString = true;
-      continue;
-    }
-
-    if (char === "{") {
-      if (depth === 0) {
-        start = i;
-      }
-      depth += 1;
-      continue;
-    }
-
-    if (char === "}" && depth > 0) {
-      depth -= 1;
-
-      if (depth === 0 && start !== -1) {
-        objects.push({
-          text: content.slice(start, i + 1),
-          start,
-          end: i + 1
-        });
-        start = -1;
-      }
-    }
-  }
-
-  return objects;
 }
 
 export { looksLikeIncompleteAnthropicToolCall };

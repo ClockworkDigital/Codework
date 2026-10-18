@@ -13,6 +13,8 @@ Rules:
 - One value per <parameter>. For object or array arguments, put JSON inside the parameter, e.g. <parameter name="edits">[{"old":"a","new":"b"}]</parameter>.
 - To run independent tools at once, emit several <invoke> blocks inside one <function_calls>. Otherwise wait for each tool result before the next call.
 - Prior assistant tool calls in this thread already use this same XML format; the harness parses that same format back from you.
+- Never put a tool call in a Markdown code fence or inline code. Calls written that way are treated as examples and are not run.
+- Parameter values are plain text in which XML entities are decoded. If a value contains a closing parameter tag, or an entity that must stay as written, wrap the whole value as <![CDATA[value]]>.
 - When finished with no further tools, answer in plain text only (no tool-call XML).`;
 
 export const TOOL_CALL_SYSTEM_REMINDER_JSON = `When you need a local harness tool, request it with a tool call as a single JSON object on its own, at the very end of your message (no markdown code fences around it):

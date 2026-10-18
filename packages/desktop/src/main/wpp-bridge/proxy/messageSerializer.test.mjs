@@ -138,7 +138,7 @@ describe("CookieMonster request envelope", () => {
   test("keeps the established Opus envelope byte-identical", () => {
     const raw = serializeChatCompletionRequest(framed())
     expect(new Bun.CryptoHasher("sha256").update(raw).digest("hex")).toBe(
-      "87f727b61b18d52b89403822ca36d1bc8dbe199c97ca91b32780c20cb66ba771",
+      "6e2449b2652abfb891eba2713a61d0be7a98318b02a6f2aac4ec2581de2468a9",
     )
   })
 

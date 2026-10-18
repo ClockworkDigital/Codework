@@ -451,7 +451,7 @@ export async function handleChatCompletions(request, response, body, { bridge = 
         tool_calls: undefined,
         finish_reason: "stop"
       }
-    : stripTaskCompleteMarker(chooseAssistantResponse(finalText, toolCallParts, o1CodeRun.response.alternateAssistantTexts));
+    : stripTaskCompleteMarker(chooseAssistantResponse(finalText, toolCallParts, o1CodeRun.response.alternateAssistantTexts, { tools: body.tools }));
   if (!isCompaction) {
     normalizeToolCallArguments(normalized.tool_calls, body.tools);
   }
@@ -643,7 +643,7 @@ export function shouldRecoverMissingRequiredToolCall(body, run, { isCompaction =
 
   const finalText = run?.response?.finalText || run?.finalText || "";
   const toolCallParts = run?.response?.toolCallParts || run?.toolCallParts || {};
-  const normalized = chooseAssistantResponse(finalText, toolCallParts, alternateAssistantTexts(run));
+  const normalized = chooseAssistantResponse(finalText, toolCallParts, alternateAssistantTexts(run), { tools: body.tools });
   if (normalized?.tool_calls?.length) return false;
   if (!activeTurnHasToolProgress(body)) return true;
   if (!commentaryPhaseEnabled(body)) return false;
@@ -662,7 +662,7 @@ export function shouldRecoverIncompleteTask(body, run, { isCompaction = false } 
   if (isCompaction || !Array.isArray(body?.tools) || body.tools.length === 0) return false;
   const finalText = run?.response?.finalText || run?.finalText || "";
   const toolCallParts = run?.response?.toolCallParts || run?.toolCallParts || {};
-  const normalized = chooseAssistantResponse(finalText, toolCallParts, alternateAssistantTexts(run));
+  const normalized = chooseAssistantResponse(finalText, toolCallParts, alternateAssistantTexts(run), { tools: body.tools });
   if (normalized?.tool_calls?.length) return false;
   const content = normalized?.content || "";
   return !hasTaskCompleteMarker(content)
