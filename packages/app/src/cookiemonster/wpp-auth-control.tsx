@@ -59,6 +59,13 @@ export function WppAuthControl(props: { compact?: boolean }) {
             {language.t(auth()?.state().loginVisible ? "wpp.auth.hideLogin" : "wpp.auth.showLogin")}
           </Button>
           <Button
+            onClick={() => {
+              void auth()?.toggleWindows().catch(failed)
+            }}
+          >
+            {language.t("wpp.auth.toggleWindows")}
+          </Button>
+          <Button
             disabled={status() === "checking"}
             onClick={() => {
               void auth()?.check().catch(failed)

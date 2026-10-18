@@ -103,6 +103,7 @@ export const cookiemonster = {
   "wpp.auth.lastChecked": "Last checked: {{time}}",
   "wpp.auth.showLogin": "Show login window",
   "wpp.auth.hideLogin": "Hide login window",
+  "wpp.auth.toggleWindows": "Toggle browser windows",
   "wpp.auth.check": "Check status",
   "sidebar.session.draft": "Draft",
   "sidebar.session.discardDraft": "Discard draft",

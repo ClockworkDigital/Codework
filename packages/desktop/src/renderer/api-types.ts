@@ -17,6 +17,7 @@ import type {
 export type ElectronAPI = {
   browserPanel: BrowserPanelPlatform
   wppLogin(): Promise<void>
+  wppToggleWindows(): Promise<void>
   wppAuth(check: boolean): Promise<WppAuthState>
   onWppAuth(callback: (state: WppAuthState) => void): () => void
   awaitInitialization(): Promise<ServerReadyData>
