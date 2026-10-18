@@ -65,7 +65,7 @@ jobs:
         timeout-minutes: 8
         run: |
           bun packages/cli/script/build.ts --target=opencode-darwin-arm64 --skip-install
-          test "$(packages/cli/dist/cli-darwin-arm64/bin/opencode --version)" = "$CM_VERSION"
+          test "$(packages/cli/dist/cli-darwin-arm64/bin/opencode --version)" = "opencode v$CM_VERSION"
 
       - name: Build desktop renderer and main
         timeout-minutes: 5
@@ -139,7 +139,7 @@ jobs:
           spctl --assess --type execute --verbose=2 "$app"
           xcrun stapler validate "$app"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")" = "$CM_VERSION"
-          test "$("$app/Contents/Resources/opencode-cli" --version)" = "$CM_VERSION"
+          test "$("$app/Contents/Resources/opencode-cli" --version)" = "opencode v$CM_VERSION"
           test "$(cat "$app/Contents/Resources/opencode-cli.version")" = "$CM_VERSION"
           cd packages/desktop/dist
           shasum -a 256 cookiemonster-mac-arm64.dmg > SHA256SUMS.txt
