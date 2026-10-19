@@ -24,6 +24,13 @@
 - If the theme does not expose a token for the required semantic role, extend the theme schema, defaults, resolution, and types with that role before using it in a component. Do not repurpose the nearest-looking existing token.
 - When changing the public theme token surface, verify the built-in light and dark defaults and the custom-theme fallback path in addition to the affected TUI component.
 
+## Scope and Pushes
+
+- Keep each change tied to the requested outcome, including the callers, fixtures, and tests it affects. Classify failures as caused by the change, pre-existing, or infrastructure-related before expanding the fix.
+- Report unrelated baseline failures with evidence and a separate repair proposal; do not silently fold them into the PR. If baseline repairs are authorized, define the repair scope up front and reassess it when new failures materially expand the work. Report the added work and expected validation cost before continuing that expansion.
+- Batch related fixes and their focused checks locally before pushing. Avoid pushing individual test or fixture fixes while a useful CI run is still collecting results; push sooner only when the current run cannot provide useful evidence or the user requests it.
+- Once a batch is pushed, keep the commit stable while required CI completes. For a confirmed transient failure, retry only failed jobs on the same commit where supported; do not create a commit just to restart CI or repeatedly retry an unexplained failure.
+
 ## Branch Names
 
 Use a short branch name of at most three words, separated by hyphens. Do not use slashes or type prefixes such as `feat/` or `fix/`.
@@ -169,8 +176,11 @@ const table = sqliteTable("session", {
 
 ## Checks
 
-- Run `bun run check` from the repository root as the canonical full lint and type-check verification.
-- During focused iteration, run `bun typecheck` from the affected package directory (for example, `packages/core`). Never run `tsc` directly.
+- Choose checks from the changed behavior and its affected consumers. Start with focused tests and lint; run `bun typecheck` from affected package directories when types or code change. Never run `tsc` directly.
+- `bun run check` from the repository root is the canonical full lint and type-check verification. On branches without a `check` script, use `bun run lint` and `bun run typecheck` from the root. Use full verification when the change has broad impact or a required hook or CI gate calls for it; do not run it after every edit or duplicate a successful equivalent hook or CI run for the same code.
+- Documentation-only changes need a diff and formatting review, not application tests, typechecks, or builds. Workflow-only changes need workflow validation and checks of the behavior they alter, not unrelated product suites.
+- Broaden validation only for affected dependencies, shared contracts, required gates, or concrete failure evidence. After a pass, rerun only checks whose inputs changed or whose result remains uncertain. Run expensive builds, benchmarks, and full suites serially when they would compete for local resources.
+- Keep required hooks and protected-branch checks intact. If an unrelated failure blocks merging, report the blocker and repair scope; do not bypass it or claim the PR is ready. Record what passed, what was not checked, and any remaining blocker.
 
 ## Session Core
 

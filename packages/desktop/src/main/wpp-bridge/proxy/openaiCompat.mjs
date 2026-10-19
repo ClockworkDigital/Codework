@@ -440,7 +440,7 @@ export async function handleChatCompletions(request, response, body, { bridge = 
         tool_calls: undefined,
         finish_reason: "stop"
       }
-    : stripTaskCompleteMarker(chooseAssistantResponse(finalText, toolCallParts, o1CodeRun.response.alternateAssistantTexts));
+    : stripTaskCompleteMarker(chooseAssistantResponse(finalText, toolCallParts, o1CodeRun.response.alternateAssistantTexts, { tools: body.tools }));
   if (!isCompaction) {
     normalized.images = o1CodeRun.response.images ?? [];
     if (normalized.images.length) normalized.content = (normalized.content ?? "").replace(/<wpp_artifact\b[^>]*>[\s\S]*?<\/wpp_artifact>/gi, "").trim();
@@ -637,7 +637,7 @@ export function shouldRecoverMissingRequiredToolCall(body, run, { isCompaction =
 
   const finalText = run?.response?.finalText || run?.finalText || "";
   const toolCallParts = run?.response?.toolCallParts || run?.toolCallParts || {};
-  const normalized = chooseAssistantResponse(finalText, toolCallParts, alternateAssistantTexts(run));
+  const normalized = chooseAssistantResponse(finalText, toolCallParts, alternateAssistantTexts(run), { tools: body.tools });
   if (normalized?.tool_calls?.length) return false;
   if (!activeTurnHasToolProgress(body)) return true;
   if (!commentaryPhaseEnabled(body)) return false;
@@ -656,7 +656,7 @@ export function shouldRecoverIncompleteTask(body, run, { isCompaction = false } 
   if (isCompaction || !Array.isArray(body?.tools) || body.tools.length === 0) return false;
   const finalText = run?.response?.finalText || run?.finalText || "";
   const toolCallParts = run?.response?.toolCallParts || run?.toolCallParts || {};
-  const normalized = chooseAssistantResponse(finalText, toolCallParts, alternateAssistantTexts(run));
+  const normalized = chooseAssistantResponse(finalText, toolCallParts, alternateAssistantTexts(run), { tools: body.tools });
   if (normalized?.tool_calls?.length) return false;
   const content = normalized?.content || "";
   return (!hasTaskCompleteMarker(content) && !run?.response?.images?.length)
@@ -780,12 +780,16 @@ function createStreamSession({ sentenceQuarantine = false } = {}) {
   };
 }
 
-// Close out a streamed completion using the authoritative normalized result. Three shapes:
-//  1. tool_calls → the gate suppressed all live prose; emit structured tool-call chunks.
+// Close out a streamed completion using the authoritative normalized result. Content goes first,
+// then any structured tool-call chunks. Three content shapes:
+//  1. recovery replay → the recovered response is a new cumulative text origin. Append it in full
+//     after any benign commentary already emitted from the discarded answer instead of diffing
+//     unrelated strings.
 //  2. prose already streamed live → emit only the trailing diff (normalized content past what we
-//     already sent), so the client isn't sent duplicate text.
-//  3. nothing streamed yet (short/undecided prose, or a leading-brace turn the normalizer decided
-//     was content after all) → emit the whole content body.
+//     already sent). This covers a tool turn's preamble too: sentence quarantine releases it live up
+//     to the first tool-call marker, so writing it again would duplicate it in the stored message.
+//  3. nothing streamed yet (short/undecided prose, a buffered tool turn, or a leading-brace turn the
+//     normalizer decided was content after all) → emit the whole content body.
 // Always terminates the stream via finishChatCompletion. The caller must unsubscribe from progress
 // BEFORE calling this so a late frame can't interleave a delta after finish_reason.
 function finalizeStreamedCompletion(response, streamBase, {
@@ -800,23 +804,14 @@ function finalizeStreamedCompletion(response, streamBase, {
   const tool_calls = normalized.tool_calls;
   const content = normalized.content || "";
 
-  if (Array.isArray(tool_calls) && tool_calls.length > 0) {
-    if (content) {
-      adapter.writeContentBody(response, streamBase, content);
-    }
-    adapter.writeToolCallChunks(response, streamBase, tool_calls);
-  } else if (recoveryReplay) {
-    // The recovery response is a new cumulative text origin. Append it in full after any benign
-    // commentary already emitted from the discarded answer instead of diffing unrelated strings.
+  if (recoveryReplay || !streamSession.hasStreamed()) {
     adapter.writeContentBody(response, streamBase, content);
-  } else if (streamSession.hasStreamed()) {
-    // Emit the authoritative content past what we've already streamed live.
-    const trailing = streamSession.trailingDiff(content);
-    if (trailing) {
-      adapter.writeContentDelta(response, streamBase, trailing);
-    }
   } else {
-    adapter.writeContentBody(response, streamBase, content);
+    adapter.writeContentDelta(response, streamBase, streamSession.trailingDiff(content));
+  }
+
+  if (Array.isArray(tool_calls) && tool_calls.length > 0) {
+    adapter.writeToolCallChunks(response, streamBase, tool_calls);
   }
 
   adapter.finishChatCompletion(response, streamBase, {

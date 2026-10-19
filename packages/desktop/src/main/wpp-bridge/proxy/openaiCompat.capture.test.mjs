@@ -643,6 +643,36 @@ describe("required tool-call recovery", () => {
     expect(response.body).not.toContain("<function_calls>");
   });
 
+  test("writes a live-streamed preamble once before its tool call", async () => {
+    const response = fakeResponse();
+    const preamble = "I’ll inspect the workspace now.\n";
+    // Built at runtime so this file holds no literal tool-call markup.
+    const call = [
+      "<", "function_calls><", 'invoke id="call-1" name="bash"><',
+      'parameter name="command">git status --short<', "/parameter><", "/invoke><", "/function_calls>",
+    ].join("");
+    const bridge = {
+      hasSession: () => false,
+      run: async (_prompt, options) => {
+        options.onProgress?.({ finalText: preamble + call });
+        return bridgeRun(preamble + call);
+      },
+    };
+    const requestBody = toolBody(user("Inspect the workspace."));
+    requestBody.stream = true;
+
+    await withNoRunLogs(() => handleChatCompletions({ headers: {} }, response, requestBody, { bridge }));
+
+    const content = response.body
+      .split("\n")
+      .filter((line) => line.startsWith("data: {") && !line.includes('"error"'))
+      .map((line) => JSON.parse(line.slice(6)).choices?.[0]?.delta?.content || "")
+      .join("");
+    expect(content).toBe(preamble);
+    expect(response.body).toContain('"name":"bash"');
+    expect(response.body).toContain('"finish_reason":"tool_calls"');
+  });
+
   test("returns a typed error when the bounded replay also omits the required tool call", async () => {
     const response = fakeResponse();
     const bridge = {

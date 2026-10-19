@@ -203,3 +203,15 @@ test.each([
 ])("$name font family for $font starts with $prefix", ({ family, font, prefix }) => {
   expect(family(font)).toStartWith(prefix)
 })
+
+test("interface preferences retain legacy choices and explicit overrides across persistence", () => {
+  for (const general of [
+    { quietCompanion: false },
+    { newLayoutDesigns: false },
+    { newLayoutDesigns: true, quietCompanion: false },
+  ]) {
+    const value = decode({ general })
+    expect(value.general).toMatchObject(general)
+    expect(decode(encode(value)).general).toMatchObject(general)
+  }
+})

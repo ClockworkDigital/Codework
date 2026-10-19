@@ -246,6 +246,17 @@ export const SettingsGeneral: Component = () => {
       <h3 class="settings-section-title">{language.t("settings.general.section.general")}</h3>
       <SettingsList>
         <LanguageSetting />
+        <Show when={platform.browserPanel}>
+          <SettingsRow title={language.t("cm.interface.title")} description={language.t("cm.interface.description")}>
+            <Switch
+              hideLabel
+              checked={settings.appearance.newInterface()}
+              onChange={settings.appearance.setNewInterface}
+            >
+              {language.t("cm.interface.title")}
+            </Switch>
+          </SettingsRow>
+        </Show>
         <Show when={!platform.browserPanel}>
           <TabLayoutSetting />
         </Show>

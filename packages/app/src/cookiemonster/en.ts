@@ -1,4 +1,6 @@
 export const cookiemonster = {
+  "cm.interface.title": "Quiet Companion",
+  "cm.interface.description": "Use the CookieMonster sidebar and interface.",
   "cm.onboarding.title": "Beginner guidance",
   "cm.onboarding.description":
     "Let CM offer relevant getting-started tips and guide links. On by default across projects on this server. Turning it off keeps normal task help available.",

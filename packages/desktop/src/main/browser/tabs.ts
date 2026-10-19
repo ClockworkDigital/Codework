@@ -1038,6 +1038,8 @@ async function runLeaveIntent<T>(
 
       if (leave) {
         await intent.settled
+        // Let Chromium restore its history entry after the unload veto before replaying.
+        await new Promise<void>((resolve) => setImmediate(resolve))
         intent.check()
         intent.replaying = true
 

@@ -51,19 +51,41 @@ function nonSystemMessages(body) {
 function hashMessage(message) {
   return hashValue({
     role: message?.role || "user",
-    content: message?.content ?? null,
+    content: comparableContent(message),
     toolCallId: message?.tool_call_id || message?.toolCallId || "",
     toolCalls: Array.isArray(message?.tool_calls)
       ? message.tool_calls.map((call) => ({
           id: call.id || "",
           type: call.type || "function",
           name: call.function?.name || call.name || "",
-          arguments: call.function?.arguments ?? call.arguments ?? "{}",
+          arguments: comparableArguments(call.function?.arguments ?? call.arguments ?? "{}"),
         }))
       : Array.isArray(message?.toolCalls)
         ? message.toolCalls
         : null,
   })
+}
+
+// The assistant echo is compared across two producers: the response committed here and the client's
+// replay of it. The client replays the text it was streamed, which keeps whitespace the normalizer
+// trims (the blank line before a tool call or the completion marker), and it sends "" for a tool-only
+// turn the normalizer returns as null. Neither changes the WPP thread, so ignore surrounding
+// whitespace in assistant text.
+function comparableContent(message) {
+  const content = message?.content ?? null
+  if (message?.role !== "assistant" || Array.isArray(content)) return content
+  return typeof content === "string" ? content.trim() : ""
+}
+
+// The client re-serializes tool input it parsed from the stream, so compare arguments as JSON values;
+// hashValue sorts their keys. Text that is not JSON is compared as written.
+function comparableArguments(value) {
+  if (typeof value !== "string") return value
+  try {
+    return JSON.parse(value)
+  } catch {
+    return value
+  }
 }
 
 function hashesFor(body) {

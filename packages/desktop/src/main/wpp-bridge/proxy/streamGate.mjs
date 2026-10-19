@@ -173,12 +173,11 @@ function trailingMarkerPrefixLength(text) {
   return longest;
 }
 
-// True when the LEADING non-whitespace content looks like the start of a tool call. Mirrors the
-// signals toolCallNormalizer.mjs keys on so the live decision matches the final normalization:
-// Anthropic XML (optionally wrapped in a leading code fence) or a leading JSON object (which may
-// be a {"type":"tool_call"} or delegated-agent call). A leading "{" is treated conservatively as
-// a potential tool call — prose almost never starts with a brace, and if it turns out to be
-// content the finalize path still emits it as a trailing diff (just not streamed live).
+// True when the LEADING non-whitespace content might start a tool call. This is deliberately broader
+// than toolCallNormalizer.mjs, which treats fenced markup as an example and runs only typed JSON for
+// a listed tool. Here, XML markup (even inside a leading code fence) or any leading JSON object
+// suppresses live output. Prose almost never starts that way, and over-suppressing only delays it:
+// when the final normalization finds no call, finalizeStreamedCompletion still emits the content.
 export function leadingLooksLikeToolCall(text) {
   const trimmed = String(text || "").trimStart();
 

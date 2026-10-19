@@ -104,6 +104,8 @@ const generalSchema = Persistence.struct({
   // Owned by the updater extension, which copies it out once; kept so settings rewrites cannot drop it first.
   releaseNotes: Persistence.optional(Schema.Boolean),
   showFileTree: Schema.Boolean,
+  newLayoutDesigns: Persistence.optional(Schema.Boolean),
+  quietCompanion: Persistence.optional(Schema.Boolean),
   showNavigation: Persistence.optional(Schema.Boolean),
   showSearch: Persistence.optional(Schema.Boolean),
   showTerminal: Persistence.optional(Schema.Boolean),
@@ -375,6 +377,10 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         customAgents: showCustomAgents,
       },
       appearance: {
+        newInterface: withFallback(() => store.general?.newLayoutDesigns ?? store.general?.quietCompanion, true),
+        setNewInterface(value: boolean) {
+          setStore("general", "newLayoutDesigns", value)
+        },
         fontSize: withFallback(() => store.appearance?.fontSize, defaultSettings.appearance.fontSize),
         setFontSize(value: number) {
           setStore("appearance", "fontSize", value)

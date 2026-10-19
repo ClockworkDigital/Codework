@@ -44,8 +44,8 @@ test.each(["done", "finishReason"])("settles captured %s without waiting for the
     await Promise.resolve()
     expect(settled).toBe(false)
     h.deliver(result)
-    await Promise.resolve()
-    await Promise.resolve()
+    // Drain promise continuations without firing the synthetic DOM polling timers.
+    await new Promise<void>((resolve) => setImmediate(resolve))
     expect(settled).toBe(true)
     expect(await waiting).toEqual(result)
     expect(h.timers.size).toBe(0)

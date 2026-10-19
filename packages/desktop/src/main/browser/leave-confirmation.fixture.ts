@@ -160,30 +160,7 @@ export async function leaveConfirmationSmoke(
       "Leave closes the captured targets once",
     )
     await command({ op: "close", tabID: anchorID })
-    const historyTabID = (await command({ op: "new" })).activeID!
-    const historyTab = browserRegistration("smoke", historyTabID)!
-    const historyContents = historyTab.contents as WebContents
-    await historyContents.loadURL(url)
-    await historyContents.loadURL(`${url}?history`)
-    await historyContents.executeJavaScript(
-      "window.onbeforeunload = () => 'unsaved'; navigator.userActivation.hasBeenActive",
-      true,
-    )
-    await leaveWithConfirmation(() => command({ op: "back", tabID: historyTabID }))
-    assert.equal(historyContents.getURL(), url, "Leave must complete the captured back-history intent")
-    await historyContents.executeJavaScript(
-      "window.onbeforeunload = () => 'unsaved'; navigator.userActivation.hasBeenActive",
-      true,
-    )
-    await leaveWithConfirmation(() => command({ op: "forward", tabID: historyTabID }))
-    assert.equal(historyContents.getURL(), `${url}?history`, "Leave must complete the captured forward-history intent")
-    await historyContents.executeJavaScript(
-      "window.onbeforeunload = () => 'unsaved'; navigator.userActivation.hasBeenActive",
-      true,
-    )
-    await leaveWithConfirmation(() => command({ op: "reload", tabID: historyTabID }))
-    assert.equal(historyContents.getURL(), `${url}?history`, "Leave must complete the captured reload intent")
-    await command({ op: "close", tabID: historyTabID })
+    await leaveHistorySmoke(url, command)
     const tabID = (await command({ op: "new" })).activeID!
     const tab = browserRegistration("smoke", tabID)!
     const contents = tab.contents as WebContents
@@ -226,6 +203,43 @@ export async function leaveConfirmationSmoke(
     dialog.showMessageBox = original
 
     if (!win.isDestroyed()) win.hide()
+  }
+}
+
+export async function leaveHistorySmoke(
+  url: string,
+  command: (value: Parameters<typeof browserCommand>[2]) => ReturnType<typeof browserCommand>,
+) {
+  const original = dialog.showMessageBox
+  try {
+    const historyTabID = (await command({ op: "new" })).activeID!
+    const historyTab = browserRegistration("smoke", historyTabID)!
+    const historyContents = historyTab.contents as WebContents
+    await historyContents.loadURL(url)
+    await wait(() => !historyContents.isLoading() && historyContents.getURL() === url)
+    await historyContents.loadURL(`${url}?history`)
+    await historyContents.executeJavaScript(
+      "window.onbeforeunload = () => 'unsaved'; navigator.userActivation.hasBeenActive",
+      true,
+    )
+    await leaveWithConfirmation(() => command({ op: "back", tabID: historyTabID }))
+    assert.equal(historyContents.getURL(), url, "Leave must complete the captured back-history intent")
+    await historyContents.executeJavaScript(
+      "window.onbeforeunload = () => 'unsaved'; navigator.userActivation.hasBeenActive",
+      true,
+    )
+    await leaveWithConfirmation(() => command({ op: "forward", tabID: historyTabID }))
+    assert.equal(historyContents.getURL(), `${url}?history`, "Leave must complete the captured forward-history intent")
+    await historyContents.executeJavaScript(
+      "window.onbeforeunload = () => 'unsaved'; navigator.userActivation.hasBeenActive",
+      true,
+    )
+    await leaveWithConfirmation(() => command({ op: "reload", tabID: historyTabID }))
+    assert.equal(historyContents.getURL(), `${url}?history`, "Leave must complete the captured reload intent")
+    await command({ op: "close", tabID: historyTabID })
+    console.log("PASS native history/reload Leave with an immediate answer")
+  } finally {
+    dialog.showMessageBox = original
   }
 }
 

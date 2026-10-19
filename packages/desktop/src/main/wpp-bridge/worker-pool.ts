@@ -440,11 +440,11 @@ export class WorkerPool {
     },
   ) {
     const agent = (job.payload?.model || worker.agent).trim()
-
-    if (job.payload?.continueThread === true) {
-      if (worker.protocolAgent === agent) return
-      assertCapabilityResponse(null, agent)
-    }
+    // The handshake checks the WPP instruction installed on the agent, which a fresh chat in the same
+    // tab does not change. Probe once per worker and agent; claim() clears the result on an agent
+    // switch. A continued thread cannot be probed in place, so an unverified one fails for replay.
+    if (worker.protocolAgent === agent) return
+    if (job.payload?.continueThread === true) assertCapabilityResponse(null, agent)
 
     const probeJob = buildCapabilityProbeJob(job)
     const result = await worker.controller.runJob(probeJob, undefined, remainingJobTimeout(job))
