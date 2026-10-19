@@ -4,4 +4,5 @@ export type WppAuthPlatform = {
   state(): WppAuthState
   check(): Promise<WppAuthState>
   toggleLogin(): Promise<void>
+  toggleWindows(): Promise<void>
 }

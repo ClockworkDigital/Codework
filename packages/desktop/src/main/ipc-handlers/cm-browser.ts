@@ -41,7 +41,7 @@ export const cmBrowserHandlers = CmBrowserRpcs.toLayer(
         Effect.promise(async () => {
           const { api, current } = await owner(context)
           const viewport: unknown = JSON.parse(input.viewport)
-          // The native boundary validates the bounds and owner lease.
+          // SAFETY: The native boundary validates the bounds and owner lease before using this wire payload.
           api.browserViewport(current, viewport as Parameters<typeof api.browserViewport>[1])
         }),
       CmBrowserContext: (input, context) =>
@@ -82,6 +82,12 @@ export const cmBrowserHandlers = CmBrowserRpcs.toLayer(
           await owner(context)
           if (!wpp) throw new Error("wpp_unavailable")
           wpp.toggleLogin()
+        }),
+      CmWppToggleWindows: (_input, context) =>
+        Effect.promise(async () => {
+          await owner(context)
+          if (!wpp) throw new Error("wpp_unavailable")
+          wpp.toggleWindows()
         }),
     })
   }),

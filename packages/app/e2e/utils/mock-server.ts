@@ -1,6 +1,7 @@
 import type { Page } from "@playwright/test"
 import type { OpenCodeEvent, SessionMessageInfo } from "@opencode/client/promise"
 import { Permission } from "@opencode/schema/permission"
+import type { Config } from "@opencode/schema/config"
 import { Worktree } from "@opencode/schema/worktree"
 import { Duration, Effect, Layer, Option, Predicate, Schema } from "effect"
 import { HttpRouter, HttpServer, HttpServerResponse } from "effect/http"
@@ -62,6 +63,7 @@ export interface MockServerConfig {
   // Without it, writes answer 501 MockUnsupported.
   onFileWrite?: (input: { path: string; directory: string; body: string }) => void
   configEntries?: unknown[]
+  onConfigUpdate?: (patch: Config.Patch) => void | MockAnswer
   directory: string
   project: unknown
   // Replaces the `/api/project` inventory, which defaults to `[project]`.
@@ -953,7 +955,12 @@ function mockHandlers(
             canonical: projectSeed(config)?.canonical ?? config.directory,
           }),
         configShells: () => Effect.succeed(config.shells ?? []),
-        configUpdate: () => noContent,
+        configUpdate: (ctx) =>
+          Effect.sync(() => {
+            const answer = config.onConfigUpdate?.(ctx.payload)
+            if (answer) return HttpServerResponse.jsonUnsafe(answer.body, { status: answer.status })
+            return HttpServerResponse.empty({ status: 204 })
+          }),
         websearchProviders: () => Effect.succeed({ location: location(config), data: [] }),
         worktreeList: () =>
           Effect.sync(() => {

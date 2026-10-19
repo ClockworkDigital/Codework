@@ -6825,6 +6825,15 @@ export type ConfigGetOutput = Array<ConfigEntry>
 
 export type ConfigShellsOutput = Array<ConfigShellOption>
 
-export type ConfigUpdateInput = { readonly shell: { readonly shell: string | null }["shell"] }
+export type ConfigUpdateInput = {
+  readonly shell?: {
+    readonly shell?: string | null
+    readonly skill?: { readonly id: string; readonly enabled: boolean }
+  }["shell"]
+  readonly skill?: {
+    readonly shell?: string | null
+    readonly skill?: { readonly id: string; readonly enabled: boolean }
+  }["skill"]
+}
 
 export type ConfigUpdateOutput = void

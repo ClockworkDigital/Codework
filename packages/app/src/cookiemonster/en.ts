@@ -1,4 +1,10 @@
 export const cookiemonster = {
+  "cm.onboarding.title": "Beginner guidance",
+  "cm.onboarding.description":
+    "Let CM offer relevant getting-started tips and guide links. On by default across projects on this server. Turning it off keeps normal task help available.",
+  "cm.onboarding.retry": "Could not load guidance setting. Retry",
+  "cm.onboarding.saveFailed": "Could not save beginner guidance",
+  "cm.onboarding.saveFailed.description": "Check the connection and try again.",
   "command.sidebar.toggle": "Toggle sidebar",
   "sidebar.nav.projectsAndSessions": "Projects and sessions",
   "sidebar.resize": "Resize sidebar",
@@ -103,6 +109,7 @@ export const cookiemonster = {
   "wpp.auth.lastChecked": "Last checked: {{time}}",
   "wpp.auth.showLogin": "Show login window",
   "wpp.auth.hideLogin": "Hide login window",
+  "wpp.auth.toggleWindows": "Toggle browser windows",
   "wpp.auth.check": "Check status",
   "sidebar.session.draft": "Draft",
   "sidebar.session.discardDraft": "Discard draft",

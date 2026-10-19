@@ -3,7 +3,7 @@ import type { ElectronAPI } from "./api-types"
 import { invoke, listen, send } from "./ipc-client"
 import type { BrowserTabs, BrowserSelection } from "@cookiemonster/cm-browser/panel"
 
-// Replies originate in the typed native browser implementation; JSON carries them through the RPC string codec.
+// SAFETY: Replies originate in the typed native browser implementation; JSON carries them through the RPC string codec.
 const browserReply = <Value>(value: string) => JSON.parse(value) as Value
 
 type Mutable<Value> =
@@ -47,6 +47,7 @@ export const api: ElectronAPI = {
   onWppAuth: window.electron.onWppAuth,
   wppAuth: (check) => invoke("CmWppAuth", { check }).then(browserReply<WppAuthState>),
   wppLogin: () => invoke("CmWppLogin"),
+  wppToggleWindows: () => invoke("CmWppToggleWindows"),
   awaitInitialization: () => invoke("AppAwaitInitialization"),
   reconnectService: () => invoke("AppReconnectService"),
   consumeInitialDeepLinks: () => invoke("AppConsumeInitialDeepLinks").then(mutable),

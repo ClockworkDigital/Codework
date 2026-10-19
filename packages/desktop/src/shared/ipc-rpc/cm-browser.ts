@@ -17,5 +17,6 @@ export const CmBrowserRpcs = RpcGroup.make(
   Rpc.make("CmBrowserPanelAcknowledge", { payload: { acknowledgement: Schema.String }, success: Schema.Boolean }),
   Rpc.make("CmBrowserLinkContext", { payload: { sessionID: Schema.NullOr(Schema.String), lease: Schema.String } }),
   Rpc.make("CmWppLogin"),
+  Rpc.make("CmWppToggleWindows"),
   Rpc.make("CmWppAuth", { payload: { check: Schema.Boolean }, success: Schema.String }),
 )

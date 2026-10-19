@@ -384,14 +384,35 @@ export const layer = (options?: Options) =>
           const filepath =
             (yield* Effect.filter(candidates, fs.isFile)).at(-1) ?? path.join(directory, "opencode.jsonc")
           const text = (yield* fs.readFileStringSafe(filepath)) ?? "{}\n"
+          const info = patch.skill ? yield* parseInfo(text, filepath) : undefined
+          if (patch.skill && !info)
+            return yield* Effect.fail(
+              new FSUtil.FileSystemError({ method: "config.update", cause: "Invalid configuration document" }),
+            )
           const updated = yield* Effect.try({
-            try: () =>
-              applyEdits(
-                text,
-                modify(text, ["shell"], patch.shell ?? undefined, {
-                  formattingOptions: { tabSize: 2, insertSpaces: true },
-                }),
-              ),
+            try: () => {
+              const formattingOptions = { tabSize: 2, insertSpaces: true }
+              const shell =
+                patch.shell === undefined
+                  ? text
+                  : applyEdits(text, modify(text, ["shell"], patch.shell ?? undefined, { formattingOptions }))
+              if (!patch.skill) return shell
+              const resource = `skill:${patch.skill.id}`
+              return applyEdits(
+                shell,
+                modify(
+                  shell,
+                  ["policies"],
+                  [
+                    ...(info?.policies ?? []).filter(
+                      (policy) => policy.action !== "integration.use" || policy.resource !== resource,
+                    ),
+                    { action: "integration.use", resource, effect: patch.skill.enabled ? "allow" : "deny" },
+                  ],
+                  { formattingOptions },
+                ),
+              )
+            },
             catch: (cause) => new FSUtil.FileSystemError({ method: "config.update", cause }),
           })
           yield* fs.writeWithDirs(filepath, updated.endsWith("\n") ? updated : `${updated}\n`)

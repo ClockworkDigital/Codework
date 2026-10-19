@@ -3,6 +3,7 @@ export * as Config from "./config.js"
 import { Schema } from "effect"
 import { ephemeral, inventory } from "./event.js"
 import { Permission } from "./permission.js"
+import { Skill } from "./skill.js"
 import { AbsolutePath, optional } from "./schema.js"
 import { ConfigAgent } from "./config/agent.js"
 import { ConfigMedia } from "./config/media.js"
@@ -114,7 +115,12 @@ export class Info extends Schema.Class<Info>("Config.Info")({
 }) {}
 
 export const Patch = Schema.Struct({
-  shell: Schema.NullOr(Schema.String),
+  shell: optional(Schema.NullOr(Schema.String)),
+  skill: optional(
+    Schema.Struct({ id: Skill.ID, enabled: Schema.Boolean }).annotate({
+      description: "Set one skill's availability across projects through a global integration policy",
+    }),
+  ),
 }).annotate({ identifier: "Config.Patch" })
 export interface Patch extends Schema.Schema.Type<typeof Patch> {}
 

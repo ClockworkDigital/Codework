@@ -12,6 +12,7 @@ import { DialogServer } from "@/servers/connect/dialog"
 import { SettingsList } from "@/settings/list"
 import { ShellSetting } from "@/settings/general/general"
 import { createServerShellController } from "@/settings/general/controllers"
+import { OnboardingSetting } from "@/cookiemonster/onboarding-setting"
 import type { SettingsServer } from "./inventory"
 import "@/settings/settings.css"
 
@@ -110,6 +111,7 @@ function ServerShell(props: { server: ServerConnection.Any }) {
       <h3 class="settings-section-title">{language.t("settings.tab.preferences")}</h3>
       <SettingsList>
         <ShellSetting controller={controller} />
+        <OnboardingSetting server={props.server} />
       </SettingsList>
     </section>
   )

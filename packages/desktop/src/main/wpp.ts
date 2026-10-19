@@ -8,6 +8,7 @@ export type WppIntegration = {
     check(): Promise<WppAuthState>
   }
   toggleLogin(): void
+  toggleWindows(): boolean
   isLoggedWorker(contents: object): boolean
   setWorkerLogWriter(
     writer: (id: number, event: string, details: Record<string, unknown>, level?: "info" | "warn" | "error") => void,

@@ -8,7 +8,7 @@ import cookiemonster from "@cookiemonster/wpp/plugin"
 import { COOKIE_MONSTER_PROVIDER } from "./legacy-config.mjs"
 import { MODEL_IDS } from "@cookiemonster/wpp/proxy/modelProfiles.mjs"
 
-test("V2 registers the CookieMonster roster and official Figma tools and skills", async () => {
+test("V2 registers the CookieMonster roster, optional desktop setup and official Figma tools and skills", async () => {
   const directory = await mkdtemp(join(tmpdir(), "cm-v2-plugins-"))
   try {
     await using host = await OpenCode.create({
@@ -48,6 +48,51 @@ test("V2 registers the CookieMonster roster and official Figma tools and skills"
     expect((await host.skill.list({ location: { directory } })).data.map((skill) => skill.id)).toContain(
       "figma-design-to-code",
     )
+    expect((await host.skill.list({ location: { directory } })).data.map((skill) => skill.id)).toContain(
+      "cm-onboarding",
+    )
+    expect((await host.skill.list({ location: { directory } })).data).toContainEqual(
+      expect.objectContaining({
+        id: "open-computer-use",
+        description: expect.stringContaining("when desktop tools are missing"),
+        content: expect.stringContaining("npm install -g open-computer-use"),
+      }),
+    )
+    expect(
+      (await host.mcp.list({ location: { directory } })).data.some((server) => server.name === "open-computer-use"),
+    ).toBe(false)
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
+test("bundled CM provider exposes optional desktop setup without enabling desktop access", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "cm-computer-use-"))
+  try {
+    await using host = await OpenCode.create({
+      config: {
+        directory,
+        project: false,
+        content: JSON.stringify({ plugins: [new URL("../resources/cm-plugins/provider/", import.meta.url).pathname] }),
+      },
+      models: { fetch: false },
+      fs: { filewatcher: false },
+    })
+    expect(
+      (await host.model.list({ location: { directory } })).data.some((model) => model.providerID === "cookiemonster"),
+    ).toBe(true)
+    expect((await host.skill.list({ location: { directory } })).data.map((skill) => skill.id)).toContain(
+      "cm-onboarding",
+    )
+    expect((await host.skill.list({ location: { directory } })).data).toContainEqual(
+      expect.objectContaining({
+        id: "open-computer-use",
+        content: expect.stringContaining("npm install -g open-computer-use"),
+      }),
+    )
+    expect(
+      (await host.mcp.list({ location: { directory } })).data.some((server) => server.name === "open-computer-use"),
+    ).toBe(false)
   } finally {
     await rm(directory, { recursive: true, force: true })
   }

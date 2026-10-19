@@ -28,22 +28,12 @@ export function createDesktopPlatform(api: ElectronAPI, windowState: DesktopWind
       .catch(() => undefined)
   }
 
-  return {
+  const platform: Platform = {
     platform: "desktop",
     os,
     version: windowState.version,
     windowID: windowState.id,
-    ...(import.meta.env.CM_BRAND
-      ? {
-          browserPanel: api.browserPanel,
-        }
-      : {}),
-    ...(import.meta.env.CM_BRAND && import.meta.env.CM_WPP
-      ? {
-          wppLogin: api.wppLogin,
-          wppAuth: { state: () => auth, check: () => api.wppAuth(true), toggleLogin: api.wppLogin },
-        }
-      : {}),
+
     ...createDesktopFiles(api, os),
     ...createDesktopStorage(api),
     exportDebugLogs: () => api.exportDebugLogs(),
@@ -71,6 +61,22 @@ export function createDesktopPlatform(api: ElectronAPI, windowState: DesktopWind
     },
     extensions: createExtensionBridge(),
   }
+
+  if (import.meta.env.CM_BRAND) {
+    platform.browserPanel = api.browserPanel
+  }
+
+  if (import.meta.env.CM_BRAND && import.meta.env.CM_WPP) {
+    platform.wppLogin = api.wppLogin
+    platform.wppAuth = {
+      state: () => auth,
+      check: () => api.wppAuth(true),
+      toggleLogin: api.wppLogin,
+      toggleWindows: api.wppToggleWindows,
+    }
+  }
+
+  return platform
 }
 
 function desktopOS() {
