@@ -1,5 +1,6 @@
 interface ImportMetaEnv {
   readonly CM_BRAND: boolean
+  readonly CM_WPP: boolean
   readonly OPENCODE_CHANNEL: string
   readonly OPENCODE_VERSION?: string
 }

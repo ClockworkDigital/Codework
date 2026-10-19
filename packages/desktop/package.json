@@ -21,7 +21,9 @@
     "package:mac": "electron-builder --mac --config electron-builder.config.ts",
     "package:win": "electron-builder --win --config electron-builder.config.ts",
     "package:linux": "electron-builder --linux --config electron-builder.config.ts",
-    "bench:startup": "bun ./scripts/bench-startup.ts"
+    "bench:startup": "bun ./scripts/bench-startup.ts",
+    "install:wpp": "bun ./scripts/install-wpp.ts",
+    "test:wpp": "CM_WPP=1 bun test --preload ./test/preload.ts --timeout 30000 ./wpp/contracts.test.ts"
   },
   "main": "./out/main/index.js",
   "dependencies": {
@@ -60,7 +62,9 @@
     "typescript": "~5.6.2",
     "vite": "8.2.2",
     "@cookiemonster/cm-browser": "workspace:*",
-    "@cookiemonster/provider": "workspace:*"
+    "@opencode/plugin": "workspace:*",
+    "@opencode/sdk": "workspace:*",
+    "@opencode/plugin-figma": "workspace:*"
   },
   "optionalDependencies": {
     "@lydell/node-pty-darwin-arm64": "1.2.0-beta.12",
@@ -69,5 +73,11 @@
     "@lydell/node-pty-linux-x64": "1.2.0-beta.12",
     "@lydell/node-pty-win32-arm64": "1.2.0-beta.12",
     "@lydell/node-pty-win32-x64": "1.2.0-beta.12"
+  },
+  "imports": {
+    "#cm-wpp": {
+      "cm-wpp": "./wpp/index.mjs",
+      "default": "./src/main/wpp.ts"
+    }
   }
 }

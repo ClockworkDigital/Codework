@@ -1,4 +1,5 @@
 interface ImportMetaEnv {
+  readonly VITE_CM_WPP?: boolean
   readonly VITE_OPENCODE_SERVER_MODE?: "none" | "origin"
   readonly VITE_OPENCODE_SERVER_HOST: string
   readonly VITE_OPENCODE_SERVER_PORT: string

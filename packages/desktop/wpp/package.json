@@ -1,0 +1,8 @@
+{
+  "name": "@cookiemonster/desktop-wpp",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@cookiemonster/wpp": "git+ssh://git@github.com/trmosala/CM-WPP-Bits.git#738929f5ea51441d990373064543beda1566f5ff"
+  }
+}

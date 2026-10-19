@@ -1,4 +1,4 @@
-import type { WppAuthState } from "@cookiemonster/provider/auth"
+import type { WppAuthState } from "../shared/wpp-auth"
 import type { StorageSnapshot, WindowSnapshot } from "../shared/ipc-transport"
 import type { WindowBootstrap } from "../shared/window-bootstrap"
 import type { BrowserPanelPlatform } from "@cookiemonster/cm-browser/panel"

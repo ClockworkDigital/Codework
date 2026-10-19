@@ -1,0 +1,39 @@
+name: CookieMonster WPP verification
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CM_BRAND: "1"
+      CM_WPP: "1"
+    defaults:
+      run:
+        working-directory: packages/desktop
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: ./.github/actions/setup-bun
+        with:
+          wpp-ssh-key: ${{ secrets.CM_WPP_SSH_KEY }}
+      - name: Type-check desktop
+        run: bun typecheck
+      - name: Build native provider and host plugins
+        run: bun scripts/build-cm-plugins.ts
+      - name: Test configuration and native login integration
+        run: bun test --preload ./test/preload.ts src/main/cm-config.test.ts src/main/wpp-integration/login-controls.test.ts
+      - name: Test V2 provider and Responses contracts
+        run: bun run test:wpp
+      - name: Test extracted backend
+        run: bun run --cwd wpp/node_modules/@cookiemonster/wpp test
+      - name: Build WPP desktop
+        run: ./node_modules/.bin/electron-vite build
+      - name: Build generic desktop without the private dependency
+        run: |
+          mv wpp/node_modules "$RUNNER_TEMP/cm-wpp-modules"
+          CM_WPP=0 ./node_modules/.bin/electron-vite build

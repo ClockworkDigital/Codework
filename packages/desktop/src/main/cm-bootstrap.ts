@@ -1,6 +1,8 @@
 import { existsSync } from "node:fs"
 import path from "node:path"
 import { app, BrowserWindow } from "electron"
+import { wpp } from "#cm-wpp"
+import { getStore } from "./storage/store"
 import { cookieMonsterConfig } from "./cm-config"
 import { resolveCmAePlugin } from "../cm-ae"
 
@@ -20,12 +22,12 @@ export async function startCookieMonster() {
 
   const entries = app.isPackaged
     ? [
-        path.join(process.resourcesPath, "cm-plugins/provider"),
+        ...(wpp ? [path.join(process.resourcesPath, "cm-plugins/provider")] : []),
         path.join(process.resourcesPath, "cm-plugins/figma"),
         path.join(process.resourcesPath, "cm-plugins/browser"),
       ]
     : [
-        path.join(app.getAppPath(), "../cm-provider"),
+        ...(wpp ? [path.join(app.getAppPath(), "wpp/node_modules/@cookiemonster/wpp/provider")] : []),
         path.join(app.getAppPath(), "../plugins/figma"),
         path.join(app.getAppPath(), "../cm-browser"),
       ]
@@ -33,13 +35,12 @@ export async function startCookieMonster() {
   entries.forEach((file) => {
     if (!existsSync(file)) throw new Error(`CookieMonster plugin is missing: ${file}`)
   })
-  process.env.OPENCODE_CONFIG_CONTENT = cookieMonsterConfig(entries, process.env.OPENCODE_CONFIG_CONTENT)
-  const { startWppBridge } = await import("./wpp-bridge")
-  const { openWppLogin, wppAuth } = await import("./wpp-bridge/session")
-  wppAuth.subscribe((state) =>
-    BrowserWindow.getAllWindows().forEach((win) => {
-      if (!win.isDestroyed()) win.webContents.send("cm-wpp-auth", state)
-    }),
-  )
-  await startWppBridge({ openLogin: () => void openWppLogin(), checkAuth: () => wppAuth.check() })
+  process.env.OPENCODE_CONFIG_CONTENT = cookieMonsterConfig(entries, process.env.OPENCODE_CONFIG_CONTENT, wpp?.model)
+  if (wpp) {
+    await wpp.start(getStore().get("wppChatMode") === "agent" ? "agent" : "assistant", (state) =>
+      BrowserWindow.getAllWindows().forEach((win) => {
+        if (!win.isDestroyed()) win.webContents.send("cm-wpp-auth", state)
+      }),
+    )
+  }
 }

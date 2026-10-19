@@ -1,10 +1,14 @@
 import { cp, mkdir, rm } from "node:fs/promises"
 import { fileURLToPath } from "node:url"
 
+await rm(new URL("../resources/cm-plugins/provider", import.meta.url), { recursive: true, force: true })
+
 const root = fileURLToPath(new URL("../", import.meta.url))
 
 for (const plugin of [
-  { name: "provider", entry: "../cm-provider/src/index.ts" },
+  ...(process.env.CM_WPP === "1"
+    ? [{ name: "provider", entry: "wpp/node_modules/@cookiemonster/wpp/provider/index.ts" }]
+    : []),
   { name: "figma", entry: "../plugins/figma/index.ts" },
   { name: "browser", entry: "../cm-browser/src/plugin.ts" },
 ]) {

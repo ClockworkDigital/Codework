@@ -348,7 +348,7 @@ async function run() {
   await app.whenReady()
 
   if (process.argv.includes("--wpp-auth")) {
-    const { wppAuthSmoke } = await import("../wpp-bridge/auth-state.fixture")
+    const { wppAuthSmoke } = await import("../../../wpp/auth-state.fixture.mjs")
     await wppAuthSmoke()
     stage("PASS WPP authentication")
 

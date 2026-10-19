@@ -1,6 +1,4 @@
-import { DEFAULT_MODEL_ID } from "@cookiemonster/provider/profiles"
-
-export function cookieMonsterConfig(plugins: string[], content?: string) {
+export function cookieMonsterConfig(plugins: string[], content?: string, model?: string) {
   const config: unknown = content ? JSON.parse(content) : {}
 
   if (!config || typeof config !== "object" || Array.isArray(config)) throw new Error("Invalid OpenCode config")
@@ -9,7 +7,7 @@ export function cookieMonsterConfig(plugins: string[], content?: string) {
   if (!Array.isArray(current)) throw new Error("Invalid OpenCode plugins")
 
   return JSON.stringify({
-    model: `cookiemonster/${DEFAULT_MODEL_ID}`,
+    ...(model ? { model } : {}),
     ...config,
     plugins: [
       ...current.filter((plugin) => plugin !== "-opencode.browser"),

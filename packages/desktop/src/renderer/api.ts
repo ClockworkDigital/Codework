@@ -1,4 +1,4 @@
-import type { WppAuthState } from "@cookiemonster/provider/auth"
+import type { WppAuthState } from "../shared/wpp-auth"
 import type { ElectronAPI } from "./api-types"
 import { invoke, listen, send } from "./ipc-client"
 import type { BrowserTabs, BrowserSelection } from "@cookiemonster/cm-browser/panel"

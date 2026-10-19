@@ -1,3 +1,4 @@
+import { wpp } from "#cm-wpp"
 import { BrowserWindow } from "electron"
 import { Effect } from "effect"
 import { CmBrowserRpcs } from "../../shared/ipc-rpc/cm-browser"
@@ -72,15 +73,15 @@ export const cmBrowserHandlers = CmBrowserRpcs.toLayer(
       CmWppAuth: (input, context) =>
         Effect.promise(async () => {
           await owner(context)
-          const { wppAuth } = await import("../wpp-bridge/session")
+          if (!wpp) throw new Error("wpp_unavailable")
 
-          return JSON.stringify(input.check ? await wppAuth.check() : wppAuth.get())
+          return JSON.stringify(input.check ? await wpp.auth.check() : wpp.auth.get())
         }),
       CmWppLogin: (_input, context) =>
         Effect.promise(async () => {
           await owner(context)
-          const { toggleWppLogin } = await import("../wpp-bridge/session")
-          toggleWppLogin()
+          if (!wpp) throw new Error("wpp_unavailable")
+          wpp.toggleLogin()
         }),
     })
   }),

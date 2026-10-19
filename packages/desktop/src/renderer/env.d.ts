@@ -3,6 +3,7 @@ import type { ElectronNative } from "../preload/types"
 declare global {
   interface ImportMetaEnv {
     readonly CM_BRAND: boolean
+    readonly CM_WPP: boolean
     readonly OPENCODE_TEST_ONBOARDING: boolean
   }
 

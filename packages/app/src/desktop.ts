@@ -21,3 +21,5 @@ export { createNamespaceStorage, type NamespaceStorage } from "./runtime/persist
 export { flushPersisted } from "./runtime/persistence/persist"
 
 export { useExtensionServers } from "./runtime/extension/servers"
+
+export type { WppAuthState, WppAuthStatus, WppAuthPlatform } from "./runtime/platform/wpp-auth"

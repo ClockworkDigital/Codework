@@ -184,3 +184,15 @@ const table = sqliteTable("session", {
 - Keep delivery vocabulary explicit. Prompts steer by default. At safe step boundaries, steered compaction takes priority up to the first steered move control; other steers retain enqueue order. At an idle boundary, steers take priority; otherwise exactly one queued item delivers before the runner reevaluates continuation. Inbox items may be cancelled or changed between queue and steer before delivery. Promoting new user input resets the selected agent's step allowance; a batch of steers resets it once.
 - One step is one logical LLM call; its durable record covers only the model-visible span. Do not write "provider turn", and do not use bare "turn" for a single call: "turn" is reserved for the future assistant-turn unit containing all steps from prompt promotion until the session would go idle.
 - Keep event replay ownership separate from clustered Session execution ownership.
+
+## Optional CookieMonster WPP integration
+
+WPP implementation and the native V2 provider plugin are owned by the private `trmosala/CM-WPP-Bits` repo. Earlier `packages/desktop/src/main/wpp-bridge/` and `packages/cm-provider/` paths now map to that dependency. Capture/token handovers moved there.
+
+The optional integration is in `packages/desktop/wpp/`, outside the root workspace. Install it with `bun run --cwd packages/desktop install:wpp`; its manifest and separate lockfile pin an immutable Git commit. `CM_WPP=1` enables it in desktop dev/build commands, independently of `CM_BRAND`. Normal builds and installs must work with it absent. Do not add it to the root workspace dependencies or edit installed dependency source.
+
+Desktop source consumes the build-selected `#cm-wpp` integration. Generic builds retain browser/Figma configuration and existing user settings, but add no WPP provider or model default. WPP builds use the native V2 provider plugin and Responses protocol. Vault/translation integration remains host-owned.
+
+See `packages/desktop/WPP.md` for tests. Backend tests and generated declarations belong to CM-WPP-Bits; the V2 SDK/AI and packaged-plugin contracts remain in the optional host integration because they use its SDK runtime. Run `CM_WPP=1 bun scripts/build-cm-plugins.ts` then `bun run test:wpp` from the desktop package. Desktop vault tests need `--preload ./test/preload.ts`.
+
+CI uses `CM_WPP_SSH_KEY` only for WPP jobs. Install private source after saving the public dependency cache. Agents must not merge or publish releases.

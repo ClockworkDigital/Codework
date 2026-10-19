@@ -112,3 +112,5 @@ written to `dist/bench-startup`.
 A packaged beta or prod build registers itself as the `opencode://` handler when it starts, even from the bench; the
 installed app takes the registration back on its next launch. Those channels run with `HTTPS_PROXY` pointed at a
 closed port (`--offline` forces it for dev) so the updater's first check fails fast instead of reaching GitHub.
+
+CookieMonster builds can optionally include WPP. See [WPP.md](./WPP.md) for installation, build flags, private dependency access, and verification.

@@ -1,6 +1,9 @@
 name: "Setup Bun"
 description: "Setup Bun with caching and install dependencies"
 inputs:
+  wpp-ssh-key:
+    description: "Read-only deploy key for the optional private WPP integration"
+    required: false
   bun-version:
     description: "Bun version to install instead of the root packageManager version"
     required: false
@@ -78,3 +81,36 @@ runs:
       with:
         path: ${{ steps.cache.outputs.dir }}
         key: ${{ steps.bun-cache.outputs.cache-primary-key }}
+
+    # Install private source after saving the public dependency cache.
+    - name: Authenticate private WPP dependency
+      if: env.CM_WPP == '1'
+      shell: bash
+      env:
+        CM_WPP_SSH_KEY: ${{ inputs.wpp-ssh-key }}
+      run: |
+        if [ -z "$CM_WPP_SSH_KEY" ]; then
+          echo "::error::CM_WPP_SSH_KEY with read access to trmosala/CM-WPP-Bits is required."
+          exit 1
+        fi
+        umask 077
+        printf '%s\n' "$CM_WPP_SSH_KEY" > "$RUNNER_TEMP/cm-wpp-key"
+        curl --fail --silent --show-error https://api.github.com/meta | node -e '
+          let data = ""
+          process.stdin.on("data", chunk => data += chunk)
+          process.stdin.on("end", () => {
+            for (const key of JSON.parse(data).ssh_keys) console.log("github.com " + key)
+          })
+        ' > "$RUNNER_TEMP/cm-wpp-known-hosts"
+
+    - name: Install optional WPP integration
+      if: env.CM_WPP == '1'
+      run: |
+        export GIT_SSH_COMMAND="ssh -i \"$RUNNER_TEMP/cm-wpp-key\" -o BatchMode=yes -o ConnectTimeout=15 -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=\"$RUNNER_TEMP/cm-wpp-known-hosts\""
+        bun run --cwd packages/desktop install:wpp --frozen-lockfile
+      shell: bash
+
+    - name: Remove private WPP credentials
+      if: always()
+      run: rm -f "$RUNNER_TEMP/cm-wpp-key" "$RUNNER_TEMP/cm-wpp-known-hosts"
+      shell: bash

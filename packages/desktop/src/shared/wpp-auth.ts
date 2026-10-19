@@ -1,1 +1,1 @@
-export type { WppAuthStatus, WppAuthState, WppAuthPlatform } from "@cookiemonster/provider/auth"
+export type { WppAuthStatus, WppAuthState, WppAuthPlatform } from "@opencode/app/desktop"

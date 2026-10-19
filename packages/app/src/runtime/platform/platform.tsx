@@ -4,7 +4,7 @@ import type { Accessor } from "solid-js"
 import type { DesktopMenuAction } from "@/shell/commands/desktop-menu"
 import type { DraftStore } from "@/runtime/persistence/drafts"
 import type { Bridge } from "@opencode/gui-extensions/sdk/bridge"
-import type { WppAuthPlatform } from "@cookiemonster/provider/auth"
+import type { WppAuthPlatform } from "./wpp-auth"
 import type { BrowserPanelPlatform } from "@cookiemonster/cm-browser/panel"
 
 type PickerPaths = string | string[] | null

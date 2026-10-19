@@ -100,6 +100,7 @@ export default [
           },
         },
         define: {
+          "import.meta.env.VITE_CM_WPP": JSON.stringify(process.env.CM_WPP === "1"),
           "import.meta.env.VITE_OPENCODE_CHANNEL": JSON.stringify(channel),
         },
         worker: {

@@ -8,7 +8,7 @@ import {
 } from "../shared/ipc-transport"
 import { windowBootstrapFromArguments } from "../shared/window-bootstrap"
 import type { ElectronNative } from "./types"
-import type { WppAuthState } from "@cookiemonster/provider/auth"
+import type { WppAuthState } from "../shared/wpp-auth"
 import type { BrowserPanelPlatform } from "@cookiemonster/cm-browser/panel"
 
 function subscribe<Value>(channel: string, callback: (value: Value) => void) {

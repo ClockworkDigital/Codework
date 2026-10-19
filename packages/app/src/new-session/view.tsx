@@ -27,8 +27,7 @@ import { displayName } from "@opencode/ui/project-avatar"
 import { useComposerState } from "@/composer/persistence"
 import { promptLength } from "@/composer/prompt-parts"
 import { Cm3Icon } from "@/cookiemonster/cm3-icon"
-import cookieMonsterBannerLight from "@/assets/cookie-monster-banner-light.svg"
-import cookieMonsterBannerDark from "@/assets/cookie-monster-banner-dark.svg"
+import { cookieMonsterBannerLight, cookieMonsterBannerDark } from "@/assets/cookie-monster-banner"
 
 const providerTipDismissalDuration = 30 * 24 * 60 * 60 * 1000
 

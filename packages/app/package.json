@@ -89,7 +89,6 @@
     "solid-js": "catalog:",
     "solid-presence": "0.2.0",
     "tailwindcss": "4.3.3",
-    "@cookiemonster/cm-browser": "workspace:*",
-    "@cookiemonster/provider": "workspace:*"
+    "@cookiemonster/cm-browser": "workspace:*"
   }
 }

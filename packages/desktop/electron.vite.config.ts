@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs"
+import { fileURLToPath } from "node:url"
 import { defineConfig } from "electron-vite"
 import type { Plugin } from "vite"
 import { pickerPlugin } from "./scripts/picker"
@@ -51,6 +53,10 @@ const initialChunk: Plugin = {
 }
 
 export default defineConfig(({ command }) => {
+  const wpp = process.env.CM_WPP === "1"
+  if (wpp && !existsSync(new URL("./wpp/node_modules/@cookiemonster/wpp/package.json", import.meta.url))) {
+    throw new Error("CM_WPP=1 requires bun run --cwd packages/desktop install:wpp")
+  }
   const channel = resolveChannel()
   const nodePtyPkg = nodePtyPackage()
 
@@ -58,9 +64,16 @@ export default defineConfig(({ command }) => {
     main: {
       resolve: {
         dedupe: ["effect"],
+        alias: [
+          {
+            find: "#cm-wpp",
+            replacement: fileURLToPath(new URL(wpp ? "./wpp/index.mjs" : "./src/main/wpp.ts", import.meta.url)),
+          },
+        ],
       },
       define: {
         "import.meta.env.CM_BRAND": JSON.stringify(process.env.CM_BRAND === "1"),
+        "import.meta.env.CM_WPP": JSON.stringify(wpp),
         // Local renderer/server mode still uses the dev application identity and updater policy.
         "import.meta.env.OPENCODE_CHANNEL": JSON.stringify(channel === "local" ? "dev" : channel),
       },
@@ -86,7 +99,13 @@ const require = __cjs_mod__.createRequire(import.meta.url);
         },
         externalizeDeps: {
           // Bundle the Effect family together.
-          exclude: ["effect", "@effect/platform-node", "@effect/platform-node-shared", "drizzle-orm"],
+          exclude: [
+            "@cookiemonster/wpp",
+            "effect",
+            "@effect/platform-node",
+            "@effect/platform-node-shared",
+            "drizzle-orm",
+          ],
           include: [nodePtyPkg],
         },
       },
@@ -125,6 +144,7 @@ const require = __cjs_mod__.createRequire(import.meta.url);
         "import.meta.env.OPENCODE_VERSION": JSON.stringify(process.env.OPENCODE_VERSION),
         "import.meta.env.VITE_OPENCODE_CHANNEL": JSON.stringify(channel),
         "import.meta.env.CM_BRAND": JSON.stringify(process.env.CM_BRAND === "1"),
+        "import.meta.env.CM_WPP": JSON.stringify(wpp),
         "import.meta.env.OPENCODE_TEST_ONBOARDING": JSON.stringify(
           command === "serve" && process.env.OPENCODE_TEST_ONBOARDING === "1",
         ),
