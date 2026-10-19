@@ -147,12 +147,18 @@ export function BrowserSite(props: {
       </BrowserButton>
       <fieldset class="space-y-2 border-t border-border-weaker-base pt-2">
         <legend class="font-medium">{language.t("browser.site.data")}</legend>
+        <Show when={inspectionFailed()}>
+          <p role="status">{language.t("browser.site.inspectFailed")}</p>
+          <Show when={data()}>
+            <p role="status">{language.t("browser.site.stale")}</p>
+          </Show>
+        </Show>
         <Show
           when={data()}
           fallback={
-            <p role="status">
-              {language.t(inspectionFailed() ? "browser.site.inspectFailed" : "browser.site.inspecting")}
-            </p>
+            <Show when={!inspectionFailed()}>
+              <p role="status">{language.t("browser.site.inspecting")}</p>
+            </Show>
           }
         >
           {(inspection) => (

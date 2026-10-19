@@ -108,6 +108,7 @@ export const browser = {
   "browser.site.data": "Site data",
   "browser.site.inspecting": "Inspecting Chromium site data…",
   "browser.site.inspectFailed": "Could not inspect this site. Try Refresh inspection.",
+  "browser.site.stale": "Showing previous inspection results. Site data may have changed.",
   "browser.site.cookies": "Cookies matching this page: {{count}}",
   "browser.site.usage": "Origin storage reported by Chromium: {{size}}",
   "browser.site.storage": "Stored categories: {{types}}",

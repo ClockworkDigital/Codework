@@ -365,6 +365,19 @@ test("mounted settings show eligibility, allow revocation during consent and rou
     })
     expect(host.textContent).toContain("Cookies matching this page: 2")
     expect(host.textContent).not.toContain("Could not inspect this site")
+    for (const failure of [() => Promise.resolve(false), () => Promise.reject(new Error("Refresh failed"))]) {
+      inspection = failure
+      button("Refresh inspection").click()
+      await new Promise<void>((resolve) => setImmediate(resolve))
+      expect(host.textContent).toContain("Cookies matching this page: 2")
+      expect(host.textContent).toContain("Could not inspect this site. Try Refresh inspection.")
+      expect(host.textContent).toContain("Showing previous inspection results. Site data may have changed.")
+      inspection = () => Promise.resolve(true)
+      button("Refresh inspection").click()
+      await new Promise<void>((resolve) => setImmediate(resolve))
+      expect(host.textContent).not.toContain("Could not inspect this site")
+      expect(host.textContent).not.toContain("Showing previous inspection results")
+    }
   } finally {
     dispose?.()
     host.remove()
