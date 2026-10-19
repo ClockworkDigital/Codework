@@ -105,6 +105,38 @@ describe("decideThreadMode", () => {
     expect(decideThreadMode(KEY, next, true)).toEqual({ mode: "continue", sinceIndex: 2 })
   })
 
+  test("a tool turn continues when the client replays its streamed text and re-serialized arguments", () => {
+    commitThread(KEY, body(sys(), user("inspect")), {
+      content: "I'll check.",
+      tool_calls: [
+        {
+          id: "t1",
+          type: "function",
+          function: { name: "bash", arguments: JSON.stringify({ command: "pwd", description: "Print dir" }) },
+        },
+      ],
+    })
+    const echo = {
+      role: "assistant",
+      content: "I'll check.\n\n",
+      tool_calls: [
+        {
+          id: "t1",
+          type: "function",
+          function: { name: "bash", arguments: JSON.stringify({ description: "Print dir", command: "pwd" }) },
+        },
+      ],
+    }
+    const next = body(sys(), user("inspect"), echo, toolResult("t1", "ok"))
+    expect(decideThreadMode(KEY, next, true)).toEqual({ mode: "continue", sinceIndex: 2 })
+  })
+
+  test("a tool-only turn committed with null content continues from the client's empty string", () => {
+    commitThread(KEY, body(sys(), user("inspect")), { content: null, tool_calls: assistantToolCall("t1").tool_calls })
+    const next = body(sys(), user("inspect"), assistantToolCall("t1"), toolResult("t1", "ok"))
+    expect(decideThreadMode(KEY, next, true)).toEqual({ mode: "continue", sinceIndex: 2 })
+  })
+
   test("an unexpected assistant echo resyncs fresh", () => {
     const first = body(sys(), user("hello"))
     commitThread(KEY, first, assistant("answer"))

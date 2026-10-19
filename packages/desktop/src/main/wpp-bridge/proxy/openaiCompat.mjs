@@ -786,12 +786,16 @@ function createStreamSession({ sentenceQuarantine = false } = {}) {
   };
 }
 
-// Close out a streamed completion using the authoritative normalized result. Three shapes:
-//  1. tool_calls → the gate suppressed all live prose; emit structured tool-call chunks.
+// Close out a streamed completion using the authoritative normalized result. Content goes first,
+// then any structured tool-call chunks. Three content shapes:
+//  1. recovery replay → the recovered response is a new cumulative text origin. Append it in full
+//     after any benign commentary already emitted from the discarded answer instead of diffing
+//     unrelated strings.
 //  2. prose already streamed live → emit only the trailing diff (normalized content past what we
-//     already sent), so the client isn't sent duplicate text.
-//  3. nothing streamed yet (short/undecided prose, or a leading-brace turn the normalizer decided
-//     was content after all) → emit the whole content body.
+//     already sent). This covers a tool turn's preamble too: sentence quarantine releases it live up
+//     to the first tool-call marker, so writing it again would duplicate it in the stored message.
+//  3. nothing streamed yet (short/undecided prose, a buffered tool turn, or a leading-brace turn the
+//     normalizer decided was content after all) → emit the whole content body.
 // Always terminates the stream via finishChatCompletion. The caller must unsubscribe from progress
 // BEFORE calling this so a late frame can't interleave a delta after finish_reason.
 function finalizeStreamedCompletion(response, streamBase, {
@@ -805,23 +809,14 @@ function finalizeStreamedCompletion(response, streamBase, {
   const tool_calls = normalized.tool_calls;
   const content = normalized.content || "";
 
-  if (Array.isArray(tool_calls) && tool_calls.length > 0) {
-    if (content) {
-      writeContentBody(response, streamBase, content);
-    }
-    writeToolCallChunks(response, streamBase, tool_calls);
-  } else if (recoveryReplay) {
-    // The recovery response is a new cumulative text origin. Append it in full after any benign
-    // commentary already emitted from the discarded answer instead of diffing unrelated strings.
+  if (recoveryReplay || !streamSession.hasStreamed()) {
     writeContentBody(response, streamBase, content);
-  } else if (streamSession.hasStreamed()) {
-    // Emit the authoritative content past what we've already streamed live.
-    const trailing = streamSession.trailingDiff(content);
-    if (trailing) {
-      writeContentDelta(response, streamBase, trailing);
-    }
   } else {
-    writeContentBody(response, streamBase, content);
+    writeContentDelta(response, streamBase, streamSession.trailingDiff(content));
+  }
+
+  if (Array.isArray(tool_calls) && tool_calls.length > 0) {
+    writeToolCallChunks(response, streamBase, tool_calls);
   }
 
   finishChatCompletion(response, streamBase, {

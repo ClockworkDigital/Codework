@@ -368,6 +368,44 @@ describe("WorkerPool cancellation", () => {
     expect(destroyed).toBe(true)
     pool.destroy()
   })
+
+  test("probes a fresh job once per worker and agent", async () => {
+    const pool = new WorkerPool({ chatUrl: "https://example.test/chat" })
+    const jobs: string[] = []
+    const entry = {
+      id: 1,
+      window: { isDestroyed: () => false, destroy: () => {} },
+      controller: {
+        runJob: async (job: { id?: string }) => {
+          if (job.id?.startsWith("user-job")) {
+            jobs.push("user")
+            return { ok: true, responseSource: "network", finalText: "done" }
+          }
+          jobs.push("probe")
+          return { ok: true, finalText: "CM_CAPABILITY_V1_OK" }
+        },
+      },
+      netWitness: { summarizeWindow: () => ({ cdpRequestSeen: true, cdpStatus: 200, cdpFinished: true }) },
+      agent: "CM_Opus5.5-High",
+      protocolAgent: "",
+      sessionKey: "",
+      subagent: false,
+      busy: true,
+      lastUsed: Date.now(),
+    }
+    Reflect.get(pool, "workers").set(entry.id, entry)
+    Reflect.set(pool, "acquire", async () => entry)
+    try {
+      for (const id of ["user-job-1", "user-job-2"]) {
+        await pool.run({ id, payload: { model: entry.agent } })
+      }
+      expect(jobs).toEqual(["probe", "user", "user"])
+      expect(entry.protocolAgent).toBe(entry.agent)
+    } finally {
+      pool.destroy()
+    }
+  })
+
   test("discards the leased worker when its client aborts", async () => {
     const pool = new WorkerPool({ chatUrl: "https://example.test/chat" })
     let destroyed = false
