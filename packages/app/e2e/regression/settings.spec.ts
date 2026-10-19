@@ -134,6 +134,54 @@ test("single-server settings expose scoped pages without a server picker", async
   expect((await updated).postDataJSON()).toEqual({ shell: "bash" })
 })
 
+test("beginner guidance starts on, persists the server preference and reports save failures", async ({ page }) => {
+  const state = { enabled: true, fail: false }
+  const { settings } = await open(page, {
+    provider: {
+      all: [{ id: "cookiemonster", name: "CookieMonster", models: {} }],
+      connected: ["cookiemonster"],
+    },
+    skills: () =>
+      state.enabled
+        ? [
+            {
+              id: "cm-onboarding",
+              name: "CookieMonster beginner guidance",
+              path: "/builtin/cm-onboarding.md",
+              content: "Help",
+            },
+          ]
+        : [],
+    onConfigUpdate: (patch) => {
+      if (state.fail) return { status: 500, body: { message: "Cannot save guidance preference" } }
+      if (patch.skill?.id === "cm-onboarding") state.enabled = patch.skill.enabled
+    },
+  })
+  await settings.getByRole("tab", { name: "Server", exact: true }).click()
+  const toggle = settings.getByRole("switch", { name: "Beginner guidance", exact: true })
+  await expect(toggle).toBeEnabled()
+  await expect(toggle).toBeChecked()
+
+  const saved = page.waitForRequest(
+    (request) => request.method() === "PATCH" && new URL(request.url()).pathname === "/api/experimental/config",
+  )
+  await toggle.press("Space")
+  expect((await saved).postDataJSON()).toEqual({ skill: { id: "cm-onboarding", enabled: false } })
+  await expect(toggle).not.toBeChecked()
+  await page.reload()
+  await expect(toggle).toBeEnabled()
+  await expect(toggle).not.toBeChecked()
+
+  state.fail = true
+  await toggle.press("Space")
+  await expect(page.getByText("Could not save beginner guidance", { exact: true })).toBeVisible()
+  await expect(toggle).not.toBeChecked()
+  state.fail = false
+  await expect(toggle).toBeEnabled()
+  await toggle.press("Space")
+  await expect(toggle).toBeChecked()
+})
+
 test("project list menus rename, close, edit, add, and stay inside the scrollport", async ({ page }) => {
   const projects = ["rebase", "dinocms", "opencode", "Playground"].map((name, index) =>
     project({ id: `project-${index}`, directory: `/projects/${name}`, name }),

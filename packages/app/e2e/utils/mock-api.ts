@@ -2,6 +2,7 @@ import { Predicate, Schema, SchemaGetter } from "effect"
 import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/http-api"
 import { Pty } from "@opencode/schema/pty"
 import { Worktree } from "@opencode/schema/worktree"
+import { Config } from "@opencode/schema/config"
 
 // Handlers answer plain fixture data: undefined properties are dropped, and other non-JSON values become null.
 const Json = Schema.Json.pipe(
@@ -174,7 +175,7 @@ const Group = HttpApiGroup.make("mock")
   .add(HttpApiEndpoint.get("configShells", "/api/config/shell", { success: Json }))
   .add(
     HttpApiEndpoint.patch("configUpdate", "/api/experimental/config", {
-      payload: Schema.Struct({ shell: Schema.NullOr(Schema.String) }),
+      payload: Config.Patch,
       success: HttpApiSchema.NoContent,
     }),
   )

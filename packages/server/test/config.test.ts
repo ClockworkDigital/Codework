@@ -2,7 +2,8 @@ import fs from "node:fs/promises"
 import path from "node:path"
 import { expect } from "bun:test"
 import { Config } from "@opencode/schema/config"
-import { Effect, Schema } from "effect"
+import { Effect, Schedule, Schema } from "effect"
+import { Skill } from "@opencode/schema/skill"
 import { tmpdir } from "../../core/test/fixture/tmpdir"
 import { it } from "../../core/test/lib/effect"
 import { startServer } from "./fixture/server"
@@ -96,6 +97,89 @@ it.live("updates the global shell without replacing unrelated JSONC", () =>
     )
     expect(shells.status).toBe(200)
     expect(Array.isArray(yield* Effect.promise(() => shells.json()))).toBe(true)
+  }),
+)
+
+it.live("persists a skill toggle across locations and preserves other configuration", () =>
+  Effect.gen(function* () {
+    const tmp = yield* Effect.acquireDisposable(Effect.promise(() => tmpdir("opencode-config-skill-")))
+    const global = path.join(tmp.path, "global")
+    const config = path.join(global, "opencode.jsonc")
+    yield* Effect.promise(() => fs.mkdir(global, { recursive: true }))
+    yield* Effect.promise(() =>
+      fs.writeFile(
+        config,
+        `{
+  // keep this comment
+  "shell": "bash",
+  "policies": [{ "action": "tool.use", "resource": "shell:dangerous", "effect": "deny" }]
+}\n`,
+      ),
+    )
+    const server = yield* startServer(global, true)
+    const skills = (directory: string) =>
+      Effect.promise(async () => {
+        const url = new URL("/api/skill", server.base)
+        url.searchParams.set("location[directory]", directory)
+        const models = new URL(url)
+        models.pathname = "/api/model"
+        expect((await fetch(models, { headers: server.headers })).status).toBe(200)
+        const response = await fetch(url, { headers: server.headers })
+        expect(response.status).toBe(200)
+        const body: unknown = await response.json()
+        return Schema.decodeUnknownSync(Schema.Struct({ data: Schema.Array(Skill.Info) }))(body).data.map(
+          (skill) => skill.id,
+        )
+      })
+    const project = path.join(tmp.path, "project")
+    yield* Effect.promise(() => fs.mkdir(project, { recursive: true }))
+    // A project cannot silently re-enable guidance the user disabled globally.
+    yield* Effect.promise(() =>
+      fs.writeFile(
+        path.join(project, "opencode.json"),
+        JSON.stringify({
+          policies: [{ action: "integration.use", resource: "skill:report", effect: "allow" }],
+        }),
+      ),
+    )
+    expect(yield* skills(project)).toEqual(expect.arrayContaining(["report", "opencode"]))
+
+    for (const enabled of [false, true]) {
+      const response = yield* Effect.promise(() =>
+        fetch(new URL("/api/experimental/config", server.base), {
+          method: "PATCH",
+          headers: { ...server.headers, "content-type": "application/json" },
+          body: JSON.stringify({ skill: { id: "report", enabled } }),
+        }),
+      )
+      expect(response.status).toBe(204)
+      const current = yield* skills(project).pipe(
+        Effect.repeat({
+          until: (ids) => ids.includes(Skill.ID.make("report")) === enabled,
+          schedule: Schedule.spaced("25 millis"),
+        }),
+        Effect.timeout("5 seconds"),
+      )
+      expect(current).toContain(Skill.ID.make("opencode"))
+      const another = path.join(tmp.path, `another-${enabled}`)
+      yield* Effect.promise(() => fs.mkdir(another, { recursive: true }))
+      expect((yield* skills(another)).includes(Skill.ID.make("report"))).toBe(enabled)
+      const text = yield* Effect.promise(() => fs.readFile(config, "utf8"))
+      expect(text).toContain("// keep this comment")
+      const entries = yield* Effect.promise(async () => {
+        const response = await fetch(new URL("/api/config", server.base), { headers: server.headers })
+        const body: unknown = await response.json()
+        return Schema.decodeUnknownSync(Schema.Array(Config.Entry))(body)
+      })
+      const info = entries.find((entry) => entry.type === "document" && entry.path === config)
+      expect(info?.type === "document" && info.info).toMatchObject({
+        shell: "bash",
+        policies: [
+          { action: "tool.use", resource: "shell:dangerous", effect: "deny" },
+          { action: "integration.use", resource: "skill:report", effect: enabled ? "allow" : "deny" },
+        ],
+      })
+    }
   }),
 )
 

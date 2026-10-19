@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto"
 import { Plugin, Model, Provider } from "@opencode/plugin"
 import { Money } from "@opencode/schema/money"
 import { MODEL_IDS, resolveModelProfile } from "./modelProfiles.mjs"
+import { computerUse } from "./computer-use"
+import { onboarding } from "./onboarding"
 
 const runtimeID = (process.env.CM_RUNTIME_ID ??= randomUUID())
 const providerID = Provider.ID.make("cookiemonster")
@@ -9,6 +11,10 @@ const providerID = Provider.ID.make("cookiemonster")
 export default Plugin.define({
   id: "cookiemonster.provider",
   async setup(ctx) {
+    await ctx.skill.transform((editor) => {
+      if (!editor.get(computerUse.id)) editor.add(computerUse)
+      if (!editor.get(onboarding.id)) editor.add(onboarding)
+    })
     await ctx.provider.transform((editor) => {
       if (editor.get(providerID)) return
       editor.add({

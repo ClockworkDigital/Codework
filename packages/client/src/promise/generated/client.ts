@@ -2233,12 +2233,12 @@ export function make(options: ClientOptions) {
           },
           requestOptions,
         ),
-      update: (input: ConfigUpdateInput, requestOptions?: RequestOptions) =>
+      update: (input?: ConfigUpdateInput, requestOptions?: RequestOptions) =>
         request<ConfigUpdateOutput>(
           {
             method: "PATCH",
             path: `/api/experimental/config`,
-            body: { shell: input["shell"] },
+            body: { shell: input?.["shell"], skill: input?.["skill"] },
             successStatus: 204,
             declaredStatuses: [400, 401, 404],
             empty: true,

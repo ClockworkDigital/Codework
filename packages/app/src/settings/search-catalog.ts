@@ -155,6 +155,13 @@ export const clientSettings: Entry<SettingsRootTab>[] = [
 ]
 
 export const serverSettings: Entry<SettingsServerTab>[] = [
+  {
+    tab: "general",
+    label: "cm.onboarding.title",
+    target: "settings-beginner-guidance",
+    description: "cm.onboarding.description",
+    keywords: "beginner onboarding guidance tips tutorial help guide cookiemonster",
+  },
   { tab: "projects", label: "settings.tab.projects" },
   { tab: "workspaces", label: "settings.tab.workspaces", keywords: "workspaces disk usage cleanup delete" },
   { tab: "providers", label: "settings.providers.title", keywords: "connect api key credentials" },
