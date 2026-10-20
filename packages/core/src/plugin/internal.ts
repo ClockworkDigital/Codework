@@ -1,7 +1,7 @@
 export * as PluginInternal from "./internal.js"
 
 import { ScheduleRuntime } from "../schedule/runtime.js"
-import { CmAePlugin } from "../cm-ae/plugin.js"
+import { CmAePlugin } from "#cm-ae-plugin"
 import { SchedulePlugin } from "../schedule/plugin.js"
 import { LLMClient } from "@opencode/ai"
 import type { Plugin } from "@opencode/plugin/effect/plugin"
@@ -290,6 +290,6 @@ export const list = Effect.fn("PluginInternal.list")(function* () {
     )
   return {
     pre: resolve(pre),
-    post: resolve(process.env.CM_DESKTOP === "1" ? [...post, SchedulePlugin.Plugin, CmAePlugin.Plugin] : post),
+    post: resolve(process.env.CM_DESKTOP === "1" ? [...post, SchedulePlugin.Plugin, ...CmAePlugin.plugins] : post),
   }
 })
