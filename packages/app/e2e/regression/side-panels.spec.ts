@@ -1,4 +1,4 @@
-import { expect, test, type Locator, type Page } from "@playwright/test"
+import { expect, test, type CDPSession, type Locator, type Page } from "@playwright/test"
 import { tabKey } from "../utils/app"
 import { fileDiff, openSession } from "../utils/workspace"
 import { expectSessionTitle } from "../utils/waits"
@@ -96,6 +96,8 @@ test("review and terminal follow the session tab and stay mounted", async ({ pag
 })
 
 test("terminal stacks under review by default and spans the bottom when configured", async ({ page }) => {
+  const clock = await page.context().newCDPSession(page)
+  await clock.send("Animation.enable")
   await page.setViewportSize({ width: 1400, height: 900 })
 
   // A large nested branch diff; its first file is the sentinel that proves the virtualized tree stays mounted.
@@ -150,10 +152,10 @@ test("terminal stacks under review by default and spans the bottom when configur
 
   // Closing review mid-motion: the terminal grows upward with its bottom fixed and its content top-anchored.
   const stacked = await stackGeometry(page)
-  await holdTransitions(page)
+  await holdTransitions(page, clock)
   await toggle.click()
   const closing = await stackGeometry(page, 0.5)
-  await releaseTransitions(page)
+  await releaseTransitions(page, clock)
   await expect(reviewPanel).toBeHidden()
   await expect(terminalPanel).toBeVisible()
   const alone = await stackGeometry(page)
@@ -171,10 +173,10 @@ test("terminal stacks under review by default and spans the bottom when configur
 
   // Hiding the terminal mid-motion: both surfaces fill their regions and the clipped terminal keeps its size.
   const open = await stackGeometry(page)
-  await holdTransitions(page)
+  await holdTransitions(page, clock)
   await page.keyboard.press("Control+Backquote")
   const hiding = await stackGeometry(page, 0.5)
-  await releaseTransitions(page)
+  await releaseTransitions(page, clock)
   await expect(terminalPanel).toBeHidden()
   expect(hiding.moving).toEqual(expect.arrayContaining(["session-side-region", "session-side-terminal-region"]))
   expect(hiding.terminalRegion).toBeLessThan(open.terminalRegion - 1)
@@ -319,8 +321,12 @@ async function expectTreeSentinel(page: Page) {
 }
 
 // Pauses each CSS transition as it starts, so a real toggle can be measured mid-motion.
-function holdTransitions(page: Page) {
+async function holdTransitions(page: Page, clock: CDPSession) {
+  // Under CPU contention, transitionrun can arrive after the transition finished; stop compositor time first.
+  await clock.send("Animation.setPlaybackRate", { playbackRate: 0 })
+
   return page.evaluate(() => {
+    // SAFETY: This fixture owns the optional e2eHold state on this page.
     const host = window as Window & { e2eHold?: { active: boolean } }
 
     if (!host.e2eHold) {
@@ -339,18 +345,22 @@ function holdTransitions(page: Page) {
   })
 }
 
-function releaseTransitions(page: Page) {
-  return page.evaluate(() => {
-    ;(window as Window & { e2eHold?: { active: boolean } }).e2eHold!.active = false
+async function releaseTransitions(page: Page, clock: CDPSession) {
+  await page.evaluate(() => {
+    // SAFETY: holdTransitions created this page-owned state before release.
+    const host = window as Window & { e2eHold?: { active: boolean } }
+    host.e2eHold!.active = false
     document
       .getAnimations()
       .filter((item) => item instanceof CSSTransition && item.playState === "paused")
       .forEach((item) => item.finish())
   })
+  await clock.send("Animation.setPlaybackRate", { playbackRate: 1 })
 }
 
 // With `progress`, waits for the held region height transitions and seeks every held transition to that point first.
 async function stackGeometry(page: Page, progress?: number) {
+  // SAFETY: These filtered CSS transitions have keyframe effects targeting the owning DOM elements.
   const held = () =>
     page.evaluate(() =>
       document
@@ -371,6 +381,7 @@ async function stackGeometry(page: Page, progress?: number) {
       .getAnimations()
       .filter((item): item is CSSTransition => item instanceof CSSTransition && item.playState === "paused")
 
+    // SAFETY: CSS transitions on these regions have keyframe effects targeting DOM elements.
     const region = transitions.find(
       (item) => ((item.effect as KeyframeEffect).target as Element).getAttribute("data-slot") === "session-side-region",
     )
@@ -387,6 +398,7 @@ async function stackGeometry(page: Page, progress?: number) {
     const terminal = box("#terminal-panel")!
     const content = box('[data-slot="terminal-panel-content"]')!
 
+    // SAFETY: The filtered CSS transitions target DOM elements, as in the region lookup above.
     return {
       moving: transitions.map((item) => ((item.effect as KeyframeEffect).target as Element).getAttribute("data-slot")),
       terminalRegion: terminalRegion.height,
@@ -414,6 +426,7 @@ async function expectTerminalControlsAligned(terminal: Locator, toggle: Locator)
       const centers = await Promise.all(
         [terminal.getByRole("button", { name: "New terminal", exact: true }), toggle].map((button) =>
           button.locator("svg").evaluate((element) => {
+            // SAFETY: The locator selects svg elements, whose geometry is read below.
             const svg = element as SVGSVGElement
             const path = svg.getBBox()
 

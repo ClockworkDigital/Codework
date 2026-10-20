@@ -31,11 +31,18 @@ export default defineMain({
     "../../gui-extensions/src/**/*.stories.@(js|jsx|mjs|ts|tsx)",
   ],
   async viteFinal(config) {
-    const { mergeConfig, searchForWorkspaceRoot } = await import("vite")
-    const merged = mergeConfig(config, {
+    const { mergeConfig, normalizePath, searchForWorkspaceRoot } = await import("vite")
+    return mergeConfig(config, {
       plugins: [tailwindcss(), playgroundCss()],
       // The previous directory alias kept Solid Query unbundled.
-      optimizeDeps: { exclude: ["@tanstack/solid-query"] },
+      optimizeDeps: {
+        exclude: ["@tanstack/solid-query"],
+        // Page fixtures and built-in renderers load outside the story entry graph.
+        entries: [
+          normalizePath(path.resolve(here, "../../app/component-tests/*.fixture.tsx")),
+          normalizePath(path.resolve(extensions, "renderer.ts")),
+        ],
+      },
       resolve: {
         dedupe: ["solid-js", "solid-js/web", "@solidjs/meta", "@tanstack/solid-query"],
         alias: [
@@ -71,10 +78,5 @@ export default defineMain({
         },
       },
     })
-    merged.plugins = merged.plugins?.flat(8).filter((plugin) => {
-      if (!plugin || typeof plugin !== "object" || !("name" in plugin)) return true
-      return plugin.name !== "storybook:optimize-deps-plugin"
-    })
-    return merged
   },
 })

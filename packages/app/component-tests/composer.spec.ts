@@ -96,13 +96,17 @@ for (const direction of ["ltr", "rtl"]) {
         ).toBeLessThan(1)
         await page.keyboard.press("Enter")
         // Below the mobile breakpoint the variant picker opens in a bottom drawer instead of a menu.
-        await expect(
+
+        const option =
           width < 768
             ? page
                 .getByRole("dialog", { name: "Choose model variant", exact: true })
                 .getByRole("button", { name: "high", exact: true })
-            : page.getByRole("menuitemradio", { name: "high", exact: true }),
-        ).toBeVisible()
+            : page.getByRole("menuitemradio", { name: "high", exact: true })
+
+        await expect(option).toBeVisible()
+        // The mobile drawer starts below the viewport; wait until its options are presented before dismissal.
+        await expect(option).toBeInViewport({ ratio: 1 })
         await page.keyboard.press("Escape")
         await expect(variant).toBeFocused()
         await expect(submit).toBeInViewport()
