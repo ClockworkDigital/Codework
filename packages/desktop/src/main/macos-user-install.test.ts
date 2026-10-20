@@ -113,7 +113,8 @@ test("confirmation, failure handling and lock handoff precede launch", async () 
   }
 })
 
-test("replaces the whole app, retains the previous bundle and preserves unrelated data", async () => {
+// These filesystem fixtures require POSIX directory handles and permissions.
+test.skipIf(process.platform === "win32")("replaces the whole app, retains the previous bundle and preserves unrelated data", async () => {
   const root = await mkdtemp(join(tmpdir(), "cm-install-test-"))
   const source = join(root, "Source", "CookieMonster.app")
   const applications = join(root, "Applications With Spaces")
@@ -151,7 +152,7 @@ test("replaces the whole app, retains the previous bundle and preserves unrelate
   }
 })
 
-test("moves read-only bundle roots and restores their modes without changing the source", async () => {
+test.skipIf(process.platform === "win32")("moves read-only bundle roots and restores their modes without changing the source", async () => {
   const root = await mkdtemp(join(tmpdir(), "cm-install-test-"))
   const source = join(root, "Source")
   const destination = join(root, "CookieMonster.app")
@@ -208,7 +209,7 @@ test("moves read-only bundle roots and restores their modes without changing the
   }
 })
 
-test("backup cleanup is best-effort and retries after a later successful replacement", async () => {
+test.skipIf(process.platform === "win32")("backup cleanup is best-effort and retries after a later successful replacement", async () => {
   const root = await mkdtemp(join(tmpdir(), "cm-install-test-"))
   const source = join(root, "Source")
   const destination = join(root, "CookieMonster.app")
@@ -269,7 +270,7 @@ test("backup cleanup is best-effort and retries after a later successful replace
   }
 })
 
-test("pruning leaves unowned, changed, symlinked and unrelated backup candidates alone", async () => {
+test.skipIf(process.platform === "win32")("pruning leaves unowned, changed, symlinked and unrelated backup candidates alone", async () => {
   for (const change of [
     "unmarked",
     "extra",
@@ -365,7 +366,7 @@ test("pruning leaves unowned, changed, symlinked and unrelated backup candidates
   }
 })
 
-test("backup ownership-write failure leaves older backups without failing the published install", async () => {
+test.skipIf(process.platform === "win32")("backup ownership-write failure leaves older backups without failing the published install", async () => {
   const root = await mkdtemp(join(tmpdir(), "cm-install-test-"))
   const source = join(root, "Source")
   const destination = join(root, "CookieMonster.app")
@@ -409,7 +410,7 @@ test("backup ownership-write failure leaves older backups without failing the pu
   }
 })
 
-test("failed staging, moves, permission cleanup and recovery never prune completed backups", async () => {
+test.skipIf(process.platform === "win32")("failed staging, moves, permission cleanup and recovery never prune completed backups", async () => {
   for (const failure of ["staging", "backup", "publication", "recovery", "chmod", "close"]) {
     const root = await mkdtemp(join(tmpdir(), "cm-install-test-"))
     const source = join(root, "Source")
@@ -513,7 +514,7 @@ test("failed staging, moves, permission cleanup and recovery never prune complet
   }
 })
 
-test("backup handle cleanup failures restore the moved app before reporting failure", async () => {
+test.skipIf(process.platform === "win32")("backup handle cleanup failures restore the moved app before reporting failure", async () => {
   for (const failure of ["chmod", "close"]) {
     const root = await mkdtemp(join(tmpdir(), "cm-install-test-"))
     const source = join(root, "Source")
@@ -578,7 +579,7 @@ test("backup handle cleanup failures restore the moved app before reporting fail
   }
 })
 
-test("publication handle cleanup failures retain the complete new app and any previous backup", async () => {
+test.skipIf(process.platform === "win32")("publication handle cleanup failures retain the complete new app and any previous backup", async () => {
   for (const existing of [false, true]) {
     for (const failure of ["chmod", "close"]) {
       const root = await mkdtemp(join(tmpdir(), "cm-install-test-"))
@@ -649,7 +650,7 @@ test("publication handle cleanup failures retain the complete new app and any pr
   }
 })
 
-test("permission and move failures are not masked by mode restoration or handle close failures", async () => {
+test.skipIf(process.platform === "win32")("permission and move failures are not masked by mode restoration or handle close failures", async () => {
   for (const failure of ["chmod", "rename"]) {
     const root = await mkdtemp(join(tmpdir(), "cm-install-test-"))
     const source = join(root, "Source")
@@ -711,7 +712,7 @@ test("permission and move failures are not masked by mode restoration or handle 
   }
 })
 
-test("failed staging copies leave the installed app intact and can be retried", async () => {
+test.skipIf(process.platform === "win32")("failed staging copies leave the installed app intact and can be retried", async () => {
   const root = await mkdtemp(join(tmpdir(), "cm-install-test-"))
   const source = join(root, "Source")
   const destination = join(root, "CookieMonster.app")
@@ -796,7 +797,7 @@ test("rejects self-replacement and destinations changed while copying", async ()
   }
 })
 
-test("concurrent first installs publish only one complete bundle", async () => {
+test.skipIf(process.platform === "win32")("concurrent first installs publish only one complete bundle", async () => {
   const root = await mkdtemp(join(tmpdir(), "cm-install-test-"))
   const source = join(root, "Source")
   const destination = join(root, "CookieMonster.app")
@@ -823,7 +824,7 @@ test("concurrent first installs publish only one complete bundle", async () => {
   }
 })
 
-test("publication failures restore the old app or retain its backup without overwriting concurrent data", async () => {
+test.skipIf(process.platform === "win32")("publication failures restore the old app or retain its backup without overwriting concurrent data", async () => {
   for (const scenario of ["restore", "restore-fails", "concurrent-destination"]) {
     const root = await mkdtemp(join(tmpdir(), "cm-install-test-"))
     const source = join(root, "Source")

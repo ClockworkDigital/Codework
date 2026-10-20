@@ -3,3 +3,6 @@ packages/core/src/database/migration.gen.ts linguist-generated
 packages/core/src/models-dev/snapshot.txt linguist-generated
 packages/core/src/**/*.txt text eol=lf
 packages/httpapi-codegen/test/generated/*.ts text eol=lf
+
+# Preserve the audited bytes of the vendored CookieJar bundle on Windows.
+packages/desktop/vendor/cm-ae/** -text

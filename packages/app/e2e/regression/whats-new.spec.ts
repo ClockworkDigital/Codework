@@ -219,7 +219,10 @@ async function serveChangelog(page: Page, body: typeof changelog | typeof cliOnl
 async function start(page: Page, seed: SeedInput) {
   await mockWorkspace(page, { name: "Whats New", sessions: [], seed })
   await page.goto("/")
-  await expectAppVisible(page.getByRole("button", { name: "Settings", exact: true }))
+  // The startup dialog may already hide the shell from accessibility queries.
+  await expectAppVisible(
+    page.getByRole("button", { name: "Settings", exact: true, includeHidden: true }).filter({ visible: true }),
+  )
 }
 
 function stored(page: Page, key: string) {
