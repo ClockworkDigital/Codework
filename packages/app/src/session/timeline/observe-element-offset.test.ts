@@ -170,6 +170,46 @@ test("cleanup suppresses queued delegated callbacks, reconnect checks, and later
   route.remove()
 })
 
+test("ends a scroll at the live offset after a write without its own scroll event", async () => {
+  const viewport = document.createElement("div")
+  document.body.append(viewport)
+
+  const instance = {
+    scrollElement: viewport,
+    targetWindow: window,
+    scrollOffset: 0,
+    options: {
+      horizontal: false,
+      isRtl: false,
+      isScrollingResetDelay: 10,
+      useScrollendEvent: false,
+    },
+  } as unknown as Virtualizer<HTMLDivElement, HTMLDivElement>
+
+  const calls: [number, boolean][] = []
+
+  const cleanup = observeElementOffsetReconnectAware(instance, (offset, isScrolling) => {
+    calls.push([offset, isScrolling])
+    instance.scrollOffset = offset
+  })
+
+  try {
+    viewport.scrollTop = 100
+    viewport.dispatchEvent(new Event("scroll"))
+    // A history prepend anchors with a write whose scroll event a long task can hold past the reset delay.
+    viewport.scrollTop = 2_620
+    await new Promise((resolve) => setTimeout(resolve, 25))
+
+    expect(calls).toEqual([
+      [100, true],
+      [2_620, false],
+    ])
+  } finally {
+    cleanup?.()
+    viewport.remove()
+  }
+})
+
 type FrameWindow = {
   requestAnimationFrame(callback: () => void): unknown
   performance: { now(): number }
