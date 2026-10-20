@@ -217,7 +217,8 @@ export function getConfig() {
   const base = getBase(appId)
   base.protocols = {
     name: appId === "com.ogilvy.cookiemonster" ? "CookieMonster" : channel === "beta" ? "OpenCode Beta" : "OpenCode",
-    schemes: appId === "com.ogilvy.cookiemonster" ? ["opencode", "cookiemonster"] : ["opencode"],
+    schemes:
+      appId === "com.ogilvy.cookiemonster" && process.env.CM_WPP === "1" ? ["opencode", "cookiemonster"] : ["opencode"],
   }
 
   switch (channel) {

@@ -18,7 +18,9 @@ const channels = [
   { channel: "prod", appId: "ai.opencode.desktop" },
 ] as const
 
-function load(channel: string, target?: string, branded = false): Configuration {
+function load(channel: string, target?: string, branded = false, wpp = false): Configuration {
+  const previousWpp = process.env.CM_WPP
+  process.env.CM_WPP = wpp ? "1" : "0"
   const previousBrand = process.env.CM_BRAND
   process.env.CM_BRAND = branded ? "1" : "0"
   const previous = process.env.OPENCODE_CHANNEL
@@ -31,6 +33,8 @@ function load(channel: string, target?: string, branded = false): Configuration 
   try {
     return getConfig()
   } finally {
+    if (previousWpp === undefined) delete process.env.CM_WPP
+    else process.env.CM_WPP = previousWpp
     if (previousBrand === undefined) delete process.env.CM_BRAND
     else process.env.CM_BRAND = previousBrand
     delete process.env.OPENCODE_CHANNEL
@@ -187,7 +191,7 @@ test.each(channels)("CookieMonster identity is derived before Linux fields for $
   const id = "com.ogilvy.cookiemonster"
   expect(config.appId).toBe(id)
   expect(config.productName).toBe("CookieMonster")
-  expect(config.protocols).toEqual({ name: "CookieMonster", schemes: ["opencode", "cookiemonster"] })
+  expect(config.protocols).toEqual({ name: "CookieMonster", schemes: ["opencode"] })
   expect(config.extraMetadata?.desktopName).toBe(`${id}.desktop`)
   expect(config.linux?.executableName).toBe(id)
   expect(config.linux?.desktop?.entry?.StartupWMClass).toBe(id)
@@ -220,4 +224,11 @@ test.each([false, true])("metainfo uses the same branded=%s desktop identity as 
   } finally {
     await rm(directory, { recursive: true, force: true })
   }
+})
+
+test.each([false, true])("WPP sign-in protocol follows the optional WPP build: %s", (wpp) => {
+  expect(load("prod", undefined, true, wpp).protocols).toEqual({
+    name: "CookieMonster",
+    schemes: wpp ? ["opencode", "cookiemonster"] : ["opencode"],
+  })
 })
