@@ -204,6 +204,7 @@ test.each(["native", "legacy"] as const)(
       expect(headers[0].get("x-opencode-runtime-id")).toMatch(/^[a-f\d-]{36}$/)
       expect(headers[1].get("x-opencode-runtime-id")).toBe(headers[0].get("x-opencode-runtime-id"))
       expect(headers[0].get("x-opencode-client")).toBeTruthy()
+      expect(headers.map((value) => value.get("x-opencode-request-kind"))).toEqual(["primary", "primary"])
     } finally {
       server.stop(true)
       await rm(directory, { recursive: true, force: true })
