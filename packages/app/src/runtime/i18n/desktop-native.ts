@@ -306,6 +306,9 @@ export const DESKTOP_NATIVE_ENGLISH = {
 
   "desktop.picker.error.notSelected": "File was not selected by the picker",
   "desktop.picker.error.sizeLimit": "Selected attachments exceed the {{limit}} MB limit",
+
+  "desktop.openWith.error.appNotAllowed": "Application is not allowed: {{app}}",
+  "desktop.openWith.error.notAbsolute": "Open target must be an absolute path",
 } as const
 
 export type DesktopNativeKey = keyof typeof DESKTOP_NATIVE_ENGLISH
@@ -314,6 +317,7 @@ export type DesktopNativeMessages = Record<DesktopNativeKey, string>
 
 export type DesktopNativeBundle = { locale: DesktopNativeLocale; messages: DesktopNativeMessages }
 
+// SAFETY: DesktopNativeKey is exactly the key union of this owned literal.
 export const DESKTOP_NATIVE_KEYS = Object.keys(DESKTOP_NATIVE_ENGLISH) as DesktopNativeKey[]
 
 export const DESKTOP_NATIVE_MAX_PAYLOAD_BYTES = 64 * 1024
@@ -324,10 +328,13 @@ export function createDesktopNativeBundle(
 ): DesktopNativeBundle {
   return {
     locale,
+    // SAFETY: Every declared key occurs once and the translator returns a string for each.
     messages: Object.fromEntries(DESKTOP_NATIVE_KEYS.map((key) => [key, translate(key)])) as DesktopNativeMessages,
   }
 }
 
+// SAFETY: This IPC decoder checks payload size, locale, exact keys and string values before returning a bundle.
+/* oxlint-disable anti-slop/no-unknown-parameters, anti-slop/no-runtime-typeof, anti-slop/no-unsafe-dictionary-type */
 export function parseDesktopNativeBundle(value: unknown): DesktopNativeBundle | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
 
@@ -337,11 +344,13 @@ export function parseDesktopNativeBundle(value: unknown): DesktopNativeBundle | 
     return undefined
   }
 
+  // SAFETY: The guard above establishes an object; its fields remain unknown until checked below.
   const bundle = value as { locale?: unknown; messages?: unknown }
 
   if (!DESKTOP_NATIVE_LOCALES.some((locale) => locale === bundle.locale)) return undefined
 
   if (!bundle.messages || typeof bundle.messages !== "object" || Array.isArray(bundle.messages)) return undefined
+  // SAFETY: Messages is a non-array object; this boundary checks every unknown member below.
   const messages = bundle.messages as Record<string, unknown>
   const keys = Object.keys(messages)
 
@@ -351,8 +360,10 @@ export function parseDesktopNativeBundle(value: unknown): DesktopNativeBundle | 
 
   if (!keys.every((key) => key in DESKTOP_NATIVE_ENGLISH)) return undefined
 
+  // SAFETY: The bounded payload now has a supported locale, the exact native keys and only string values.
   return bundle as DesktopNativeBundle
 }
+/* oxlint-enable anti-slop/no-unknown-parameters, anti-slop/no-runtime-typeof, anti-slop/no-unsafe-dictionary-type */
 
 export function formatDesktopNativeMessage(message: string, params?: Record<string, string | number>) {
   if (!params) return message

@@ -27,11 +27,6 @@ export const AppCheckAppExists = Rpc.make("AppCheckAppExists", {
   success: Schema.Boolean,
 })
 
-export const AppResolveAppPath = Rpc.make("AppResolveAppPath", {
-  payload: { appName: Schema.String },
-  success: Schema.NullOr(Schema.String),
-})
-
 export const AppSetBackgroundColor = Rpc.make("AppSetBackgroundColor", {
   payload: { color: Schema.String },
 })
@@ -67,7 +62,6 @@ export const AppRpcs = RpcGroup.make(
   AppIsFirstLaunchOnboardingPending,
   AppFinishFirstLaunchOnboarding,
   AppCheckAppExists,
-  AppResolveAppPath,
   AppSetBackgroundColor,
   AppExportDebugLogs,
   AppSetForceFocus,
