@@ -128,7 +128,8 @@ try {
   const native = `process.getBuiltinModule('module').createRequire(process.execPath)('electron')`
   const usable = `Boolean(${native}.BrowserWindow?.getAllWindows().some(w => w !== globalThis.__cmActivationWorker && w.isVisible() && w.webContents.getURL().startsWith('oc://renderer/')))`
 
-  const waitFor = async (expression: string) => {
+  const waitFor = async (stage: string, expression: string) => {
+    console.log(`Checking packaged activation: ${stage}`)
     const deadline = Date.now() + 30_000
 
     while (Date.now() < deadline) {
@@ -136,11 +137,35 @@ try {
       await Bun.sleep(100)
     }
 
-    throw new Error("Packaged activation condition did not become true.")
+    await evaluate(`(() => {
+      const {app, BrowserWindow} = ${native};
+      console.log(JSON.stringify({
+        stage: ${JSON.stringify(stage)},
+        ready: app?.isReady(),
+        activationHandlers: app?.listenerCount('activate'),
+        activationEvents: globalThis.__cmActivationEvents ?? 0,
+        windows: BrowserWindow?.getAllWindows().map(window => {
+          const url = URL.parse(window.webContents.getURL());
+          return {
+            id: window.id,
+            visible: window.isVisible(),
+            minimized: window.isMinimized(),
+            loading: window.webContents.isLoading(),
+            page: url ? url.protocol + '//' + url.host + url.pathname : '',
+            worker: window === globalThis.__cmActivationWorker,
+          };
+        }),
+      }));
+      return true;
+    })()`)
+    throw new Error(`Packaged activation condition timed out: ${stage}`)
   }
 
   // The inspector can precede BrowserWindow exports; the early window also needs lifecycle adoption before close.
-  await waitFor(`${usable} && ${native}.app.listenerCount('activate') > 0`)
+  await waitFor(
+    "initial main window and lifecycle adoption",
+    `${usable} && ${native}.app.listenerCount('activate') > 0`,
+  )
 
   if (!(await evaluate(`${native}.app.isPackaged`))) throw new Error("This must exercise a packaged application.")
   await evaluate(`(() => {
@@ -153,20 +178,31 @@ try {
     return true;
   })()`)
   await waitFor(
+    "main windows closed with hidden worker preserved",
     `${native}.BrowserWindow.getAllWindows().length === 1 && !globalThis.__cmActivationWorker.isDestroyed()`,
   )
 
-  const activation = Bun.spawn(["/usr/bin/osascript", "-e", `tell application ${JSON.stringify(bundle)} to activate`], {
-    stdout: "inherit",
-    stderr: "inherit",
-  })
+  // Dock clicks send reopen; activate alone only brings the application to the foreground.
+  const activation = Bun.spawn(
+    [
+      "/usr/bin/osascript",
+      "-e",
+      `tell application ${JSON.stringify(bundle)} to reopen`,
+      "-e",
+      `tell application ${JSON.stringify(bundle)} to activate`,
+    ],
+    { stdout: "inherit", stderr: "inherit" },
+  )
 
   const activationTimer = setTimeout(() => activation.kill("SIGTERM"), 15_000)
   const activationCode = await activation.exited
   clearTimeout(activationTimer)
 
   if (activationCode !== 0) throw new Error("macOS could not activate the owned packaged app.")
-  await waitFor(`globalThis.__cmActivationEvents > 0 && ${usable}`)
+  await waitFor(
+    "native activation and restored visible main window",
+    `globalThis.__cmActivationEvents > 0 && ${usable}`,
+  )
 
   if (!(await evaluate(`!globalThis.__cmActivationWorker.isDestroyed()`)))
     throw new Error("Activation destroyed the hidden worker.")
