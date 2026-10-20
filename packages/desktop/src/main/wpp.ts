@@ -1,3 +1,4 @@
+import type { WebContents } from "electron"
 import type { WppAuthState } from "../shared/wpp-auth"
 
 export type WppIntegration = {
@@ -10,8 +11,9 @@ export type WppIntegration = {
   requestLogin(origin: string): Promise<void>
   toggleLogin(): void
   toggleWindows(): boolean
-  isLoggedWorker(contents: object): boolean
+  isLoggedWorker(contents: WebContents): boolean
   setWorkerLogWriter(
+    // oxlint-disable-next-line anti-slop/no-unsafe-dictionary-type -- Matches the optional backend diagnostic callback; values go only to the log sink.
     writer: (id: number, event: string, details: Record<string, unknown>, level?: "info" | "warn" | "error") => void,
   ): void
 }

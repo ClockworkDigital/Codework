@@ -28,6 +28,7 @@ export function createSessionRetention(input: {
       setTimeout(() => {
         timers.delete(root)
         input.session.evict(root)
+
         // Eviction keeps unacknowledged submissions and sessions still being created, and settling them need not
         // change the cached set this policy tracks. Retry while the family stays unkept and cached.
         if (!timers.has(root) && unkept().has(root)) release(root)
@@ -55,6 +56,7 @@ function unkeptRoots(session: Session, visible: readonly string[]) {
       session.root(id),
     ),
   )
+
   return session
     .cached()
     .map((id) => session.root(id))

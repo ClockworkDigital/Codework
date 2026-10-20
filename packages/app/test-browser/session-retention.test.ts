@@ -11,6 +11,7 @@ const delay = 10
 test("releases unkept families after the delay and keeps visible, running and attention families", async () => {
   const ids = ["ses_open", "ses_open_child", "ses_closed", "ses_closed_child", "ses_running", "ses_asked"]
   const scope = setup({ visible: ["ses_open_child"] })
+
   try {
     scope.remember("ses_open")
     scope.remember("ses_open_child", "ses_open")
@@ -20,6 +21,7 @@ test("releases unkept families after the delay and keeps visible, running and at
     scope.remember("ses_asked")
     scope.data.session.setStatus("ses_running", "running")
     scope.emit(permissionAsked("ses_asked"))
+
     for (const id of ids) await scope.data.session.message.sync(id)
     await settle()
 
@@ -41,10 +43,12 @@ test("releases unkept families after the delay and keeps visible, running and at
 test("closing a child tab keeps its still-visible parent and sibling family", async () => {
   const ids = ["ses_parent", "ses_child", "ses_sibling"]
   const scope = setup({ visible: ["ses_parent", "ses_child"] })
+
   try {
     scope.remember("ses_parent")
     scope.remember("ses_child", "ses_parent")
     scope.remember("ses_sibling", "ses_parent")
+
     for (const id of ids) await scope.data.session.message.sync(id)
 
     scope.setVisible(["ses_parent"])
@@ -61,6 +65,7 @@ test("closing a child tab keeps its still-visible parent and sibling family", as
 
 test("waits for persisted tabs, and keeps a read that lands before its tab or navigation commits", async () => {
   const scope = setup({ ready: false })
+
   try {
     scope.remember("ses_opening")
     await scope.data.session.message.sync("ses_opening")
@@ -90,19 +95,24 @@ test("late reads, late pages and later events are released again, and reopening 
   const late = Promise.withResolvers<void>()
   const older = Promise.withResolvers<void>()
   const ids = ["ses_paged", "ses_late"]
+
   const scope = setup({
     visible: ids,
     read(url) {
       if (url.searchParams.has("cursor")) return older.promise
+
       if (url.pathname.endsWith("/ses_late/message")) return late.promise
+
       return undefined
     },
   })
+
   try {
     scope.remember("ses_paged")
     scope.remember("ses_late")
     await scope.data.session.message.sync("ses_paged")
     await scope.data.session.pending.sync("ses_late")
+
     const reads = Promise.allSettled([
       scope.data.session.message.sync("ses_late"),
       scope.data.session.message.loadMore("ses_paged"),
@@ -141,20 +151,25 @@ test.each(["echo", "reject"] as const)(
   "keeps a closed session's optimistic prompt past the deadline and releases it after its %s",
   async (mode) => {
     const answer = Promise.withResolvers<void>()
+
     const scope = setup({
       async read(url) {
         if (!url.pathname.endsWith("/prompt")) return undefined
         await answer.promise
+
         return mode === "reject"
           ? Response.json({ message: "rejected" }, { status: 400 })
           : Response.json({ id: "msg_local" })
       },
     })
+
     try {
       scope.remember("ses_submit")
+
       const prompt = Promise.allSettled([
         scope.data.session.prompt({ sessionID: "ses_submit", id: "msg_local", text: "local" }),
       ])
+
       await settle()
       // The deadline passed while the submission awaited its acknowledgement.
       expect(scope.data.session.message.list("ses_submit").map((item) => item.id)).toEqual(["msg_local"])
@@ -174,18 +189,24 @@ test.each(["echo", "reject"] as const)(
 
 test("keeps a closed session's first prompt while its creation is unacknowledged, then releases it", async () => {
   const created = Promise.withResolvers<Response>()
+
   const scope = setup({
     read(url) {
       if (url.pathname === "/api/session") return created.promise
+
       if (url.pathname.endsWith("/prompt")) return Promise.resolve(Response.json({ id: "msg_first" }))
+
       return undefined
     },
   })
+
   try {
     const session = scope.data.session.create({})
+
     const prompt = Promise.allSettled([
       scope.data.session.prompt({ sessionID: session.id, id: "msg_first", text: "first" }),
     ])
+
     await settle()
     // Eviction skips a session whose creation the server has not acknowledged.
     expect(scope.data.session.message.list(session.id).map((item) => item.id)).toEqual(["msg_first"])
@@ -208,10 +229,12 @@ test("closed transcripts and the rows later events bring back do not stay on the
   const size = 512 * 1024
   const ids = Array.from({ length: count }, (_, index) => `ses_heavy_${index}`)
   const scope = setup({ text: "x".repeat(size) })
+
   try {
     ids.forEach((id) => scope.remember(id))
     scope.setVisible(ids)
     const base = heap()
+
     for (const id of ids) await scope.data.session.message.sync(id)
     const rows = ids.map((id) => new WeakRef(unwrap(scope.data.session.message.list(id))[0]!))
     const loaded = heap()
@@ -239,6 +262,7 @@ function settle() {
 
 function heap() {
   Bun.gc(true)
+
   return process.memoryUsage().heapUsed
 }
 
@@ -253,14 +277,17 @@ function setup(
 ) {
   const listeners = new Set<Parameters<CreateDataInput["event"]["listen"]>[0]>()
   const reads: URL[] = []
+
   const api = OpenCode.make({
     baseUrl: "http://opencode.local",
     fetch: async (request) => {
       const url = new URL(request instanceof Request ? request.url : String(request))
       reads.push(url)
       const response = await input.read?.(url)
+
       if (response) return response
       const sessionID = url.pathname.split("/")[3]
+
       if (url.pathname.endsWith("/inbox"))
         return Response.json({
           data: [
@@ -275,6 +302,7 @@ function setup(
           ],
         })
       const older = url.searchParams.has("cursor")
+
       return Response.json({
         data: [
           {
@@ -288,6 +316,7 @@ function setup(
       })
     },
   })
+
   return createRoot((dispose) => {
     const data = createData({
       api: () => api,
@@ -296,14 +325,17 @@ function setup(
         on: () => () => {},
         listen(handler) {
           listeners.add(handler)
+
           return () => listeners.delete(handler)
         },
       },
     })
+
     const [visible, setVisible] = createSignal<readonly string[]>(input.visible ?? [])
     const [ready, setReady] = createSignal(input.ready ?? true)
     const [navigating, setNavigating] = createSignal(false)
     createSessionRetention({ session: data.session, ready, visible, navigating, delay })
+
     return {
       data,
       dispose,

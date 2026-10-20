@@ -699,8 +699,10 @@ test("closing a tab releases its transcript, and reopening it reads the transcri
   page.on("request", (request) => {
     if (request.method() === "GET") reads.push(new URL(request.url()).pathname)
   })
+
   const history = (id: string) =>
     page.locator(`[data-timeline-row="UserMessage"][data-message-id="msg_${id}_history"]`)
+
   await openSession(page, {
     name: "TabRetention",
     sessions: [a, b],

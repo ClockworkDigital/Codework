@@ -223,6 +223,7 @@ function createServerController(
       const routed = location.pathname.startsWith(routes)
         ? location.pathname.slice(routes.length).split("/")[0]
         : undefined
+
       return [
         ...(routed ? [routed] : []),
         ...tabs.store.flatMap((tab) =>

@@ -35,6 +35,7 @@ function load(channel: string, target?: string, branded = false, wpp = false): C
   } finally {
     if (previousWpp === undefined) delete process.env.CM_WPP
     else process.env.CM_WPP = previousWpp
+
     if (previousBrand === undefined) delete process.env.CM_BRAND
     else process.env.CM_BRAND = previousBrand
     delete process.env.OPENCODE_CHANNEL
@@ -196,6 +197,7 @@ test.each(channels)("CookieMonster identity is derived before Linux fields for $
   expect(config.linux?.executableName).toBe(id)
   expect(config.linux?.desktop?.entry?.StartupWMClass).toBe(id)
   expect(config.rpm?.packageName).toBe("cookiemonster")
+
   for (const fpm of [config.deb?.fpm, config.rpm?.fpm]) {
     expect(fpm).toHaveLength(1)
     expect(fpm?.[0]).toEndWith(`=/usr/share/metainfo/${id}.metainfo.xml`)
@@ -204,8 +206,10 @@ test.each(channels)("CookieMonster identity is derived before Linux fields for $
 
 test.each([false, true])("metainfo uses the same branded=%s desktop identity as packaging", async (branded) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "desktop-metainfo-"))
+
   try {
     await mkdir(path.join(directory, "resources"))
+
     const result = Bun.spawnSync(
       [process.execPath, path.join(import.meta.dirname, "scripts/copy-metainfo.ts"), "prod"],
       {
@@ -215,6 +219,7 @@ test.each([false, true])("metainfo uses the same branded=%s desktop identity as 
         stderr: "pipe",
       },
     )
+
     expect(result.exitCode, Buffer.concat([result.stdout, result.stderr]).toString()).toBe(0)
     const id = branded ? "com.ogilvy.cookiemonster" : "ai.opencode.desktop"
     const xml = await Bun.file(path.join(directory, "resources", `${id}.metainfo.xml`)).text()

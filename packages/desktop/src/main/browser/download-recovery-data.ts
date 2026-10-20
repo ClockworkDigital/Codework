@@ -19,6 +19,8 @@ export type DownloadRecovery = {
   sha256: string
 }
 
+// This is the persisted recovery JSON decoder; representation checks here establish the complete contract below.
+/* oxlint-disable anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters, anti-slop/no-unsafe-dictionary-type */
 export function recoveryURL(value: unknown): value is string {
   if (typeof value !== "string" || value.length > 8192 || !URL.canParse(value)) return false
   const url = new URL(value)
@@ -34,6 +36,7 @@ export function recoveryURL(value: unknown): value is string {
 
 export function recoveryData(value: unknown): DownloadRecovery | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return
+  // SAFETY: The guard above excludes null, arrays, and primitives; every consumed property is checked below.
   const row = value as Record<string, unknown>
   const directoryDev = recoveryFileID(row.directoryDev)
   const directoryIno = recoveryFileID(row.directoryIno)
@@ -91,6 +94,8 @@ function recoveryFileID(value: unknown) {
 
   return value
 }
+
+/* oxlint-enable anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters, anti-slop/no-unsafe-dictionary-type */
 
 export async function recoveryDestination(
   recovery: Pick<DownloadRecovery, "destination" | "directoryDev" | "directoryIno">,
@@ -218,8 +223,11 @@ export async function publishDownload(
 
       return destination
     } catch (error) {
+      // oxlint-disable-next-line anti-slop/no-runtime-typeof -- Filesystem exceptions are untyped; inspect only the OS error code.
       if (!error || typeof error !== "object" || !("code" in error)) throw error
+
       if (error.code === "EEXIST") continue
+
       // Windows reports an existing directory as EPERM rather than EEXIST.
       if (
         process.platform === "win32" &&

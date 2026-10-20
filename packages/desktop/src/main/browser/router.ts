@@ -7,7 +7,6 @@ import {
   success,
   parseRequest,
   type BrowserIpcRequest,
-  type FrameRequest,
   type BrowserState,
   type ActionStatus,
   type ActionFailureCause,
@@ -193,20 +192,27 @@ export async function routeBrowserRequest(
           : response.error
       : undefined
 
-    const bounded = { ...response, actionStatus, ...(actionCause ? { actionCause } : {}), ...(error ? { error } : {}) }
+    const bounded = { ...response, actionStatus }
 
-    return Buffer.byteLength(JSON.stringify(bounded)) <= MAX_SNAPSHOT_BYTES
-      ? bounded
-      : {
-          ...failure(
-            "unavailable",
-            dispatchAttempted
-              ? nativeT("desktop.browser.actionObservationFailed")
-              : "Browser response exceeds the size limit.",
-          ),
-          actionStatus: dispatchAttempted ? "dispatched_uncertain" : "not_dispatched",
-          ...(dispatchAttempted ? { actionCause: "observation_failed" as const } : {}),
-        }
+    if (actionCause) Object.assign(bounded, { actionCause })
+
+    if (error) Object.assign(bounded, { error })
+
+    if (Buffer.byteLength(JSON.stringify(bounded)) <= MAX_SNAPSHOT_BYTES) return bounded
+
+    const oversized: Response<BrowserState> = {
+      ...failure(
+        "unavailable",
+        dispatchAttempted
+          ? nativeT("desktop.browser.actionObservationFailed")
+          : "Browser response exceeds the size limit.",
+      ),
+      actionStatus: dispatchAttempted ? "dispatched_uncertain" : "not_dispatched",
+    }
+
+    if (dispatchAttempted) Object.assign(oversized, { actionCause: "observation_failed" })
+
+    return oversized
   }
 
   if (validated.op === "grant_tabs" || validated.op === "revoke_tabs")
@@ -324,18 +330,17 @@ export async function routeBrowserRequest(
         if (!deliveryCheck) throw new Error("Missing browser delivery authority")
         deliveryCheck()
       } catch {
-        return report({
-          ...failure("unavailable", nativeT(browserDeliveryError(validated.op, response.result))),
-          ...(response.actionStatus
-            ? {
-                actionStatus:
-                  response.actionStatus === "dispatched_observed" ? "dispatched_uncertain" : response.actionStatus,
-              }
-            : {}),
-          ...(response.actionStatus
-            ? { actionCause: "observation_failed" as const, error: nativeT("desktop.browser.actionObservationFailed") }
-            : {}),
-        })
+        const unavailable = failure("unavailable", nativeT(browserDeliveryError(validated.op, response.result)))
+
+        if (response.actionStatus)
+          Object.assign(unavailable, {
+            actionStatus:
+              response.actionStatus === "dispatched_observed" ? "dispatched_uncertain" : response.actionStatus,
+            actionCause: "observation_failed",
+            error: nativeT("desktop.browser.actionObservationFailed"),
+          })
+
+        return report(unavailable)
       }
     }
 
@@ -614,15 +619,18 @@ async function route(
         if (discovered.origin !== origin) throw new Error("Site tool origin changed")
         onScreenshotDelivery(authority)
 
-        return success({
+        const state: BrowserState = {
           tabID: tab.id,
           url: origin,
           title: "",
           visibleText: "",
           elements: [],
           siteTools: discovered.tools,
-          ...(discovered.truncated ? { siteToolsTruncated: true } : {}),
-        })
+        }
+
+        if (discovered.truncated) Object.assign(state, { siteToolsTruncated: true })
+
+        return success(state)
       }
 
       const prepared = await prepareSiteTool(contents, request.toolRef, request.arguments, authority)
@@ -631,6 +639,10 @@ async function route(
 
       if (request.op === "prepare_site_tool") {
         onScreenshotDelivery(authority)
+
+        const siteToolRequest = { name: prepared.name, origin, arguments: request.arguments }
+
+        if (prepared.public.title) Object.assign(siteToolRequest, { title: prepared.public.title })
 
         return success({
           tabID: tab.id,
@@ -644,12 +656,7 @@ async function route(
             toolRevision: prepared.revision,
             argumentHash: prepared.argumentHash,
           },
-          siteToolRequest: {
-            name: prepared.name,
-            ...(prepared.public.title ? { title: prepared.public.title } : {}),
-            origin,
-            arguments: request.arguments,
-          },
+          siteToolRequest,
         })
       }
 
@@ -686,15 +693,7 @@ async function route(
     }
 
     if ("frameRef" in request) {
-      const frame = await executeFrame(
-        tab,
-        request as FrameRequest,
-        authority,
-        deadline,
-        isAllowed,
-        markDispatched,
-        markObservation,
-      )
+      const frame = await executeFrame(tab, request, authority, deadline, isAllowed, markDispatched, markObservation)
 
       const delivery = () => {
         authority()
@@ -719,6 +718,9 @@ async function route(
     }
 
     // Keep busy/rendering ownership until actual native settlement, even after an early reply.
+    // SAFETY: Registered tabs own Electron WebContents, whose event methods are outside the narrower driver contract.
+    const consoleContents = contents as typeof contents & EventEmitter
+
     const response =
       request.op === "observe_console"
         ? success({
@@ -728,12 +730,7 @@ async function route(
             visibleText: "",
             elements: [],
             diagnostics: {
-              console: await observeConsole(
-                contents as unknown as EventEmitter,
-                request.durationMs,
-                authority,
-                consent!.signal,
-              ),
+              console: await observeConsole(consoleContents, request.durationMs, authority, consent!.signal),
             },
           })
         : await execute(
@@ -779,17 +776,19 @@ async function route(
       let page: BrowserState = response.result
 
       if (tab.frameSessions) {
-        while (Buffer.byteLength(JSON.stringify(page)) > 24 * 1024 && page.elements.length) {
-          page = { ...page, elements: page.elements.slice(0, -1), truncated: true }
+        const bounded = { ...page }
+
+        while (Buffer.byteLength(JSON.stringify(bounded)) > 24 * 1024 && bounded.elements.length) {
+          bounded.elements = bounded.elements.slice(0, -1)
+          bounded.truncated = true
         }
 
-        while (Buffer.byteLength(JSON.stringify(page)) > 24 * 1024 && page.visibleText.length) {
-          page = {
-            ...page,
-            visibleText: page.visibleText.slice(0, Math.floor(page.visibleText.length / 2)),
-            truncated: true,
-          }
+        while (Buffer.byteLength(JSON.stringify(bounded)) > 24 * 1024 && bounded.visibleText.length) {
+          bounded.visibleText = bounded.visibleText.slice(0, Math.floor(bounded.visibleText.length / 2))
+          bounded.truncated = true
         }
+
+        page = bounded
       }
 
       const discovered = await discoverDocuments(

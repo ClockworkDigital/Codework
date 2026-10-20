@@ -10,6 +10,7 @@ import { MODEL_IDS } from "@cookiemonster/wpp/proxy/modelProfiles.mjs"
 
 test("V2 registers the CookieMonster roster, optional desktop setup and official Figma tools and skills", async () => {
   const directory = await mkdtemp(join(tmpdir(), "cm-v2-plugins-"))
+
   try {
     await using host = await OpenCode.create({
       config: {
@@ -23,6 +24,7 @@ test("V2 registers the CookieMonster roster, optional desktop setup and official
       fs: { filewatcher: false },
       plugins: [figma],
     })
+
     const models = (await host.model.list({ location: { directory } })).data
     expect(
       models
@@ -68,6 +70,7 @@ test("V2 registers the CookieMonster roster, optional desktop setup and official
 
 test("bundled CM provider exposes optional desktop setup without enabling desktop access", async () => {
   const directory = await mkdtemp(join(tmpdir(), "cm-computer-use-"))
+
   try {
     await using host = await OpenCode.create({
       config: {
@@ -78,6 +81,7 @@ test("bundled CM provider exposes optional desktop setup without enabling deskto
       models: { fetch: false },
       fs: { filewatcher: false },
     })
+
     expect(
       (await host.model.list({ location: { directory } })).data.some((model) => model.providerID === "cookiemonster"),
     ).toBe(true)
@@ -103,6 +107,7 @@ test.each(["native", "legacy"] as const)(
   async (kind) => {
     const directory = await mkdtemp(join(tmpdir(), "cm-v2-request-"))
     const headers: Headers[] = []
+
     const server = Bun.serve({
       port: 0,
       async fetch(request) {
@@ -110,6 +115,7 @@ test.each(["native", "legacy"] as const)(
         const body: unknown = await request.json()
         expect(body).toMatchObject({ model: "CM_GPT6_Sol_High", stream: true })
         headers.push(request.headers)
+
         const image = {
           type: "image_generation_call",
           id: `image_${headers.length}`,
@@ -117,6 +123,7 @@ test.each(["native", "legacy"] as const)(
           output_format: "png",
           result: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
         }
+
         const response = {
           id: `resp_${headers.length}`,
           object: "response",
@@ -126,6 +133,7 @@ test.each(["native", "legacy"] as const)(
           output: [image],
           usage: { input_tokens: 10, output_tokens: 2, total_tokens: 12 },
         }
+
         return new Response(
           [
             { type: "response.created", response: { ...response, status: "in_progress", output: [] } },
@@ -146,6 +154,7 @@ test.each(["native", "legacy"] as const)(
         )
       },
     })
+
     try {
       await using host = await OpenCode.create({
         config: {
@@ -176,7 +185,9 @@ test.each(["native", "legacy"] as const)(
         fs: { filewatcher: false },
         plugins: [cookiemonster],
       })
+
       const session = await host.sessions.create({ title: "WPP transport", location: { directory } })
+
       for (const text of ["Generate an image", "Generate another image"]) {
         await host.sessions.prompt({ sessionID: session.id, text })
         await host.sessions.wait({ sessionID: session.id })
@@ -200,6 +211,7 @@ test.each(["native", "legacy"] as const)(
           ),
         ).toBe(true)
       }
+
       expect(headers).toHaveLength(2)
       expect(headers[0].get("x-opencode-runtime-id")).toMatch(/^[a-f\d-]{36}$/)
       expect(headers[1].get("x-opencode-runtime-id")).toBe(headers[0].get("x-opencode-runtime-id"))
@@ -216,6 +228,7 @@ test("packaged CM plugins activate with the complete official Figma skill bundle
   const directory = await mkdtemp(join(tmpdir(), "cm-v2-packaged-"))
   const resources = new URL("../resources/cm-plugins/", import.meta.url)
   const source = await Bun.file(new URL("figma/skills-source.json", resources)).json()
+
   try {
     await using host = await OpenCode.create({
       config: {
@@ -228,6 +241,7 @@ test("packaged CM plugins activate with the complete official Figma skill bundle
       models: { fetch: false },
       fs: { filewatcher: false },
     })
+
     expect(
       (await host.model.list({ location: { directory } })).data.some((model) => model.providerID === "cookiemonster"),
     ).toBe(true)

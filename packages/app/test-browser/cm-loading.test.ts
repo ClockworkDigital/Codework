@@ -33,6 +33,7 @@ test("session cookies share their animation and phase across late mounts, update
   await new Promise<void>((done) => server.listen(0, "127.0.0.1", done))
   const address = server.address()
 
+  // oxlint-disable-next-line anti-slop/no-runtime-typeof -- Node returns a Unix socket path or a TCP address; this fixture binds TCP.
   if (!address || typeof address === "string") throw new Error("Loader fixture server did not bind")
 
   try {

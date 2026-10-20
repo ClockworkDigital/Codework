@@ -121,7 +121,8 @@ try {
     throw new Error("Packaged activation condition did not become true.")
   }
 
-  await waitFor(usable)
+  // The early window is visible before the lifecycle adopts it; closing it then deliberately quits the app.
+  await waitFor(`${usable} && ${native}.app.listenerCount('activate') > 0`)
 
   if (!(await evaluate(`${native}.app.isPackaged`))) throw new Error("This must exercise a packaged application.")
   await evaluate(`(() => {
@@ -137,13 +138,16 @@ try {
     `${native}.BrowserWindow.getAllWindows().length === 1 && !globalThis.__cmActivationWorker.isDestroyed()`,
   )
 
-  const activation = Bun.spawnSync([
-    "/usr/bin/osascript",
-    "-e",
-    `tell application ${JSON.stringify(bundle)} to activate`,
-  ])
+  const activation = Bun.spawn(["/usr/bin/osascript", "-e", `tell application ${JSON.stringify(bundle)} to activate`], {
+    stdout: "inherit",
+    stderr: "inherit",
+  })
 
-  if (activation.exitCode !== 0) throw new Error("macOS could not activate the owned packaged app.")
+  const activationTimer = setTimeout(() => activation.kill("SIGTERM"), 15_000)
+  const activationCode = await activation.exited
+  clearTimeout(activationTimer)
+
+  if (activationCode !== 0) throw new Error("macOS could not activate the owned packaged app.")
   await waitFor(`globalThis.__cmActivationEvents > 0 && ${usable}`)
 
   if (!(await evaluate(`!globalThis.__cmActivationWorker.isDestroyed()`)))
