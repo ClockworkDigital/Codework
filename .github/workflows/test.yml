@@ -86,7 +86,20 @@ jobs:
 
       - name: Install Electron for desktop runtime tests
         working-directory: packages/desktop
-        run: node node_modules/electron/install.js
+        run: node -e "require(require.resolve('electron/install.js'))"
+
+      - name: Install Chromium for browser unit tests
+        working-directory: packages/app
+        run: bunx playwright install --with-deps chromium
+
+      - name: Install ripgrep for offline core tests
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            sudo apt-get update
+            sudo apt-get install -y ripgrep
+          else
+            choco install ripgrep --yes --no-progress
+          fi
 
       - name: Check Effect simplifications
         if: runner.os == 'Linux'
