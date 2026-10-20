@@ -5,7 +5,7 @@ export function desktopIdentity(channel: "dev" | "beta" | "prod") {
 
   return {
     appId: channel === "prod" ? "ai.opencode.desktop" : `ai.opencode.desktop.${channel}`,
-    productName: channel === "prod" ? "OpenCode" : channel === "beta" ? "OpenCode Beta" : "OpenCode Dev",
+    productName: { prod: "OpenCode", beta: "OpenCode Beta", dev: "OpenCode Dev" }[channel],
     packageName: channel === "prod" ? "opencode" : `opencode-${channel}`,
   }
 }
