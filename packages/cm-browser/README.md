@@ -2,6 +2,14 @@
 
 The desktop browser uses main-owned Electron `WebContentsView` tabs. Tabs belong to a chat session and retain their pages when switching tabs, switching sessions, or hiding the browser panel. Closing a tab respects its `beforeunload` handler. Pop-ups open as new tabs and preserve normal opener behavior.
 
+## Backend trust and request limits
+
+The desktop trusts its authenticated V2 backend, installed plugins, and the task/session IDs that backend supplies across tasks. This boundary does not isolate tasks after backend compromise. Web pages remain untrusted. Main still checks native ownership, task grants, delegated leases, pause state, document identity, and delivery validity for each operation.
+
+The V2 browser RPC validates serialized request events against a 64 KiB UTF-8 budget before publishing them. The largest permitted typed input is 10,000 characters, at most 40,000 UTF-8 bytes; site-tool arguments have an 8 KiB limit, and delegation is limited to 16 tab IDs. These inputs fit within the envelope budget. Rejected events disconnect the browser port and settle its pending operations. The native bridge also caps active requests at 256. These are admission limits, not a guarantee against the memory required to construct an input or a compromised backend bypassing its own schema.
+
+Responses keep their existing RPC compatibility limit and main-owned snapshot/image budgets. The previous request-event ceiling was 20 Mi UTF-16 code units. Ordinary request parsing already drops unused fields. The 1 MiB unused-field probe demonstrated acceptance, without establishing lasting retention or an OOM. The legacy DOM assertion memory spike was measured separately.
+
 ## Autonomous agent browsing
 
 CM Browser is the default desktop browser for agent tasks. The model starts with `browser_read_state`, creates a tab with `browser_create_tab` when needed, then uses `browser_navigate`. Creation initializes upload interception before authorizing the blank tab. Create, select and close use standing task authority for agent-controlled tabs, without routine native approval. Explicit OpenCode ask/deny rules still apply. Selecting or creating a tab reveals the browser panel.
