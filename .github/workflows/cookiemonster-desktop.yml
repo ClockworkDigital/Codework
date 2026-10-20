@@ -148,6 +148,17 @@ jobs:
           cd packages/desktop/dist
           shasum -a 256 cookiemonster-mac-arm64.dmg > SHA256SUMS.txt
 
+      - name: Verify packaged macOS activation with a hidden worker
+        timeout-minutes: 3
+        run: |
+          mount="$RUNNER_TEMP/cm-activation-mount"
+          mkdir "$mount"
+          hdiutil attach packages/desktop/dist/cookiemonster-mac-arm64.dmg -readonly -nobrowse -mountpoint "$mount"
+          trap 'hdiutil detach "$mount"' EXIT
+          mkdir "$RUNNER_TEMP/cm-activation"
+          ditto "$mount/CookieMonster.app" "$RUNNER_TEMP/cm-activation/CookieMonster.app"
+          bun packages/desktop/scripts/check-mac-activation.ts "$RUNNER_TEMP/cm-activation/CookieMonster.app"
+
       - name: Upload verified installer
         if: ${{ !inputs.publish }}
         timeout-minutes: 3
