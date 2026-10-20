@@ -45,48 +45,52 @@ it.live("list reads saved inventory even when its checkout is missing, without b
   }),
 )
 
-it.live("refresh discovers both clones while list alone never discovers external worktrees", () =>
-  Effect.gen(function* () {
-    const tmp = yield* Effect.acquireDisposable(Effect.promise(() => tmpdir("opencode-worktree-clones-")))
-    const first = path.join(tmp.path, "first")
-    const second = path.join(tmp.path, "second")
-    const a = path.join(tmp.path, "a")
-    const b = path.join(tmp.path, "b")
-    yield* Effect.promise(async () => {
-      await fs.mkdir(first)
-      await initRepo(first)
-      await $`git remote add origin https://github.com/example/clones.git`.cwd(first).quiet()
-      await $`git clone --no-hardlinks ${first} ${second}`.quiet()
-      await $`git remote set-url origin https://github.com/example/clones.git`.cwd(second).quiet()
-    })
-    const server = yield* startServer(path.join(tmp.path, "config"))
-    const api = OpenCode.make({ baseUrl: server.base, headers: server.headers })
-    yield* Effect.promise(async () => {
-      const session = await api.session.create({ location: { directory: first } })
-      const other = await api.session.create({ location: { directory: second } })
-      const projectID = session.projectID
-      expect(other.projectID).toBe(projectID)
-      await $`git worktree add --detach ${a} HEAD`.cwd(first).quiet()
-      await $`git worktree add --detach ${b} HEAD`.cwd(second).quiet()
-      expect(await api.worktree.list({ projectID })).toHaveLength(2)
-      await api.worktree.refresh({ projectID })
-      expect(await api.worktree.list({ projectID })).toEqual(
-        expect.arrayContaining([
-          { directory: first },
-          { directory: second },
-          { directory: a, strategy: "git" },
-          { directory: b, strategy: "git" },
-        ]),
-      )
-      await fs.rm(second, { recursive: true })
-      await $`git worktree remove ${a}`.cwd(first).quiet()
-      await api.worktree.refresh({ projectID })
-      const rows = await api.worktree.list({ projectID })
-      expect(rows).not.toContainEqual({ directory: a, strategy: "git" })
-      expect(rows).not.toContainEqual({ directory: second })
-      expect(rows).toContainEqual({ directory: b, strategy: "git" })
-    })
-  }),
+// This fixture boots a server and several Git processes; cold Windows startup can exceed five seconds.
+it.live(
+  "refresh discovers both clones while list alone never discovers external worktrees",
+  () =>
+    Effect.gen(function* () {
+      const tmp = yield* Effect.acquireDisposable(Effect.promise(() => tmpdir("opencode-worktree-clones-")))
+      const first = path.join(tmp.path, "first")
+      const second = path.join(tmp.path, "second")
+      const a = path.join(tmp.path, "a")
+      const b = path.join(tmp.path, "b")
+      yield* Effect.promise(async () => {
+        await fs.mkdir(first)
+        await initRepo(first)
+        await $`git remote add origin https://github.com/example/clones.git`.cwd(first).quiet()
+        await $`git clone --no-hardlinks ${first} ${second}`.quiet()
+        await $`git remote set-url origin https://github.com/example/clones.git`.cwd(second).quiet()
+      })
+      const server = yield* startServer(path.join(tmp.path, "config"))
+      const api = OpenCode.make({ baseUrl: server.base, headers: server.headers })
+      yield* Effect.promise(async () => {
+        const session = await api.session.create({ location: { directory: first } })
+        const other = await api.session.create({ location: { directory: second } })
+        const projectID = session.projectID
+        expect(other.projectID).toBe(projectID)
+        await $`git worktree add --detach ${a} HEAD`.cwd(first).quiet()
+        await $`git worktree add --detach ${b} HEAD`.cwd(second).quiet()
+        expect(await api.worktree.list({ projectID })).toHaveLength(2)
+        await api.worktree.refresh({ projectID })
+        expect(await api.worktree.list({ projectID })).toEqual(
+          expect.arrayContaining([
+            { directory: first },
+            { directory: second },
+            { directory: a, strategy: "git" },
+            { directory: b, strategy: "git" },
+          ]),
+        )
+        await fs.rm(second, { recursive: true })
+        await $`git worktree remove ${a}`.cwd(first).quiet()
+        await api.worktree.refresh({ projectID })
+        const rows = await api.worktree.list({ projectID })
+        expect(rows).not.toContainEqual({ directory: a, strategy: "git" })
+        expect(rows).not.toContainEqual({ directory: second })
+        expect(rows).toContainEqual({ directory: b, strategy: "git" })
+      })
+    }),
+  15_000,
 )
 
 it.live("remove loads canonical strategies and enforces project ownership", () =>
