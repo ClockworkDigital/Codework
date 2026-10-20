@@ -8,6 +8,8 @@ export function BrowserSite(props: {
   tab: BrowserTab
   profile: BrowserProfile
   busy: boolean
+  // SAFETY: Command results are opaque except the documented false inspection outcome checked below.
+  // oxlint-disable-next-line anti-slop/no-unknown-returns
   command(value: BrowserCommand): Promise<unknown>
 }) {
   const language = useLanguage()
@@ -92,6 +94,7 @@ export function BrowserSite(props: {
                 void props.command({
                   op: "site-permission",
                   origin: origin(),
+                  // SAFETY: This owned select offers only the three BrowserPermission values below.
                   [device]: event.currentTarget.value as BrowserPermission,
                 })
               }
@@ -114,6 +117,7 @@ export function BrowserSite(props: {
                 void props.command({
                   op: "site-permission",
                   origin: origin(),
+                  // SAFETY: This owned select offers only the three BrowserPermission values below.
                   [permission]: event.currentTarget.value as BrowserPermission,
                 })
               }
@@ -158,12 +162,18 @@ export function BrowserSite(props: {
       </BrowserButton>
       <fieldset class="space-y-2 border-t border-border-weaker-base pt-2">
         <legend class="font-medium">{language.t("browser.site.data")}</legend>
+        <Show when={inspectionFailed()}>
+          <p role="status">{language.t("browser.site.inspectFailed")}</p>
+          <Show when={data()}>
+            <p role="status">{language.t("browser.site.stale")}</p>
+          </Show>
+        </Show>
         <Show
           when={data()}
           fallback={
-            <p role="status">
-              {language.t(inspectionFailed() ? "browser.site.inspectFailed" : "browser.site.inspecting")}
-            </p>
+            <Show when={!inspectionFailed()}>
+              <p role="status">{language.t("browser.site.inspecting")}</p>
+            </Show>
           }
         >
           {(inspection) => (
