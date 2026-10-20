@@ -372,7 +372,7 @@ async function route(
   if (browserTaskPaused(message.sessionID)) return failure("access_denied", nativeT("desktop.browser.taskPaused"))
 
   if (parsed.op === "set_panel") {
-    if (access) return failure("access_denied", nativeT("desktop.browser.operationUnavailable"))
+    if (access?.kind === "delegated") return failure("access_denied", nativeT("desktop.browser.operationUnavailable"))
 
     return routeBrowserPanel(message.sessionID, parsed, signal, deadline)
   }

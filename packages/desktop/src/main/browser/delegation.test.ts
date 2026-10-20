@@ -598,3 +598,18 @@ test("lost grant ACK is cleaned by executionID and cannot be retried after revok
     f.close()
   }
 })
+
+test("delegated children cannot change desktop panels", async () => {
+  const f = fixture()
+
+  try {
+    await f.grant()
+    expect(f.manager.authority("child").kind).toBe("delegated")
+
+    for (const view of ["review", "hidden"] as const) {
+      expect(await f.route({ op: "set_panel", view })).toMatchObject({ ok: false, code: "access_denied" })
+    }
+  } finally {
+    f.close()
+  }
+})
