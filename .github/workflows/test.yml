@@ -84,6 +84,10 @@ jobs:
         if: runner.os == 'Linux'
         run: bun run test:effect-simplification-rules
 
+      - name: Install Electron for desktop runtime tests
+        working-directory: packages/desktop
+        run: node node_modules/electron/install.js
+
       - name: Check Effect simplifications
         if: runner.os == 'Linux'
         run: bun run lint:effect-simplifications

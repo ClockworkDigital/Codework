@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto"
 import { constants } from "node:fs"
-import { open, mkdir, unlink, stat, copyFile } from "node:fs/promises"
+import { open, mkdir, unlink, stat, lstat, copyFile } from "node:fs/promises"
 import { basename, dirname, extname, isAbsolute, join } from "node:path"
 import { physicalDownloadPath } from "./download-path"
 
@@ -218,7 +218,16 @@ export async function publishDownload(
 
       return destination
     } catch (error) {
-      if (!error || typeof error !== "object" || !("code" in error) || error.code !== "EEXIST") throw error
+      if (!error || typeof error !== "object" || !("code" in error)) throw error
+      if (error.code === "EEXIST") continue
+      // Windows reports an existing directory as EPERM rather than EEXIST.
+      if (
+        process.platform === "win32" &&
+        error.code === "EPERM" &&
+        (await lstat(destination).catch(() => undefined))?.isDirectory()
+      )
+        continue
+      throw error
     }
   }
 
