@@ -8,7 +8,16 @@ import { emitIpcEvent } from "../ipc-events"
 import { DesktopLogging, scoped } from "../native/logging"
 import { DesktopStorage } from "../storage"
 import { safeWebContentsURL } from "../windows/state"
-import { getLastFocusedWindow, getWindowByID, makeMainWindows, setAppQuitting, setRelaunchHandler } from "../windows"
+import {
+  getLastFocusedWindow,
+  getMainWindows,
+  getWindowByID,
+  // SAFETY: This existing factory runs once inside this scoped lifecycle layer and propagates its requirements.
+  // oxlint-disable-next-line anti-slop-effect/no-service-constructor-imports
+  makeMainWindows,
+  setAppQuitting,
+  setRelaunchHandler,
+} from "../windows"
 import { marks } from "./marks"
 import { initializeFirstLaunchOnboarding } from "./onboarding"
 import { Shutdown } from "./shutdown"
@@ -130,7 +139,15 @@ const runtime = Layer.effect(
     }
 
     const activate = () => {
-      if (BrowserWindow.getAllWindows().length === 0) restoreWindows()
+      const main = getMainWindows()
+
+      if (main.length === 0) {
+        restoreWindows()
+
+        return
+      }
+
+      focusWindow(main.find((win) => win.isFocused()) ?? main[0])
     }
 
     const resetRelaunchHandler = setRelaunchHandler(relaunch)
