@@ -6,14 +6,16 @@ export function observeElementOffsetReconnectAware<TScrollElement extends Elemen
   onReconnect?: () => void,
 ) {
   let active = true
+  const element = instance.scrollElement
 
   const deliver = (offset: number, isScrolling: boolean) => {
     if (!active) return
-    callback(offset, isScrolling)
+    // The core's reset-delay fallback repeats the offset read by the last scroll event. A long task can hold a
+    // write's own scroll event past that delay, so ending the scroll at the stored offset would revert the write.
+    callback(isScrolling || !element ? offset : element.scrollTop, isScrolling)
   }
 
   const cleanupOffset = observeElementOffset(instance, deliver)
-  const element = instance.scrollElement
   const targetWindow = instance.targetWindow
   const root = element?.closest("main") ?? element?.ownerDocument.body
 
