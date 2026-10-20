@@ -101,7 +101,18 @@ try {
           reject(error)
         },
       })
-      connection.send(JSON.stringify({ id, method: "Runtime.evaluate", params: { expression, returnByValue: true } }))
+      // Inspector interrupts can reenter Node's module loader before its initialization finishes.
+      connection.send(
+        JSON.stringify({
+          id,
+          method: "Runtime.evaluate",
+          params: {
+            expression: `new Promise(resolve => process.nextTick(() => setImmediate(resolve))).then(() => (${expression}))`,
+            returnByValue: true,
+            awaitPromise: true,
+          },
+        }),
+      )
     })
 
     if (result.exceptionDetails)
