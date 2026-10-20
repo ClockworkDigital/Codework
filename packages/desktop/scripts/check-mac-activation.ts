@@ -1,0 +1,170 @@
+import { join } from "node:path"
+import { Schema } from "effect"
+
+if (process.platform !== "darwin") throw new Error("Packaged activation must be checked on macOS.")
+
+const bundle = process.argv[2]
+
+if (!bundle?.endsWith("/CookieMonster.app")) throw new Error("Pass the owned packaged CookieMonster.app path.")
+
+const executable = Bun.spawnSync([
+  "/usr/libexec/PlistBuddy",
+  "-c",
+  "Print :CFBundleExecutable",
+  join(bundle, "Contents/Info.plist"),
+])
+
+if (executable.exitCode !== 0) throw new Error("Could not read the packaged executable.")
+
+const child = Bun.spawn(
+  [join(bundle, "Contents/MacOS", executable.stdout.toString().trim()), "--inspect=127.0.0.1:9347"],
+  { stdout: "inherit", stderr: "inherit" },
+)
+
+const Evaluation = Schema.Struct({
+  result: Schema.Struct({ value: Schema.optionalKey(Schema.Boolean) }),
+  exceptionDetails: Schema.optionalKey(Schema.Unknown),
+})
+
+const waiting = new Map<number, { resolve: (value: typeof Evaluation.Type) => void; reject: (error: Error) => void }>()
+
+const Reply = Schema.Struct({
+  id: Schema.optionalKey(Schema.Number),
+  result: Schema.optionalKey(Evaluation),
+  error: Schema.optionalKey(Schema.Struct({ message: Schema.String })),
+})
+
+const Targets = Schema.Array(Schema.Struct({ type: Schema.String, webSocketDebuggerUrl: Schema.String }))
+
+let socket: WebSocket | undefined
+
+let sequence = 0
+
+try {
+  const deadline = Date.now() + 30_000
+
+  while (!socket && Date.now() < deadline) {
+    const response = await fetch("http://127.0.0.1:9347/json/list", { signal: AbortSignal.timeout(500) }).catch(
+      () => undefined,
+    )
+
+    if (response?.ok) {
+      const target = Schema.decodeUnknownSync(Targets)(await response.json()).find((target) => target.type === "node")
+
+      if (target) socket = new WebSocket(target.webSocketDebuggerUrl)
+    }
+
+    if (!socket) await Bun.sleep(100)
+  }
+
+  const connection = socket
+
+  if (!connection) throw new Error("The owned packaged app did not open its inspector.")
+  await new Promise<void>((resolve, reject) => {
+    connection.addEventListener("open", () => resolve(), { once: true })
+    connection.addEventListener("error", () => reject(new Error("Packaged inspector connection failed.")), {
+      once: true,
+    })
+  })
+  connection.addEventListener("message", (event) => {
+    const reply = Schema.decodeUnknownSync(Reply)(JSON.parse(String(event.data)))
+
+    if (reply.id === undefined) return
+    const request = waiting.get(reply.id)
+    waiting.delete(reply.id)
+
+    if (reply.error) request?.reject(new Error(reply.error.message))
+    else if (reply.result) request?.resolve(reply.result)
+  })
+
+  const evaluate = async (expression: string) => {
+    const id = ++sequence
+
+    const result = await new Promise<typeof Evaluation.Type>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        waiting.delete(id)
+        reject(new Error("Packaged inspector request timed out."))
+      }, 5000)
+
+      waiting.set(id, {
+        resolve: (value) => {
+          clearTimeout(timer)
+          resolve(value)
+        },
+        reject: (error) => {
+          clearTimeout(timer)
+          reject(error)
+        },
+      })
+      connection.send(JSON.stringify({ id, method: "Runtime.evaluate", params: { expression, returnByValue: true } }))
+    })
+
+    if (result.exceptionDetails !== undefined || result.result.value === undefined)
+      throw new Error("Packaged activation evaluation failed.")
+
+    return result.result.value
+  }
+
+  if (!(await evaluate(`process.pid === ${child.pid}`)))
+    throw new Error("Inspector belongs to another process; refusing to operate it.")
+  const native = `process.getBuiltinModule('module').createRequire(process.execPath)('electron')`
+  const usable = `${native}.BrowserWindow.getAllWindows().some(w => w !== globalThis.__cmActivationWorker && w.isVisible() && w.webContents.getURL().startsWith('oc://renderer/'))`
+
+  const waitFor = async (expression: string) => {
+    const deadline = Date.now() + 30_000
+
+    while (Date.now() < deadline) {
+      if (await evaluate(expression)) return
+      await Bun.sleep(100)
+    }
+
+    throw new Error("Packaged activation condition did not become true.")
+  }
+
+  await waitFor(usable)
+
+  if (!(await evaluate(`${native}.app.isPackaged`))) throw new Error("This must exercise a packaged application.")
+  await evaluate(`(() => {
+    const {app, BrowserWindow} = ${native};
+    globalThis.__cmActivationEvents = 0;
+    app.on('activate', () => globalThis.__cmActivationEvents++);
+    globalThis.__cmActivationWorker = new BrowserWindow({show:false, webPreferences:{sandbox:true,contextIsolation:true,nodeIntegration:false}});
+    BrowserWindow.getAllWindows().filter(w => w !== globalThis.__cmActivationWorker).forEach(w => w.close());
+    app.hide();
+    return true;
+  })()`)
+  await waitFor(
+    `${native}.BrowserWindow.getAllWindows().length === 1 && !globalThis.__cmActivationWorker.isDestroyed()`,
+  )
+
+  const activation = Bun.spawnSync([
+    "/usr/bin/osascript",
+    "-e",
+    `tell application ${JSON.stringify(bundle)} to activate`,
+  ])
+
+  if (activation.exitCode !== 0) throw new Error("macOS could not activate the owned packaged app.")
+  await waitFor(`globalThis.__cmActivationEvents > 0 && ${usable}`)
+
+  if (!(await evaluate(`!globalThis.__cmActivationWorker.isDestroyed()`)))
+    throw new Error("Activation destroyed the hidden worker.")
+  console.log(
+    JSON.stringify({
+      result: "pass",
+      packaged: true,
+      platform: "darwin",
+      nativeActivation: true,
+      mainWindowRestored: true,
+      hiddenWorkerPreserved: true,
+    }),
+  )
+} finally {
+  socket?.close()
+
+  if (child.exitCode === null) {
+    child.kill("SIGTERM")
+    const timer = setTimeout(() => child.kill("SIGKILL"), 5000)
+    await child.exited
+    clearTimeout(timer)
+  }
+}
