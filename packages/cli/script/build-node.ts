@@ -155,7 +155,7 @@ for (const target of targets) {
     )}\n`,
   )
   await verifyArtifact(path.join(outdir, name))
-  if (host) await smoke(output)
+  if (host) await smoke(output, builder)
 }
 
 async function resolveHostNode() {
@@ -225,14 +225,20 @@ async function resolveTargetNode(target: NodeTarget, host?: string) {
   return realpath(executable)
 }
 
-async function smoke(output: string) {
+async function smoke(output: string, node: string) {
   const root = await mkdtemp(path.join(os.tmpdir(), "opencode-node-smoke-"))
   const executable = path.join(root, path.basename(output))
   await copyFile(output, executable)
   if (process.platform !== "win32") await chmod(executable, 0o755)
   run(executable, ["--version"], root)
   run(executable, ["--help"], root)
-  await rm(root, { recursive: true, force: true })
+  // Use Node's retry-aware cleanup for transient Windows directory locks.
+  run(node, [
+    "--input-type=module",
+    "-e",
+    "import { rm } from 'node:fs/promises'; await rm(process.argv[1], { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })",
+    root,
+  ])
 }
 
 function targetName(target: NodeTarget) {
