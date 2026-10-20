@@ -77,6 +77,14 @@ CLI preparation uses these channel rules:
 default. `bun dev --download-server <version>` instead downloads that CLI version for local development. Neither path
 requires `OPENCODE_CLI_DIST` or runs the production prebuild.
 
+## CookieMonster Linux launcher migration
+
+Branded packages use `com.ogilvy.cookiemonster` for their executable, desktop entry, icon basename, window class, and metainfo. The app keeps its existing `com.ogilvy.cookiemonster` profile directory, including WPP sign-in and settings. Packaging identity is independent of whether WPP is enabled.
+
+Earlier CookieMonster packages installed OpenCode-named launchers and icons. Upgrading removes those obsolete package-owned files; an upstream OpenCode installation supplies its own. If a pinned CookieMonster launcher stops resolving, remove that old pin and pin the new CookieMonster entry. CookieMonster deliberately supplies no OpenCode-named compatibility launcher, so installing or removing it cannot replace upstream OpenCode's files.
+
+After producing a branded Debian archive, run `bun scripts/check-cm-linux.ts /path/to/cookiemonster.deb` from this package. The check rejects upstream launcher/icon/metainfo paths and verifies the installed desktop entry. Installation and removal coexistence must also be checked in a disposable environment.
+
 ## Startup benchmark
 
 `bun run bench:startup` measures a **packaged** build from process spawn to the restored tab being ready and the

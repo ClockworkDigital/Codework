@@ -8,6 +8,7 @@ import type { CustomMacSignOptions } from "app-builder-lib"
 import { Arch, type Configuration } from "electron-builder"
 import { NativeArch } from "../../script/native-arch"
 import { CLI_BINARIES, getCurrentCli, nodePtyPackage } from "./scripts/utils"
+import { desktopIdentity } from "./scripts/identity"
 
 const execFileAsync = promisify(execFile)
 
@@ -63,17 +64,19 @@ function resolveChannel() {
   return "dev"
 }
 
-const APP_IDS = {
-  dev: "ai.opencode.desktop.dev",
-  beta: "ai.opencode.desktop.beta",
-  prod: "ai.opencode.desktop",
-} as const
-
 const getBase = (appId: string): Configuration => {
   const target = getCurrentCli()
 
   return {
     artifactName: "opencode-desktop-${os}-${arch}.${ext}",
+    afterAllArtifactBuild: async (context) => {
+      if (appId === "com.ogilvy.cookiemonster") {
+        for (const artifact of context.artifactPaths.filter((file) => file.endsWith(".deb"))) {
+          await execFileAsync("bun", [path.join(packageDir, "scripts/check-cm-linux.ts"), artifact])
+        }
+      }
+      return []
+    },
     directories: {
       output: "dist",
       buildResources: "resources",
@@ -213,7 +216,8 @@ const getBase = (appId: string): Configuration => {
 
 export function getConfig() {
   const channel = resolveChannel()
-  const appId = APP_IDS[channel]
+  const identity = desktopIdentity(channel)
+  const appId = identity.appId
   const base = getBase(appId)
 
   switch (channel) {
@@ -221,9 +225,9 @@ export function getConfig() {
       return {
         ...base,
         appId,
-        productName: "OpenCode Dev",
+        productName: identity.productName,
         deb: { fpm: [metainfoFpm(appId)] },
-        rpm: { packageName: "opencode-dev", fpm: [metainfoFpm(appId)] },
+        rpm: { packageName: identity.packageName, fpm: [metainfoFpm(appId)] },
       }
     }
 
@@ -231,7 +235,7 @@ export function getConfig() {
       return {
         ...base,
         appId,
-        productName: "OpenCode Beta",
+        productName: identity.productName,
         protocols: { name: "OpenCode Beta", schemes: ["opencode"] },
         publish: {
           provider: "generic",
@@ -239,7 +243,7 @@ export function getConfig() {
           channel: "latest",
         },
         deb: { fpm: [metainfoFpm(appId)] },
-        rpm: { packageName: "opencode-beta", fpm: [metainfoFpm(appId)] },
+        rpm: { packageName: identity.packageName, fpm: [metainfoFpm(appId)] },
       }
     }
 
@@ -247,15 +251,18 @@ export function getConfig() {
       return {
         ...base,
         appId,
-        productName: "OpenCode",
+        productName: identity.productName,
         protocols: { name: "OpenCode", schemes: ["opencode"] },
         publish: {
           provider: "generic",
           url: "https://opencode.ai/update/api/latest/desktop/opencode/",
           channel: "latest",
         },
-        deb: { fpm: [metainfoFpm(appId), legacyDesktopEntryFpm] },
-        rpm: { packageName: "opencode", fpm: [metainfoFpm(appId), legacyDesktopEntryFpm] },
+        deb: { fpm: [metainfoFpm(appId), ...(appId === "ai.opencode.desktop" ? [legacyDesktopEntryFpm] : [])] },
+        rpm: {
+          packageName: identity.packageName,
+          fpm: [metainfoFpm(appId), ...(appId === "ai.opencode.desktop" ? [legacyDesktopEntryFpm] : [])],
+        },
       }
     }
   }
@@ -271,8 +278,6 @@ const brandedConfig: Configuration = {
   ...config,
   ...(branded
     ? {
-        appId: "com.ogilvy.cookiemonster",
-        productName: "CookieMonster",
         artifactName: "cookiemonster-${os}-${arch}.${ext}",
         extraMetadata: {
           ...config.extraMetadata,
