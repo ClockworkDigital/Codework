@@ -181,6 +181,8 @@ it.live("persists a skill toggle across locations and preserves other configurat
       })
     }
   }),
+  // Allow watched-server lifecycle overhead outside the per-update five-second polls.
+  15_000,
 )
 
 function isRecord(value: unknown): value is Record<string, unknown> {
