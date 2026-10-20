@@ -3,6 +3,6 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@cookiemonster/wpp": "git+ssh://git@github.com/trmosala/CM-WPP-Bits.git#0b8bc9600ea32614f5003aab8e6d624a0f7602e3"
+    "@cookiemonster/wpp": "git+ssh://git@github.com/trmosala/CM-WPP-Bits.git#8bb2cd4e7d0588c3ef37735453830e7206f5a455"
   }
 }

@@ -225,6 +225,27 @@ test("keeps a closed session's first prompt while its creation is unacknowledged
 })
 
 test("closed transcripts and the rows later events bring back do not stay on the heap", async () => {
+  if (process.env.CM_RETENTION_HEAP_PROBE !== "1") {
+    // Other browser tests can release their heaps between samples; measure this contract in its own process.
+    const result = Bun.spawnSync(
+      [
+        process.execPath,
+        "test",
+        "--conditions=browser",
+        "--preload",
+        "./happydom.ts",
+        import.meta.path,
+        "-t",
+        "closed transcripts and the rows",
+      ],
+      { env: { ...process.env, CM_RETENTION_HEAP_PROBE: "1" }, timeout: 20_000, stdout: "pipe", stderr: "pipe" },
+    )
+
+    expect(result.exitCode, result.stdout.toString() + result.stderr.toString()).toBe(0)
+
+    return
+  }
+
   const count = 48
   const size = 512 * 1024
   const ids = Array.from({ length: count }, (_, index) => `ses_heavy_${index}`)

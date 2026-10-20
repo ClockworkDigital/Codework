@@ -88,6 +88,7 @@ runs:
       shell: bash
       env:
         CM_WPP_SSH_KEY: ${{ inputs.wpp-ssh-key }}
+        GH_TOKEN: ${{ github.token }}
       run: |
         if [ -z "$CM_WPP_SSH_KEY" ]; then
           echo "::error::CM_WPP_SSH_KEY with read access to trmosala/CM-WPP-Bits is required."
@@ -95,7 +96,7 @@ runs:
         fi
         umask 077
         printf '%s\n' "$CM_WPP_SSH_KEY" > "$RUNNER_TEMP/cm-wpp-key"
-        curl --fail --silent --show-error https://api.github.com/meta | node -e '
+        curl --fail --silent --show-error --header "Authorization: Bearer $GH_TOKEN" https://api.github.com/meta | node -e '
           let data = ""
           process.stdin.on("data", chunk => data += chunk)
           process.stdin.on("end", () => {
