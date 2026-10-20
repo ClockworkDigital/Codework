@@ -34,14 +34,12 @@ export default defineMain({
     const { mergeConfig, searchForWorkspaceRoot } = await import("vite")
     const merged = mergeConfig(config, {
       plugins: [tailwindcss(), playgroundCss()],
+      // The previous directory alias kept Solid Query unbundled.
+      optimizeDeps: { exclude: ["@tanstack/solid-query"] },
       resolve: {
-        dedupe: ["solid-js", "solid-js/web", "@solidjs/meta"],
+        dedupe: ["solid-js", "solid-js/web", "@solidjs/meta", "@tanstack/solid-query"],
         alias: [
           { find: "@solidjs/router", replacement: path.resolve(mocks, "solid-router.tsx") },
-          {
-            find: "@tanstack/solid-query",
-            replacement: path.resolve(here, "../../app/node_modules/@tanstack/solid-query"),
-          },
           { find: /^@\/providers\/models\/selection$/, replacement: path.resolve(mocks, "app/context/local.ts") },
           { find: /^@\/workspaces\/files\/model$/, replacement: path.resolve(mocks, "app/context/file.ts") },
           { find: /^@\/shell\/state\/layout$/, replacement: path.resolve(mocks, "app/context/layout.ts") },
