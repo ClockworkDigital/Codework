@@ -442,6 +442,7 @@ test("mounted preview validates sizes and waits for menu disposal and viewport a
     }
     let accept: (value: BrowserTabs) => void = () => {}
     let viewport = Promise.withResolvers<void>()
+    viewport.resolve()
     let requested = Promise.withResolvers<void>()
     let captured = Promise.withResolvers<void>()
     let image = Promise.withResolvers<string>()
@@ -477,7 +478,7 @@ test("mounted preview validates sizes and waits for menu disposal and viewport a
       },
       viewport: async (input) => {
         if (!input.bounds) return
-        expect(document.querySelector("[data-component=dropdown-menu-content]")).toBeNull()
+        expect(document.querySelector("[data-component=dropdown-menu-content]") === null).toBe(true)
         requested.resolve()
         await viewport.promise
       },
@@ -510,6 +511,9 @@ test("mounted preview validates sizes and waits for menu disposal and viewport a
     await Promise.resolve()
     expect(calls[0]).toMatchObject({ op: "device", size: { width: 360, height: 844 } })
 
+    // Ignore the initial viewport update; capture must await its own post-menu acknowledgement.
+    viewport = Promise.withResolvers<void>()
+    requested = Promise.withResolvers<void>()
     const menu = host.querySelector<HTMLButtonElement>('button[aria-label="Browser menu"]')!
     menu.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }))
     await Promise.resolve()
@@ -517,10 +521,14 @@ test("mounted preview validates sizes and waits for menu disposal and viewport a
       (value) => value.textContent?.trim() === "Take a screenshot and add to chat",
     )!
     expect(item).toBeDefined()
+    if (process.env.CM_DOM_ASSERT_PROBE === "1") {
+      // Deliberately false while a real mounted menu exists. Keep failure reporting independent of its DOM graph.
+      expect(document.querySelector("[data-component=dropdown-menu-content]") === null).toBe(true)
+    }
     item.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }))
     expect(captures).toBe(0)
     await requested.promise
-    expect(document.querySelector("[data-component=dropdown-menu-content]")).toBeNull()
+    expect(document.querySelector("[data-component=dropdown-menu-content]") === null).toBe(true)
     expect(captures).toBe(0)
     viewport.resolve()
     await captured.promise
@@ -739,7 +747,7 @@ test("mounted preview validates sizes and waits for menu disposal and viewport a
     find.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }))
     await Promise.resolve()
     expect(host.querySelector('[data-slot="browser-tools"] input[aria-label="Find in page"]')).not.toBeNull()
-    expect(host.querySelector('[data-slot="browser-tools"] [data-component="select"]')).toBeNull()
+    expect(host.querySelector('[data-slot="browser-tools"] [data-component="select"]') === null).toBe(true)
 
     dispose?.()
     dispose = undefined
@@ -756,3 +764,29 @@ test("mounted preview validates sizes and waits for menu disposal and viewport a
     await rm(directory, { recursive: true, force: true })
   }
 }, 30_000)
+
+test("a deliberate mounted DOM presence failure produces a bounded diagnostic", () => {
+  const result = Bun.spawnSync(
+    [
+      process.execPath,
+      "test",
+      "--conditions=browser",
+      "--preload",
+      "./happydom.ts",
+      import.meta.path,
+      "-t",
+      "mounted preview validates",
+    ],
+    {
+      cwd: resolve("."),
+      env: { ...process.env, CM_DOM_ASSERT_PROBE: "1" },
+      timeout: 20_000,
+      stdout: "pipe",
+      stderr: "pipe",
+    },
+  )
+  expect(result.exitCode).toBe(1)
+  expect(result.stderr.length).toBeLessThan(64 * 1024)
+  expect(result.stderr.toString()).toContain("Expected: true")
+  expect(result.stderr.toString()).toContain("Received: false")
+}, 25_000)
