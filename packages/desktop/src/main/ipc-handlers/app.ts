@@ -3,7 +3,7 @@ import { parseDesktopNativeBundle } from "@opencode/app/i18n/desktop-native"
 import { Effect } from "effect"
 import { AppRpcs } from "../../shared/ipc-rpc"
 import { openExternalURL } from "../files"
-import { checkAppExists, resolveAppPath } from "../files/apps"
+import { checkAppExists } from "../files/apps"
 import { setForceFocus } from "../native/debug"
 import { showCliInstaller } from "../native/install-cli"
 import { DesktopLogging, scoped } from "../native/logging"
@@ -35,7 +35,6 @@ export const appHandlers = AppRpcs.toLayer(
       AppFinishFirstLaunchOnboarding: ({ createDefaultProject }) =>
         finishFirstLaunchOnboarding(createDefaultProject).pipe(Effect.orDie),
       AppCheckAppExists: ({ appName }) => checkAppExists(appName).pipe(Effect.orDie),
-      AppResolveAppPath: ({ appName }) => resolveAppPath(appName).pipe(Effect.orDie),
       AppSetBackgroundColor: ({ color }) => Effect.sync(() => setBackgroundColor(color)),
       AppExportDebugLogs: () => logging.exportDebug,
       AppSetForceFocus: ({ enabled }, context) => promise(() => setForceFocus(sender(handoff, context), enabled)),

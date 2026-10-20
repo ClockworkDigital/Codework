@@ -55,7 +55,6 @@ export const api: ElectronAPI = {
   finishFirstLaunchOnboarding: (createDefaultProject) =>
     invoke("AppFinishFirstLaunchOnboarding", { createDefaultProject }),
   checkAppExists: (appName) => invoke("AppCheckAppExists", { appName }),
-  resolveAppPath: (appName) => invoke("AppResolveAppPath", { appName }),
   // The first read of a namespace the preload already fetched is served from that snapshot; later
   // reads (a window re-opening a namespace) go to the main process as usual.
   storeItems: (name) =>

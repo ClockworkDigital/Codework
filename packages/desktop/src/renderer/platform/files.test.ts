@@ -24,7 +24,6 @@ function fileApi(events: string[]): Parameters<typeof createDesktopFiles>[0] {
     openExternal: () => {},
     openBrowser: async () => true,
     openLocalFile: () => {},
-    resolveAppPath: async () => null,
     openPath: async () => undefined,
     revealPath: async () => false,
     readClipboardImage: async () => null,
@@ -37,7 +36,7 @@ function fileApi(events: string[]): Parameters<typeof createDesktopFiles>[0] {
 describe("desktop attachment files", () => {
   test("returns the native browser launch result and forwards clipboard text", async () => {
     const events: string[] = []
-    const files = createDesktopFiles({ ...fileApi(events), openBrowser: async () => false }, "macos")
+    const files = createDesktopFiles({ ...fileApi(events), openBrowser: async () => false })
 
     expect(await files.openBrowser("https://opencode.ai/console")).toBe(false)
     await files.writeClipboardText("ses_123")
@@ -46,7 +45,7 @@ describe("desktop attachment files", () => {
 
   test("reads selected files sequentially and releases the token", async () => {
     const events: string[] = []
-    const files = createDesktopFiles(fileApi(events), "windows")
+    const files = createDesktopFiles(fileApi(events))
 
     await files.openAttachmentPickerDialog({}, async (file) => {
       events.push(`file:${file.name}`)
@@ -63,7 +62,7 @@ describe("desktop attachment files", () => {
 
   test("releases the token when a selected file callback fails", async () => {
     const events: string[] = []
-    const files = createDesktopFiles(fileApi(events), "windows")
+    const files = createDesktopFiles(fileApi(events))
 
     await expect(
       files.openAttachmentPickerDialog({}, async () => {

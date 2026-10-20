@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process"
 import util from "node:util"
 import { Effect, FileSystem, Path } from "effect"
+import { nativeT } from "../native/translations"
 
 const execFilePromise = util.promisify(execFile)
 
@@ -12,10 +13,42 @@ export const checkAppExists = Effect.fn("DesktopFiles.checkAppExists")(function*
   return yield* checkMacosApp(appName)
 })
 
-export const resolveAppPath = Effect.fn("DesktopFiles.resolveAppPath")(function* (appName: string) {
-  if (process.platform !== "win32") return appName
+// The apps a renderer may open a path with: the editors and terminals the app offers to open a path in on each OS,
+// named as `open -a` (macOS) or a PATH lookup (Windows, Linux) finds them. Other platforms get Linux's choices.
+const OPEN_WITH_APPS = {
+  darwin: new Set([
+    "Visual Studio Code",
+    "Cursor",
+    "Zed",
+    "TextMate",
+    "Antigravity",
+    "Terminal",
+    "iTerm",
+    "Ghostty",
+    "Warp",
+    "Xcode",
+    "Android Studio",
+    "Sublime Text",
+  ]),
+  win32: new Set(["code", "cursor", "zed", "powershell", "Sublime Text"]),
+  linux: new Set(["code", "cursor", "zed", "Sublime Text"]),
+}
 
-  return yield* resolveWindowsAppPath(appName)
+/**
+ * The executable that opens a path with an allowed app: its name, or on Windows the executable main locates
+ * for it, or null when Windows cannot. Any other app fails with a message for the user, so the renderer never
+ * picks an executable.
+ */
+export const resolveAppPath = Effect.fn("DesktopFiles.resolveAppPath")(function* (appName: string) {
+  const platform = process.platform === "darwin" || process.platform === "win32" ? process.platform : "linux"
+
+  if (!OPEN_WITH_APPS[platform].has(appName)) {
+    return yield* Effect.fail(nativeT("desktop.openWith.error.appNotAllowed", { app: appName }))
+  }
+
+  if (platform !== "win32") return appName
+
+  return yield* resolveWindowsAppPath(appName).pipe(Effect.orElseSucceed(() => null))
 })
 
 const checkMacosApp = Effect.fn("DesktopFiles.checkMacosApp")(function* (appName: string) {
@@ -125,7 +158,11 @@ const resolveWindowsAppPath = Effect.fn("DesktopFiles.resolveWindowsAppPath")(fu
 
   if (key) {
     for (const file of paths) {
-      const dirs = [path.dirname(file), path.dirname(path.dirname(file)), path.dirname(path.dirname(path.dirname(file)))]
+      const dirs = [
+        path.dirname(file),
+        path.dirname(path.dirname(file)),
+        path.dirname(path.dirname(path.dirname(file))),
+      ]
 
       for (const dir of dirs) {
         const entries = yield* fs.readDirectory(dir).pipe(Effect.orElseSucceed(() => []))
