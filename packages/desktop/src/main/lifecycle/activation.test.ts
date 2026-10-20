@@ -63,13 +63,24 @@ if (process.env.CM_ACTIVATION_TEST_CHILD !== "1") {
       setAppQuitting: () => {},
       setRelaunchHandler: () => () => {},
     }))
-    mock.module("../storage", () => ({ DesktopStorage: { layer: Layer.empty } }))
+    mock.module("../storage", () => ({
+      DesktopStorage: { layer: Layer.empty },
+    }))
     mock.module("../native/logging", () => ({
       DesktopLogging: { layer: Layer.empty },
       scoped: <A, E, R>(_scope: string, effect: Effect.Effect<A, E, R>) => effect,
     }))
-    mock.module("./onboarding", () => ({ initializeFirstLaunchOnboarding: () => Effect.void }))
+    mock.module("./onboarding", () => ({
+      initializeFirstLaunchOnboarding: () => Effect.void,
+    }))
     mock.module("../ipc-events", () => ({ emitIpcEvent: () => {} }))
+    const login = Promise.withResolvers<string>()
+
+    const requestLogin = mock(async (origin: string) => {
+      login.resolve(origin)
+    })
+
+    mock.module("#cm-wpp", () => ({ wpp: { requestLogin } }))
     const { ApplicationLifecycle } = await import("./index")
     const runtime = ManagedRuntime.make(ApplicationLifecycle.layer)
 
@@ -85,6 +96,11 @@ if (process.env.CM_ACTIVATION_TEST_CHILD !== "1") {
       expect(restore).toHaveBeenCalledTimes(2)
       expect(restored).toHaveBeenCalledTimes(1)
       expect(shown).toHaveBeenCalledTimes(1)
+      expect(focused).toHaveBeenCalledTimes(1)
+      events.emit("second-instance", {}, ["cm", "cookiemonster://wpp/login?origin=http%3A%2F%2F127.0.0.1%3A18787"])
+      expect(await login.promise).toBe("http://127.0.0.1:18787")
+      expect(requestLogin).toHaveBeenCalledTimes(1)
+      expect(lifecycle.consumeInitialDeepLinks()).toEqual([])
       expect(focused).toHaveBeenCalledTimes(1)
     } finally {
       await runtime.dispose()

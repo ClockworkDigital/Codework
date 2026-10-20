@@ -21,7 +21,7 @@ import {
 import { marks } from "./marks"
 import { initializeFirstLaunchOnboarding } from "./onboarding"
 import { Shutdown } from "./shutdown"
-import { consoleReturnWindow } from "./deep-link"
+import { consoleReturnWindow, wppLoginOrigin } from "./deep-link"
 
 export interface Interface {
   readonly relaunch: () => void
@@ -54,10 +54,25 @@ const runtime = Layer.effect(
     }
 
     const emitDeepLinks = (urls: string[]) => {
-      if (!urls.length) return
-      pendingDeepLinks.push(...urls)
+      const links = urls.filter((url) => {
+        if (!url.startsWith("cookiemonster://")) return true
+        const origin = wppLoginOrigin(url)
 
-      const target = urls.flatMap((url) => {
+        if (origin)
+          runFork(
+            Effect.tryPromise(async () => {
+              const { wpp } = await import("#cm-wpp")
+              await wpp?.requestLogin(origin)
+            }).pipe(Effect.catch(() => Effect.logWarning("WPP sign-in could not be opened"))),
+          )
+
+        return false
+      })
+
+      if (!links.length) return
+      pendingDeepLinks.push(...links)
+
+      const target = links.flatMap((url) => {
         const id = consoleReturnWindow(url)
         const win = id ? getWindowByID(id) : null
 
@@ -66,7 +81,7 @@ const runtime = Layer.effect(
 
       const win = target ?? getLastFocusedWindow()
 
-      if (win) emitIpcEvent(win.webContents, new DeepLinksOpened({ urls }))
+      if (win) emitIpcEvent(win.webContents, new DeepLinksOpened({ urls: links }))
 
       return win
     }
@@ -86,7 +101,7 @@ const runtime = Layer.effect(
     }
 
     const secondInstance = (_event: Event, argv: string[]) => {
-      const urls = argv.filter((arg) => arg.startsWith("opencode://"))
+      const urls = argv.filter((arg) => arg.startsWith("opencode://") || arg.startsWith("cookiemonster://"))
 
       if (urls.length) {
         runFork(Effect.logInfo("deep link received via second-instance", { urls }))

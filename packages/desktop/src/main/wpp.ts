@@ -7,6 +7,7 @@ export type WppIntegration = {
     get(): WppAuthState
     check(): Promise<WppAuthState>
   }
+  requestLogin(origin: string): Promise<void>
   toggleLogin(): void
   toggleWindows(): boolean
   isLoggedWorker(contents: object): boolean

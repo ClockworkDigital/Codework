@@ -179,10 +179,6 @@ const getBase = (appId: string): Configuration => {
       notarize: true,
       target: ["dmg", "zip"],
     },
-    protocols: {
-      name: "OpenCode",
-      schemes: ["opencode"],
-    },
     win: {
       icon: `resources/icons/icon.ico`,
       signtoolOptions: {
@@ -219,6 +215,10 @@ export function getConfig() {
   const identity = desktopIdentity(channel)
   const appId = identity.appId
   const base = getBase(appId)
+  base.protocols = {
+    name: appId === "com.ogilvy.cookiemonster" ? "CookieMonster" : channel === "beta" ? "OpenCode Beta" : "OpenCode",
+    schemes: appId === "com.ogilvy.cookiemonster" ? ["opencode", "cookiemonster"] : ["opencode"],
+  }
 
   switch (channel) {
     case "dev": {
@@ -236,7 +236,6 @@ export function getConfig() {
         ...base,
         appId,
         productName: identity.productName,
-        protocols: { name: "OpenCode Beta", schemes: ["opencode"] },
         publish: {
           provider: "generic",
           url: "https://opencode.ai/update/api/beta/desktop/opencode/",
@@ -252,7 +251,6 @@ export function getConfig() {
         ...base,
         appId,
         productName: identity.productName,
-        protocols: { name: "OpenCode", schemes: ["opencode"] },
         publish: {
           provider: "generic",
           url: "https://opencode.ai/update/api/latest/desktop/opencode/",
