@@ -187,6 +187,7 @@ test.each(channels)("CookieMonster identity is derived before Linux fields for $
   const id = "com.ogilvy.cookiemonster"
   expect(config.appId).toBe(id)
   expect(config.productName).toBe("CookieMonster")
+  expect(config.protocols).toEqual({ name: "CookieMonster", schemes: ["opencode", "cookiemonster"] })
   expect(config.extraMetadata?.desktopName).toBe(`${id}.desktop`)
   expect(config.linux?.executableName).toBe(id)
   expect(config.linux?.desktop?.entry?.StartupWMClass).toBe(id)
