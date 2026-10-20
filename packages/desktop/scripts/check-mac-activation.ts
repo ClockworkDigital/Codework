@@ -23,7 +23,12 @@ const child = Bun.spawn(
 
 const Evaluation = Schema.Struct({
   result: Schema.Struct({ value: Schema.optionalKey(Schema.Boolean) }),
-  exceptionDetails: Schema.optionalKey(Schema.Unknown),
+  exceptionDetails: Schema.optionalKey(
+    Schema.Struct({
+      text: Schema.String,
+      exception: Schema.optionalKey(Schema.Struct({ description: Schema.optionalKey(Schema.String) })),
+    }),
+  ),
 })
 
 const waiting = new Map<number, { resolve: (value: typeof Evaluation.Type) => void; reject: (error: Error) => void }>()
@@ -99,8 +104,10 @@ try {
       connection.send(JSON.stringify({ id, method: "Runtime.evaluate", params: { expression, returnByValue: true } }))
     })
 
-    if (result.exceptionDetails !== undefined || result.result.value === undefined)
-      throw new Error("Packaged activation evaluation failed.")
+    if (result.exceptionDetails)
+      throw new Error(result.exceptionDetails.exception?.description ?? result.exceptionDetails.text)
+
+    if (result.result.value === undefined) throw new Error("Packaged activation did not return a boolean.")
 
     return result.result.value
   }
@@ -108,7 +115,7 @@ try {
   if (!(await evaluate(`process.pid === ${child.pid}`)))
     throw new Error("Inspector belongs to another process; refusing to operate it.")
   const native = `process.getBuiltinModule('module').createRequire(process.execPath)('electron')`
-  const usable = `${native}.BrowserWindow.getAllWindows().some(w => w !== globalThis.__cmActivationWorker && w.isVisible() && w.webContents.getURL().startsWith('oc://renderer/'))`
+  const usable = `Boolean(${native}.BrowserWindow?.getAllWindows().some(w => w !== globalThis.__cmActivationWorker && w.isVisible() && w.webContents.getURL().startsWith('oc://renderer/')))`
 
   const waitFor = async (expression: string) => {
     const deadline = Date.now() + 30_000
@@ -121,7 +128,7 @@ try {
     throw new Error("Packaged activation condition did not become true.")
   }
 
-  // The early window is visible before the lifecycle adopts it; closing it then deliberately quits the app.
+  // The inspector can precede BrowserWindow exports; the early window also needs lifecycle adoption before close.
   await waitFor(`${usable} && ${native}.app.listenerCount('activate') > 0`)
 
   if (!(await evaluate(`${native}.app.isPackaged`))) throw new Error("This must exercise a packaged application.")
