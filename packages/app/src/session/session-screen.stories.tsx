@@ -15,6 +15,8 @@ import {
   terminalPassedDocument,
 } from "@opencode/session-ui/storybook"
 import { SessionPreview } from "./story-model"
+import { SettingsProvider } from "@/settings/model"
+import type { JSX } from "solid-js"
 
 const description = "opencode · modular-session-ui"
 
@@ -51,6 +53,13 @@ export default {
   title: "OpenCode/Session/Complete workspace",
   id: "app-current-session-surface",
   component: SessionPreview,
+  decorators: [
+    (Story: () => JSX.Element) => (
+      <SettingsProvider>
+        <Story />
+      </SettingsProvider>
+    ),
+  ],
   parameters: {
     layout: "fullscreen",
     docs: {
