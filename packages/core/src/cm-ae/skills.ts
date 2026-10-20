@@ -2,6 +2,7 @@ import path from "node:path"
 import { randomBytes } from "node:crypto"
 import { stat } from "node:fs/promises"
 import { AbsolutePath } from "@opencode/schema/schema"
+import { Glob } from "@opencode/util/glob"
 import { Schema } from "effect"
 import type { Skill } from "@opencode/schema/skill"
 import { ManagedSkill } from "./managed.js"
@@ -29,11 +30,10 @@ export function skills(input: {
         throw error
       })
       if (!exists) continue
-      for await (const file of new Bun.Glob("**/SKILL.md").scan({
+      for (const file of await Glob.scan("**/SKILL.md", {
         cwd: root,
         absolute: true,
-        onlyFiles: true,
-        followSymlinks: true,
+        symlink: true,
       }))
         files.add(AbsolutePath.make(file))
     }

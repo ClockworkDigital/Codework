@@ -238,3 +238,5 @@ export const Plugin = {
       )
   }),
 }
+
+export const plugins = [Plugin] as const

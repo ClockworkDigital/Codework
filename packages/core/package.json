@@ -30,6 +30,10 @@
     "./*": "./src/*.ts"
   },
   "imports": {
+    "#cm-ae-plugin": {
+      "workerd": "./src/cm-ae/plugin.workerd.ts",
+      "default": "./src/cm-ae/plugin.ts"
+    },
     "#sqlite": {
       "workerd": "./src/database/sqlite.workerd.ts",
       "bun": "./src/database/sqlite.bun.ts",
