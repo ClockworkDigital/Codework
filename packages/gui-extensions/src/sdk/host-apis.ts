@@ -916,7 +916,8 @@ export interface Desktop {
    * Opens a path with an app, or with the default app.
    *
    * @param path - An absolute path.
-   * @param app - The app's name or path; omit it for the default app.
+   * @param app - The name of an editor or terminal the desktop offers on this OS; omit it for the default app. Any
+   *   other app, or a relative path with an app, rejects with a message to show the user.
    */
   launch(path: string, app?: string): Promise<void>
   /**

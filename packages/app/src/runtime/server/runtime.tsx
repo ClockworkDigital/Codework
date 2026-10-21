@@ -1,6 +1,20 @@
 import { createSimpleContext } from "@opencode/ui/context"
-import { Accessor, batch, createEffect, createMemo, createResource, createRoot, getOwner, untrack } from "solid-js"
+import {
+  Accessor,
+  batch,
+  createEffect,
+  createMemo,
+  createResource,
+  createRoot,
+  getOwner,
+  untrack,
+  useTransition,
+} from "solid-js"
+import { useLocation } from "@solidjs/router"
 import { createServerProjects, RECENTLY_CLOSED_DISPLAY_LIMIT, ServerConnection, useServers } from "./registry"
+import { createSessionRetention } from "./session-retention"
+import { sessionHref } from "@/shell/routes/session"
+import { useTabs } from "@/shell/tabs/tabs"
 import { pathKey } from "@/workspaces/path-key"
 import { useServerHealth } from "@/runtime/server/health"
 import { createServerSdkContext } from "./client"
@@ -197,6 +211,32 @@ function createServerController(
   const sync = createServerSyncContext(sdk, data)
   createPermissionAutoApprover({ sdk, data })
   const notification = createServerNotificationState({ sdk, data, key: connKey, coordinator: notificationCoordinator })
+
+  const tabs = useTabs()
+  const location = useLocation()
+  // Parsed here because the shared route parser throws on routes it does not recognise.
+  const routes = sessionHref(connKey, "")
+  createSessionRetention({
+    session: data.session,
+    ready: tabs.ready,
+    visible: () => {
+      const routed = location.pathname.startsWith(routes)
+        ? location.pathname.slice(routes.length).split("/")[0]
+        : undefined
+
+      return [
+        ...(routed ? [routed] : []),
+        ...tabs.store.flatMap((tab) =>
+          tab.type === "session" && tab.server === connKey
+            ? [tab.sessionId, tab.routeSessionId, tab.routeParentId].flatMap((id) => (id ? [id] : []))
+            : [],
+        ),
+      ]
+    },
+    navigating: useTransition()[0],
+    // Covers an open path whose transcript read lands before the transition adding its tab commits.
+    delay: 1_000,
+  })
 
   function enrich(project: { worktree: string; expanded: boolean }) {
     const [childStore] = sync.child(project.worktree, { bootstrap: false })

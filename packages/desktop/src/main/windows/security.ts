@@ -1,27 +1,43 @@
-import type { BrowserWindow } from "electron"
+import type { BrowserWindow, Session, WebContents } from "electron"
 import { SidecarCredentials } from "../service/sidecar-credentials"
 import { addRendererHeaders, hasHeader, upsertHeader } from "./headers"
 import { isRendererUrl } from "./scheme"
 
 const rendererPermissions = new Set(["clipboard-sanitized-write", "notifications"])
 
+const rendererWindows = new WeakMap<Session, Set<WebContents>>()
+
 export function allowRendererPermissions(win: BrowserWindow) {
-  const webContentsId = win.webContents.id
-  win.webContents.session.setPermissionRequestHandler((webContents, permission, callback, details) => {
+  const contents = win.webContents
+  const session = contents.session
+  const registered = rendererWindows.get(session) ?? new Set<WebContents>()
+
+  if (registered.has(contents)) return
+  registered.add(contents)
+  contents.once("destroyed", () => registered.delete(contents))
+
+  if (rendererWindows.has(session)) return
+  rendererWindows.set(session, registered)
+
+  session.setPermissionRequestHandler((webContents, permission, callback, details) => {
     callback(
-      rendererPermissions.has(permission) && isRendererUrl(details.requestingUrl) && webContents.id === webContentsId,
+      rendererPermissions.has(permission) &&
+        registered.has(webContents) &&
+        !webContents.isDestroyed() &&
+        details.isMainFrame &&
+        isRendererUrl(details.requestingUrl),
     )
   })
-  win.webContents.session.setPermissionCheckHandler((webContents, permission, requestingOrigin, details) => {
-    if (!rendererPermissions.has(permission)) return false
+  session.setPermissionCheckHandler((webContents, permission, requestingOrigin, details) => {
+    if (!rendererPermissions.has(permission) || !webContents || !registered.has(webContents)) return false
 
-    if (webContents && webContents.id !== webContentsId) return false
+    if (webContents.isDestroyed() || !details.isMainFrame) return false
 
     return isRendererUrl(details.requestingUrl) || isRendererUrl(requestingOrigin)
   })
 }
 
-export function wireNavigationPolicy(win: BrowserWindow, openExternalURL: (url: string) => unknown) {
+export function wireNavigationPolicy(win: BrowserWindow, openExternalURL: (url: string) => void) {
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (!isRendererUrl(url)) openExternalURL(url)
 

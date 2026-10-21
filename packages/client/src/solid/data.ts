@@ -1428,6 +1428,12 @@ export function createData(config: CreateDataInput) {
           status === "running" ? [sessionID] : [],
         )
       },
+      /** Sessions holding transcript or pending rows. Notifies only when that set changes, not per streamed row. */
+      cached: createMemo(
+        () => [...new Set([...Object.keys(store.session.message), ...Object.keys(store.session.pending)])].toSorted(),
+        [],
+        { equals: (a, b) => a.length === b.length && a.every((id, index) => id === b[index]) },
+      ),
       // Inputs are the pending user and synthetic items; compactions are control items.
       input: {
         list(sessionID: string) {

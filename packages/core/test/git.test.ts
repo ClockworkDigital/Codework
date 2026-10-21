@@ -34,45 +34,52 @@ describe("Git", () => {
     }),
   )
 
-  it.live("clones a remote and reads checkout metadata", () =>
-    withRemote((fixture) =>
-      Effect.gen(function* () {
-        const git = yield* Git.Service
-        const target = AbsolutePath.make(path.join(fixture.root, "checkout"))
-        const repository = yield* git.repo.clone({ remote: fixture.remote, directory: target })
+  // These fixtures launch several Git processes; hosted Windows cold starts can exceed five seconds.
+  it.live(
+    "clones a remote and reads checkout metadata",
+    () =>
+      withRemote((fixture) =>
+        Effect.gen(function* () {
+          const git = yield* Git.Service
+          const target = AbsolutePath.make(path.join(fixture.root, "checkout"))
+          const repository = yield* git.repo.clone({ remote: fixture.remote, directory: target })
 
-        expect(yield* git.remote.get(repository)).toBe(fixture.remote)
-        expect(yield* git.history.head(repository)).toBeString()
-        expect(yield* git.history.branch(repository)).toBe("main")
-        expect(yield* git.history.defaultRemoteBranch(repository)).toBe("main")
-        expect(repository.worktree).toBe(target)
-        expect(repository.gitDirectory).toBe(AbsolutePath.make(path.join(target, ".git")))
-        expect(repository.commonDirectory).toBe(repository.gitDirectory)
-        expect(yield* read(path.join(target, "README.md"))).toBe("one\n")
-      }),
-    ),
+          expect(yield* git.remote.get(repository)).toBe(fixture.remote)
+          expect(yield* git.history.head(repository)).toBeString()
+          expect(yield* git.history.branch(repository)).toBe("main")
+          expect(yield* git.history.defaultRemoteBranch(repository)).toBe("main")
+          expect(repository.worktree).toBe(target)
+          expect(repository.gitDirectory).toBe(AbsolutePath.make(path.join(target, ".git")))
+          expect(repository.commonDirectory).toBe(repository.gitDirectory)
+          expect(yield* read(path.join(target, "README.md"))).toBe("one\n")
+        }),
+      ),
+    { timeout: 15_000 },
   )
 
-  it.live("fetches, checks out, and resets remote changes", () =>
-    withRemote((fixture) =>
-      Effect.gen(function* () {
-        const git = yield* Git.Service
-        const target = AbsolutePath.make(path.join(fixture.root, "checkout"))
-        const repository = yield* git.repo.clone({ remote: fixture.remote, directory: target })
+  it.live(
+    "fetches, checks out, and resets remote changes",
+    () =>
+      withRemote((fixture) =>
+        Effect.gen(function* () {
+          const git = yield* Git.Service
+          const target = AbsolutePath.make(path.join(fixture.root, "checkout"))
+          const repository = yield* git.repo.clone({ remote: fixture.remote, directory: target })
 
-        yield* Effect.promise(() => commit(fixture.source, "two\n", "second"))
-        yield* git.sync.fetchRemotes(repository)
-        yield* git.sync.resetHard(repository, "origin/main")
-        expect(yield* read(path.join(target, "README.md"))).toBe("two\n")
+          yield* Effect.promise(() => commit(fixture.source, "two\n", "second"))
+          yield* git.sync.fetchRemotes(repository)
+          yield* git.sync.resetHard(repository, "origin/main")
+          expect(yield* read(path.join(target, "README.md"))).toBe("two\n")
 
-        yield* Effect.promise(() => branch(fixture.source, "feature/docs", "feature\n"))
-        yield* git.sync.fetchBranch(repository, { branch: "feature/docs" })
-        yield* git.sync.checkoutRemoteBranch(repository, { branch: "feature/docs" })
-        yield* git.sync.resetHard(repository, "origin/feature/docs")
-        expect(yield* git.history.branch(repository)).toBe("feature/docs")
-        expect(yield* read(path.join(target, "README.md"))).toBe("feature\n")
-      }),
-    ),
+          yield* Effect.promise(() => branch(fixture.source, "feature/docs", "feature\n"))
+          yield* git.sync.fetchBranch(repository, { branch: "feature/docs" })
+          yield* git.sync.checkoutRemoteBranch(repository, { branch: "feature/docs" })
+          yield* git.sync.resetHard(repository, "origin/feature/docs")
+          expect(yield* git.history.branch(repository)).toBe("feature/docs")
+          expect(yield* read(path.join(target, "README.md"))).toBe("feature\n")
+        }),
+      ),
+    { timeout: 15_000 },
   )
 })
 

@@ -4,6 +4,7 @@ export const ALLOWLIST_FILENAME = "cm-browser-allowlist.json"
 export const STATE_DIRECTORY_NAME = "CookieMonster"
 export const MAX_URL_LENGTH = 2_048
 export const MAX_TYPED_TEXT = 10_000
+export const MAX_REQUEST_BYTES = 64 * 1024
 export const MAX_SNAPSHOT_BYTES = 64 * 1024
 export const OPERATION_TIMEOUT_MS = 15_000
 export const MAX_SCREENSHOT_EDGE = 4096

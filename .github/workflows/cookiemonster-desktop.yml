@@ -87,6 +87,12 @@ jobs:
           OPENCODE_CHANNEL: dev
         run: bun test --preload ./test/preload.ts --timeout 20000 electron-builder.config.test.ts src/main/macos-user-install.test.ts
 
+      - name: Verify pinned WPP backend and host contracts
+        timeout-minutes: 3
+        run: |
+          bun run --cwd packages/desktop/wpp/node_modules/@cookiemonster/wpp test
+          bun run --cwd packages/desktop test:wpp
+
       - name: Import Developer ID certificate
         uses: apple-actions/import-codesign-certs@8f3fb608891dd2244cdab3d69cd68c0d37a7fe93 # v2.0.0
         with:
@@ -147,6 +153,17 @@ jobs:
           test "$(cat "$app/Contents/Resources/opencode-cli.version")" = "$CM_VERSION"
           cd packages/desktop/dist
           shasum -a 256 cookiemonster-mac-arm64.dmg > SHA256SUMS.txt
+
+      - name: Verify packaged macOS activation with a hidden worker
+        timeout-minutes: 3
+        run: |
+          mount="$RUNNER_TEMP/cm-activation-mount"
+          mkdir "$mount"
+          hdiutil attach packages/desktop/dist/cookiemonster-mac-arm64.dmg -readonly -nobrowse -mountpoint "$mount"
+          trap 'hdiutil detach "$mount"' EXIT
+          mkdir "$RUNNER_TEMP/cm-activation"
+          ditto "$mount/CookieMonster.app" "$RUNNER_TEMP/cm-activation/CookieMonster.app"
+          bun packages/desktop/scripts/check-mac-activation.ts "$RUNNER_TEMP/cm-activation/CookieMonster.app"
 
       - name: Upload verified installer
         if: ${{ !inputs.publish }}

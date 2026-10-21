@@ -26,7 +26,6 @@ export type ElectronAPI = {
   isFirstLaunchOnboardingPending(): Promise<boolean>
   finishFirstLaunchOnboarding(createDefaultProject: boolean): Promise<string | null>
   checkAppExists(appName: string): Promise<boolean>
-  resolveAppPath(appName: string): Promise<string | null>
   storeItems(name: string): Promise<{ items: Record<string, string>; revision: number }>
   storeUpdate(name: string, insert: Record<string, string>, remove: string[]): Promise<number>
   storeClear(name: string): Promise<void>

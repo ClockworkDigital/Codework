@@ -31,17 +31,22 @@ export default defineMain({
     "../../gui-extensions/src/**/*.stories.@(js|jsx|mjs|ts|tsx)",
   ],
   async viteFinal(config) {
-    const { mergeConfig, searchForWorkspaceRoot } = await import("vite")
-    const merged = mergeConfig(config, {
+    const { mergeConfig, normalizePath, searchForWorkspaceRoot } = await import("vite")
+    return mergeConfig(config, {
       plugins: [tailwindcss(), playgroundCss()],
+      // The previous directory alias kept Solid Query unbundled.
+      optimizeDeps: {
+        exclude: ["@tanstack/solid-query"],
+        // Page fixtures and built-in renderers load outside the story entry graph.
+        entries: [
+          normalizePath(path.resolve(here, "../../app/component-tests/*.fixture.tsx")),
+          normalizePath(path.resolve(extensions, "renderer.ts")),
+        ],
+      },
       resolve: {
-        dedupe: ["solid-js", "solid-js/web", "@solidjs/meta"],
+        dedupe: ["solid-js", "solid-js/web", "@solidjs/meta", "@tanstack/solid-query"],
         alias: [
           { find: "@solidjs/router", replacement: path.resolve(mocks, "solid-router.tsx") },
-          {
-            find: "@tanstack/solid-query",
-            replacement: path.resolve(here, "../../app/node_modules/@tanstack/solid-query"),
-          },
           { find: /^@\/providers\/models\/selection$/, replacement: path.resolve(mocks, "app/context/local.ts") },
           { find: /^@\/workspaces\/files\/model$/, replacement: path.resolve(mocks, "app/context/file.ts") },
           { find: /^@\/shell\/state\/layout$/, replacement: path.resolve(mocks, "app/context/layout.ts") },
@@ -73,10 +78,5 @@ export default defineMain({
         },
       },
     })
-    merged.plugins = merged.plugins?.flat(8).filter((plugin) => {
-      if (!plugin || typeof plugin !== "object" || !("name" in plugin)) return true
-      return plugin.name !== "storybook:optimize-deps-plugin"
-    })
-    return merged
   },
 })

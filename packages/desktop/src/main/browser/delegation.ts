@@ -19,6 +19,7 @@ import {
 import { browserOwnerScopeCurrent, type BrowserOwnerScope, type BrowserSessionResolver } from "./session-resolver"
 
 export type BrowserAuthority = {
+  readonly kind: "task" | "delegated"
   signal?: AbortSignal
   token?: object
   check(): void
@@ -317,6 +318,7 @@ export function createBrowserDelegations(
       }
 
       return {
+        kind: "delegated",
         token: lease,
         signal: lease.controller.signal,
         check: requireActive,
@@ -335,6 +337,7 @@ export function createBrowserDelegations(
     }
 
     return {
+      kind: "task",
       check: () => {
         if (closed) throw new Error("Sidecar closed")
       },

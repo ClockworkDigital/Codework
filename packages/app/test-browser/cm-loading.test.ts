@@ -9,7 +9,9 @@ import solid from "vite-plugin-solid"
 
 test("session cookies share their animation and phase across late mounts, updates, and reduced motion", async () => {
   const directory = await mkdtemp(join(tmpdir(), "cm-loading-"))
-  const browser = await chromium.launch()
+  // SVG images follow Chromium's own reduced-motion preference (the OS setting on Windows), not page emulation.
+  // Pin it so the motion checks are deterministic; page emulation below still covers reduced motion.
+  const browser = await chromium.launch({ args: ["--force-prefers-no-reduced-motion"] })
 
   const server = createServer(async (request, response) => {
     const pathname = new URL(request.url ?? "/", "http://localhost").pathname
@@ -31,6 +33,7 @@ test("session cookies share their animation and phase across late mounts, update
   await new Promise<void>((done) => server.listen(0, "127.0.0.1", done))
   const address = server.address()
 
+  // oxlint-disable-next-line anti-slop/no-runtime-typeof -- Node returns a Unix socket path or a TCP address; this fixture binds TCP.
   if (!address || typeof address === "string") throw new Error("Loader fixture server did not bind")
 
   try {

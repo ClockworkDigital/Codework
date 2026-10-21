@@ -8,6 +8,7 @@ import type { CustomMacSignOptions } from "app-builder-lib"
 import { Arch, type Configuration } from "electron-builder"
 import { NativeArch } from "../../script/native-arch"
 import { CLI_BINARIES, getCurrentCli, nodePtyPackage } from "./scripts/utils"
+import { desktopIdentity } from "./scripts/identity"
 
 const execFileAsync = promisify(execFile)
 
@@ -63,17 +64,20 @@ function resolveChannel() {
   return "dev"
 }
 
-const APP_IDS = {
-  dev: "ai.opencode.desktop.dev",
-  beta: "ai.opencode.desktop.beta",
-  prod: "ai.opencode.desktop",
-} as const
-
 const getBase = (appId: string): Configuration => {
   const target = getCurrentCli()
 
   return {
     artifactName: "opencode-desktop-${os}-${arch}.${ext}",
+    afterAllArtifactBuild: async (context) => {
+      if (appId === "com.ogilvy.cookiemonster") {
+        for (const artifact of context.artifactPaths.filter((file) => file.endsWith(".deb"))) {
+          await execFileAsync("bun", [path.join(packageDir, "scripts/check-cm-linux.ts"), artifact])
+        }
+      }
+
+      return []
+    },
     directories: {
       output: "dist",
       buildResources: "resources",
@@ -176,10 +180,6 @@ const getBase = (appId: string): Configuration => {
       notarize: true,
       target: ["dmg", "zip"],
     },
-    protocols: {
-      name: "OpenCode",
-      schemes: ["opencode"],
-    },
     win: {
       icon: `resources/icons/icon.ico`,
       signtoolOptions: {
@@ -213,17 +213,23 @@ const getBase = (appId: string): Configuration => {
 
 export function getConfig() {
   const channel = resolveChannel()
-  const appId = APP_IDS[channel]
+  const identity = desktopIdentity(channel)
+  const appId = identity.appId
   const base = getBase(appId)
+  base.protocols = {
+    name: appId === "com.ogilvy.cookiemonster" ? "CookieMonster" : channel === "beta" ? "OpenCode Beta" : "OpenCode",
+    schemes:
+      appId === "com.ogilvy.cookiemonster" && process.env.CM_WPP === "1" ? ["opencode", "cookiemonster"] : ["opencode"],
+  }
 
   switch (channel) {
     case "dev": {
       return {
         ...base,
         appId,
-        productName: "OpenCode Dev",
+        productName: identity.productName,
         deb: { fpm: [metainfoFpm(appId)] },
-        rpm: { packageName: "opencode-dev", fpm: [metainfoFpm(appId)] },
+        rpm: { packageName: identity.packageName, fpm: [metainfoFpm(appId)] },
       }
     }
 
@@ -231,15 +237,14 @@ export function getConfig() {
       return {
         ...base,
         appId,
-        productName: "OpenCode Beta",
-        protocols: { name: "OpenCode Beta", schemes: ["opencode"] },
+        productName: identity.productName,
         publish: {
           provider: "generic",
           url: "https://opencode.ai/update/api/beta/desktop/opencode/",
           channel: "latest",
         },
         deb: { fpm: [metainfoFpm(appId)] },
-        rpm: { packageName: "opencode-beta", fpm: [metainfoFpm(appId)] },
+        rpm: { packageName: identity.packageName, fpm: [metainfoFpm(appId)] },
       }
     }
 
@@ -247,15 +252,17 @@ export function getConfig() {
       return {
         ...base,
         appId,
-        productName: "OpenCode",
-        protocols: { name: "OpenCode", schemes: ["opencode"] },
+        productName: identity.productName,
         publish: {
           provider: "generic",
           url: "https://opencode.ai/update/api/latest/desktop/opencode/",
           channel: "latest",
         },
-        deb: { fpm: [metainfoFpm(appId), legacyDesktopEntryFpm] },
-        rpm: { packageName: "opencode", fpm: [metainfoFpm(appId), legacyDesktopEntryFpm] },
+        deb: { fpm: [metainfoFpm(appId), ...(appId === "ai.opencode.desktop" ? [legacyDesktopEntryFpm] : [])] },
+        rpm: {
+          packageName: identity.packageName,
+          fpm: [metainfoFpm(appId), ...(appId === "ai.opencode.desktop" ? [legacyDesktopEntryFpm] : [])],
+        },
       }
     }
   }
@@ -267,36 +274,31 @@ const branded = process.env.CM_BRAND === "1"
 
 const unsigned = process.env.CM_UNSIGNED === "1"
 
-const brandedConfig: Configuration = {
-  ...config,
-  ...(branded
-    ? {
-        appId: "com.ogilvy.cookiemonster",
-        productName: "CookieMonster",
-        artifactName: "cookiemonster-${os}-${arch}.${ext}",
-        extraMetadata: {
-          ...config.extraMetadata,
-          cmUserInstall: true,
-          ...(process.env.CM_VERSION ? { version: process.env.CM_VERSION } : {}),
-        },
-        extraResources: [
-          ...(config.extraResources ?? []),
-          { from: "resources/cm-plugins", to: "cm-plugins" },
-          { from: "resources/vault-auth", to: "vault-auth" },
-          { from: "resources/cm-ae", to: "cm-ae" },
+const brandedConfig: Configuration = branded
+  ? {
+      ...config,
+      artifactName: "cookiemonster-${os}-${arch}.${ext}",
+      extraMetadata: { ...config.extraMetadata, cmUserInstall: true },
+      extraResources: [
+        ...(config.extraResources ?? []),
+        { from: "resources/cm-plugins", to: "cm-plugins" },
+        { from: "resources/vault-auth", to: "vault-auth" },
+        { from: "resources/cm-ae", to: "cm-ae" },
+      ],
+      dmg: {
+        backgroundColor: "#ffffff",
+        window: { width: 540, height: 360 },
+        contents: [
+          { x: 160, y: 160, type: "file" },
+          { x: 380, y: 160, type: "file", path: path.join(packageDir, "resources", "Install CookieMonster.txt") },
         ],
-        dmg: {
-          backgroundColor: "#ffffff",
-          window: { width: 540, height: 360 },
-          contents: [
-            { x: 160, y: 160, type: "file" },
-            { x: 380, y: 160, type: "file", path: path.join(packageDir, "resources", "Install CookieMonster.txt") },
-          ],
-        },
-        publish: { provider: "github", owner: "trmosala", repo: "opencode", channel: "latest" },
-      }
-    : {}),
-}
+      },
+      publish: { provider: "github", owner: "trmosala", repo: "opencode", channel: "latest" },
+    }
+  : config
+
+if (branded && process.env.CM_VERSION)
+  brandedConfig.extraMetadata = { ...brandedConfig.extraMetadata, version: process.env.CM_VERSION }
 
 export default unsigned
   ? ({

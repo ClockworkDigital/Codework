@@ -692,6 +692,44 @@ test("inactive tabs load attention and inbox, but read the transcript only on se
   expect(errors).toEqual([])
 })
 
+test("closing a tab releases its transcript, and reopening it reads the transcript again", async ({ page }) => {
+  const reads: string[] = []
+  const errors: string[] = []
+  page.on("pageerror", (error) => errors.push(error.message))
+  page.on("request", (request) => {
+    if (request.method() === "GET") reads.push(new URL(request.url()).pathname)
+  })
+
+  const history = (id: string) =>
+    page.locator(`[data-timeline-row="UserMessage"][data-message-id="msg_${id}_history"]`)
+
+  await openSession(page, {
+    name: "TabRetention",
+    sessions: [a, b],
+    pageMessages: (id) => ({
+      items: [{ id: `msg_${id}_history`, type: "user", text: `History of ${id}`, time: { created: 1 } }],
+    }),
+  })
+  await expect(history(a.id)).toContainText(`History of ${a.id}`)
+
+  await page.locator(`[data-titlebar-tab-link][href="${sessionHref(b.id)}"]`).click()
+  await expect(history(b.id)).toContainText(`History of ${b.id}`)
+  await page.keyboard.press("Control+w")
+  await expect(page.locator(`[data-titlebar-tab-slot]:has(a[href="${sessionHref(b.id)}"])`)).toHaveCount(0)
+  await expectSessionTitle(page, a.title)
+
+  // A release has no visible signal, so wait past the retention delay. The open tab keeps its transcript.
+  await page.waitForTimeout(2_000)
+  await expect(history(a.id)).toContainText(`History of ${a.id}`)
+
+  await page.keyboard.press("Control+Shift+T")
+  await expectSessionTitle(page, b.title)
+  await expect(history(b.id)).toContainText(`History of ${b.id}`)
+  await expect.poll(() => reads.filter((path) => path === `/api/session/${b.id}/message`).length).toBe(2)
+  expect(reads.filter((path) => path === `/api/session/${a.id}/message`)).toHaveLength(1)
+  expect(errors).toEqual([])
+})
+
 test("five loaded workspace tabs stay rendered and reactive through repeated switches", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
 

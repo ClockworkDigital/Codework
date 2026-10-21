@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 import { statSync } from "node:fs"
-import { cp, mkdtemp, rm } from "node:fs/promises"
+import { cp, mkdir, mkdtemp, rm } from "node:fs/promises"
 import { createRequire } from "node:module"
 import os from "node:os"
 import path from "node:path"
@@ -18,7 +18,11 @@ const channels = [
   { channel: "prod", appId: "ai.opencode.desktop" },
 ] as const
 
-function load(channel: string, target?: string): Configuration {
+function load(channel: string, target?: string, branded = false, wpp = false): Configuration {
+  const previousWpp = process.env.CM_WPP
+  process.env.CM_WPP = wpp ? "1" : "0"
+  const previousBrand = process.env.CM_BRAND
+  process.env.CM_BRAND = branded ? "1" : "0"
   const previous = process.env.OPENCODE_CHANNEL
   const previousTarget = process.env.OPENCODE_CLI_TARGET
   process.env.OPENCODE_CHANNEL = channel
@@ -29,6 +33,11 @@ function load(channel: string, target?: string): Configuration {
   try {
     return getConfig()
   } finally {
+    if (previousWpp === undefined) delete process.env.CM_WPP
+    else process.env.CM_WPP = previousWpp
+
+    if (previousBrand === undefined) delete process.env.CM_BRAND
+    else process.env.CM_BRAND = previousBrand
     delete process.env.OPENCODE_CHANNEL
     delete process.env.OPENCODE_CLI_TARGET
 
@@ -176,4 +185,55 @@ test("the trimmed Zip.js package can still export compressed logs", async () => 
   } finally {
     await rm(dir, { recursive: true, force: true })
   }
+})
+
+test.each(channels)("CookieMonster identity is derived before Linux fields for $channel", ({ channel }) => {
+  const config = load(channel, undefined, true)
+  const id = "com.ogilvy.cookiemonster"
+  expect(config.appId).toBe(id)
+  expect(config.productName).toBe("CookieMonster")
+  expect(config.protocols).toEqual({ name: "CookieMonster", schemes: ["opencode"] })
+  expect(config.extraMetadata?.desktopName).toBe(`${id}.desktop`)
+  expect(config.linux?.executableName).toBe(id)
+  expect(config.linux?.desktop?.entry?.StartupWMClass).toBe(id)
+  expect(config.rpm?.packageName).toBe("cookiemonster")
+
+  for (const fpm of [config.deb?.fpm, config.rpm?.fpm]) {
+    expect(fpm).toHaveLength(1)
+    expect(fpm?.[0]).toEndWith(`=/usr/share/metainfo/${id}.metainfo.xml`)
+  }
+})
+
+test.each([false, true])("metainfo uses the same branded=%s desktop identity as packaging", async (branded) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "desktop-metainfo-"))
+
+  try {
+    await mkdir(path.join(directory, "resources"))
+
+    const result = Bun.spawnSync(
+      [process.execPath, path.join(import.meta.dirname, "scripts/copy-metainfo.ts"), "prod"],
+      {
+        cwd: directory,
+        env: { ...process.env, CM_BRAND: branded ? "1" : "0" },
+        stdout: "pipe",
+        stderr: "pipe",
+      },
+    )
+
+    expect(result.exitCode, Buffer.concat([result.stdout, result.stderr]).toString()).toBe(0)
+    const id = branded ? "com.ogilvy.cookiemonster" : "ai.opencode.desktop"
+    const xml = await Bun.file(path.join(directory, "resources", `${id}.metainfo.xml`)).text()
+    expect(xml).toContain(`<id>${id}</id>`)
+    expect(xml).toContain(`<launchable type="desktop-id">${id}.desktop</launchable>`)
+    expect(xml).toContain(`<name>${branded ? "CookieMonster" : "OpenCode"}</name>`)
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
+test.each([false, true])("WPP sign-in protocol follows the optional WPP build: %s", (wpp) => {
+  expect(load("prod", undefined, true, wpp).protocols).toEqual({
+    name: "CookieMonster",
+    schemes: wpp ? ["opencode", "cookiemonster"] : ["opencode"],
+  })
 })

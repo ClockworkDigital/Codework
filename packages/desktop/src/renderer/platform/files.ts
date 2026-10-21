@@ -1,8 +1,6 @@
 import type { Platform } from "@opencode/app/desktop"
 import type { ElectronAPI } from "../api-types"
 
-type DesktopOS = Extract<Platform, { platform: "desktop" }>["os"]
-
 type DesktopFileAPI = Pick<
   ElectronAPI,
   | "openDirectoryPicker"
@@ -14,14 +12,13 @@ type DesktopFileAPI = Pick<
   | "openExternal"
   | "openBrowser"
   | "openLocalFile"
-  | "resolveAppPath"
   | "openPath"
   | "revealPath"
   | "readClipboardImage"
   | "writeClipboardText"
 >
 
-export function createDesktopFiles(api: DesktopFileAPI, os: DesktopOS) {
+export function createDesktopFiles(api: DesktopFileAPI) {
   const attachmentPaths = new WeakMap<File, string>()
 
   const openDirectoryPickerDialog: Extract<Platform, { platform: "desktop" }>["openDirectoryPickerDialog"] = async (
@@ -63,15 +60,9 @@ export function createDesktopFiles(api: DesktopFileAPI, os: DesktopOS) {
     openExternal: (url: string) => api.openExternal(url),
     openBrowser: (url: string) => api.openBrowser(url),
     openLocalFile: (url: string) => api.openLocalFile(url),
+    // Main owns the allowed apps and resolves their executables, so only the app's name crosses.
     async openPath(path: string, app?: string) {
-      if (os !== "windows") {
-        await api.openPath(path, app)
-
-        return
-      }
-
-      const resolvedApp = app ? await api.resolveAppPath(app).catch(() => null) : null
-      await api.openPath(path, resolvedApp ?? undefined)
+      await api.openPath(path, app)
     },
     async revealPath(path: string) {
       return api.revealPath(path)

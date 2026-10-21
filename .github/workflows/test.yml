@@ -23,7 +23,7 @@ env:
 jobs:
   affected:
     name: affected packages
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     outputs:
       app: ${{ steps.packages.outputs.app }}
     steps:
@@ -58,9 +58,9 @@ jobs:
       matrix:
         settings:
           - name: linux
-            host: blacksmith-4vcpu-ubuntu-2404
+            host: ubuntu-24.04
           - name: windows
-            host: blacksmith-4vcpu-windows-2025
+            host: windows-2025
     runs-on: ${{ matrix.settings.host }}
     defaults:
       run:
@@ -84,6 +84,23 @@ jobs:
         if: runner.os == 'Linux'
         run: bun run test:effect-simplification-rules
 
+      - name: Install Electron for desktop runtime tests
+        working-directory: packages/desktop
+        run: node -e "require(require.resolve('electron/install.js'))"
+
+      - name: Install Chromium for browser unit tests
+        working-directory: packages/app
+        run: bunx playwright install --with-deps chromium
+
+      - name: Install ripgrep for offline core tests
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            sudo apt-get update
+            sudo apt-get install -y ripgrep
+          else
+            choco install ripgrep --yes --no-progress
+          fi
+
       - name: Check Effect simplifications
         if: runner.os == 'Linux'
         run: bun run lint:effect-simplifications
@@ -102,15 +119,23 @@ jobs:
             turbo-${{ runner.os }}-${{ hashFiles('turbo.json', '**/package.json') }}-
             turbo-${{ runner.os }}-
 
+      - name: Initialize installed PowerShell runtime
+        if: runner.os == 'Linux'
+        run: |
+          # Cold PowerShell startup can exceed a unit test's five-second budget.
+          if command -v pwsh > /dev/null; then
+            pwsh -NoLogo -NoProfile -NonInteractive -Command "Write-Output 'PowerShell ready'"
+          fi
+
       - name: Run unit tests
         timeout-minutes: 20
         run: |
-          # The runners have four vCPUs, and each Bun test process performs its own concurrent work.
+          # Each package creates concurrent work; serialize packages to bound hosted process pressure.
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            GITHUB_ACTIONS=false bun turbo test --concurrency=3
+            GITHUB_ACTIONS=false bun turbo test --concurrency=1
             exit 0
           fi
-          GITHUB_ACTIONS=false bun turbo test --affected --concurrency=3
+          GITHUB_ACTIONS=false bun turbo test --affected --concurrency=1
         env:
           OPENCODE_EXPERIMENTAL_DISABLE_FILEWATCHER: ${{ runner.os == 'Windows' && 'true' || 'false' }}
           TURBO_SCM_BASE: ${{ github.event_name == 'pull_request' && format('{0}^1', github.sha) || github.event.before }}
@@ -135,7 +160,7 @@ jobs:
           TURBO_SCM_HEAD: ${{ github.sha }}
 
       - name: Verify compiled service lifecycle
-        if: always()
+        if: ${{ !cancelled() }}
         timeout-minutes: 10
         working-directory: packages/cli
         env:
@@ -145,13 +170,13 @@ jobs:
           bun run script/service-smoke.ts
 
       - name: Setup Node build runtime
-        if: always()
+        if: ${{ !cancelled() }}
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "26.4.0"
 
       - name: Verify Node build
-        if: always()
+        if: ${{ !cancelled() }}
         timeout-minutes: 15
         working-directory: packages/cli
         env:
@@ -178,9 +203,9 @@ jobs:
       matrix:
         settings:
           - name: linux
-            host: blacksmith-4vcpu-ubuntu-2404
+            host: ubuntu-24.04
           - name: windows
-            host: blacksmith-4vcpu-windows-2025
+            host: windows-2025
     runs-on: ${{ matrix.settings.host }}
     env:
       E2E_ENABLED: ${{ needs.affected.outputs.app == 'true' && github.ref_name != 'dev' && github.head_ref != 'dev' }}

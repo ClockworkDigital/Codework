@@ -96,13 +96,17 @@ for (const direction of ["ltr", "rtl"]) {
         ).toBeLessThan(1)
         await page.keyboard.press("Enter")
         // Below the mobile breakpoint the variant picker opens in a bottom drawer instead of a menu.
-        await expect(
+
+        const option =
           width < 768
             ? page
                 .getByRole("dialog", { name: "Choose model variant", exact: true })
                 .getByRole("button", { name: "high", exact: true })
-            : page.getByRole("menuitemradio", { name: "high", exact: true }),
-        ).toBeVisible()
+            : page.getByRole("menuitemradio", { name: "high", exact: true })
+
+        await expect(option).toBeVisible()
+        // The mobile drawer starts below the viewport; wait until its options are presented before dismissal.
+        await expect(option).toBeInViewport({ ratio: 1 })
         await page.keyboard.press("Escape")
         await expect(variant).toBeFocused()
         await expect(submit).toBeInViewport()
@@ -110,7 +114,8 @@ for (const direction of ["ltr", "rtl"]) {
         await add.click()
         await expect(page.getByRole("menuitem", { name: "Images and files" })).toBeVisible()
         await page.keyboard.press("Escape")
-        expect(await add.boundingBox()).toEqual(fixedAdd)
+        // Menu dismissal restores focus and scroll position after its closing animation.
+        await expect.poll(() => add.boundingBox()).toEqual(fixedAdd)
       }
 
       if (alternate !== "none") {
@@ -121,6 +126,36 @@ for (const direction of ["ltr", "rtl"]) {
       }
     })
   }
+}
+
+for (const motion of ["no-preference", "reduce"] as const) {
+  story(
+    `returns focus when the mobile variant drawer closes before its opening paint (${motion})`,
+    async ({ mount, page }) => {
+      await page.setViewportSize({ width: 360, height: 720 })
+      await page.emulateMedia({ reducedMotion: motion })
+      const component = await mount("opencode-composer-flow--toolbar-overflow")
+      const variant = component.getByRole("button", { name: "Choose model variant" })
+      await expect(variant).toBeVisible()
+      await page.clock.install({ time: 0 })
+      await page.clock.pauseAt(1000)
+      await variant.focus()
+      await page.keyboard.press("Enter")
+      const drawer = page.getByRole("dialog", { name: "Choose model variant", exact: true })
+      await expect(drawer.getByRole("button", { name: "high", exact: true })).toBeVisible()
+      // No opening animation-frame callback has run when Escape arrives.
+      await page.keyboard.press("Escape")
+      await page.clock.runFor(1000)
+      await expect(drawer).toBeHidden()
+      await expect(variant).toBeFocused()
+      await page.clock.resume()
+      await page.keyboard.press("Enter")
+      await expect(drawer.getByRole("button", { name: "high", exact: true })).toBeInViewport({ ratio: 1 })
+      await page.keyboard.press("Escape")
+      await expect(drawer).toBeHidden()
+      await expect(variant).toBeFocused()
+    },
+  )
 }
 
 story("does not mask or pad controls when they fit", async ({ mount }) => {

@@ -1,0 +1,54 @@
+diff --git a/dist/index.js b/dist/index.js
+index c5248382bac4a58b510b48e023e27d14b89c390c..d7166616257b473ca56c7969e9e861ee00be9bd0 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -477,6 +477,7 @@ var DrawerRoot = (props) => {
+       if (_open) {
+         setTransitionAwareOpen(true);
+         afterPaint(() => {
++          if (!open()) return;
+           batch(() => {
+             setTransitionState("opening");
+             setActiveSnapPoint(localProps.defaultSnapPoint);
+@@ -492,8 +493,12 @@ var DrawerRoot = (props) => {
+           setActiveSnapPoint(0);
+         });
+         afterPaint(() => {
++          if (open()) return;
+           const transitionDuration = parseFloat(drawerStyles().transitionDuration);
+-          if (transitionDuration === 0) {
++          // Closing before the opening paint produces no transitionend event.
++          if (transitionDuration === 0 || !dialogContext()?.contentRef()?.getAnimations().some(
++            animation => animation.playState === "running" || animation.playState === "paused"
++          )) {
+             closeDrawer();
+           }
+         });
+diff --git a/dist/index.jsx b/dist/index.jsx
+index fa3ca91ca526e9c11a10819a8bda27dcbb884af7..f0974f9d9fd3ac39a6e9fbaa53729b8bcaef31bd 100644
+--- a/dist/index.jsx
++++ b/dist/index.jsx
+@@ -567,6 +567,7 @@ var DrawerRoot = (props) => {
+       if (_open) {
+         setTransitionAwareOpen(true);
+         afterPaint(() => {
++          if (!open()) return;
+           batch2(() => {
+             setTransitionState("opening");
+             setActiveSnapPoint(localProps.defaultSnapPoint);
+@@ -584,10 +585,14 @@ var DrawerRoot = (props) => {
+           setActiveSnapPoint(0);
+         });
+         afterPaint(() => {
++          if (open()) return;
+           const transitionDuration = parseFloat(
+             drawerStyles().transitionDuration
+           );
+-          if (transitionDuration === 0) {
++          // Closing before the opening paint produces no transitionend event.
++          if (transitionDuration === 0 || !dialogContext()?.contentRef()?.getAnimations().some(
++            animation => animation.playState === "running" || animation.playState === "paused"
++          )) {
+             closeDrawer();
+           }
+         });

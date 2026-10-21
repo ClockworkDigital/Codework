@@ -8,6 +8,8 @@ test("restores a view observed before its first attachment", async () => {
   const mutations = controlledMutations(targetWindow)
   const viewport = targetWindow.document.createElement("div")
 
+  // SAFETY: This observer and TanStack's offset delegate read only the window, element, offset, and listed options.
+  // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- Happy DOM supplies the browser contract used by this focused fixture.
   const instance = {
     scrollElement: viewport,
     targetWindow,
@@ -45,6 +47,8 @@ test("reports a divergent native offset once and ignores equal offsets and unrel
   route.append(viewport)
   targetWindow.document.body.append(route)
 
+  // SAFETY: This observer and TanStack's offset delegate read only the window, element, offset, and listed options.
+  // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- Happy DOM supplies the browser contract used by this focused fixture.
   const instance = {
     scrollElement: viewport,
     targetWindow,
@@ -93,6 +97,8 @@ test("keeps checking until stale reset-delay callbacks can no longer win", async
   route.append(viewport)
   targetWindow.document.body.append(route)
 
+  // SAFETY: This observer and TanStack's offset delegate read only the window, element, offset, and listed options.
+  // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- Happy DOM supplies the browser contract used by this focused fixture.
   const instance = {
     scrollElement: viewport,
     targetWindow,
@@ -137,6 +143,8 @@ test("cleanup suppresses queued delegated callbacks, reconnect checks, and later
   route.append(viewport)
   document.body.append(route)
 
+  // SAFETY: This observer and TanStack's offset delegate read only the window, element, offset, and listed options.
+  // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- Happy DOM supplies the browser contract used by this focused fixture.
   const instance = {
     scrollElement: viewport,
     targetWindow: window,
@@ -170,8 +178,50 @@ test("cleanup suppresses queued delegated callbacks, reconnect checks, and later
   route.remove()
 })
 
+test("ends a scroll at the live offset after a write without its own scroll event", async () => {
+  const viewport = document.createElement("div")
+  document.body.append(viewport)
+
+  // SAFETY: This observer and TanStack's offset delegate read only the window, element, offset, and listed options.
+  // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- Happy DOM supplies the browser contract used by this focused fixture.
+  const instance = {
+    scrollElement: viewport,
+    targetWindow: window,
+    scrollOffset: 0,
+    options: {
+      horizontal: false,
+      isRtl: false,
+      isScrollingResetDelay: 10,
+      useScrollendEvent: false,
+    },
+  } as unknown as Virtualizer<HTMLDivElement, HTMLDivElement>
+
+  const calls: [number, boolean][] = []
+
+  const cleanup = observeElementOffsetReconnectAware(instance, (offset, isScrolling) => {
+    calls.push([offset, isScrolling])
+    instance.scrollOffset = offset
+  })
+
+  try {
+    viewport.scrollTop = 100
+    viewport.dispatchEvent(new Event("scroll"))
+    // A history prepend anchors with a write whose scroll event a long task can hold past the reset delay.
+    viewport.scrollTop = 2_620
+    await new Promise((resolve) => setTimeout(resolve, 25))
+
+    expect(calls).toEqual([
+      [100, true],
+      [2_620, false],
+    ])
+  } finally {
+    cleanup?.()
+    viewport.remove()
+  }
+})
+
 type FrameWindow = {
-  requestAnimationFrame(callback: () => void): unknown
+  requestAnimationFrame(callback: () => void): void
   performance: { now(): number }
 }
 
@@ -188,6 +238,8 @@ function controlledMutations(targetWindow: Window) {
 
   class ControlledMutationObserver {
     constructor(callback: MutationCallback) {
+      // SAFETY: The callback uses only the observer lifecycle methods implemented by this controlled fixture.
+      // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- Controlled observer intentionally omits unused browser internals.
       emit = (record) => callback([record], this as unknown as MutationObserver)
     }
     observe() {}
@@ -199,7 +251,9 @@ function controlledMutations(targetWindow: Window) {
 
   Object.defineProperty(targetWindow, "MutationObserver", { value: ControlledMutationObserver })
 
+  // SAFETY: The production observer reads only type, target, addedNodes, and removedNodes from these fixture records.
   const record = (target: Node, addedNodes: Node[], removedNodes: Node[]) =>
+    // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- Happy DOM nodes implement the DOM methods consumed by the observer.
     ({ type: "childList", target, addedNodes, removedNodes }) as unknown as MutationRecord
 
   return {

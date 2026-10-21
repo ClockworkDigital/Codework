@@ -66,6 +66,8 @@ export const FilesOpenLocalFile = Rpc.make("FilesOpenLocalFile", {
 export const FilesOpenPath = Rpc.make("FilesOpenPath", {
   payload: { path: Schema.String, application: Schema.optional(Schema.String) },
   success: Schema.NullOr(Schema.String),
+  // A rejected app or target: a message in the app's language for the renderer to show.
+  error: Schema.String,
 })
 
 export const FilesRevealPath = Rpc.make("FilesRevealPath", {

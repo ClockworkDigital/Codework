@@ -17,7 +17,9 @@ function Fixture() {
   return (
     <main style={{ color: state.light ? "rgb(215, 225, 235)" : "rgb(17, 91, 177)", padding: "24px" }}>
       <style>{`[data-component="session-progress-indicator-v2"] { color: inherit; }
-        section { display:flex; } svg { flex-shrink:0; }`}</style>
+        section { display:flex; } svg { flex-shrink:0; }
+        /* Own layer per compared row, so identical rows raster from the same tile origin. */
+        #project, #recent, #tabs { will-change: transform; }`}</style>
       <button id="late" onClick={() => setState("late", !state.late)}>
         Toggle copies
       </button>

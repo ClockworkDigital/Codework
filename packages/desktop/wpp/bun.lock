@@ -5,11 +5,11 @@
     "": {
       "name": "@cookiemonster/desktop-wpp",
       "dependencies": {
-        "@cookiemonster/wpp": "git+ssh://git@github.com/trmosala/CM-WPP-Bits.git#2e470e8190c319f47c86dfb83af829eb869908bf",
+        "@cookiemonster/wpp": "git+ssh://git@github.com/trmosala/CM-WPP-Bits.git#8bb2cd4e7d0588c3ef37735453830e7206f5a455",
       },
     },
   },
   "packages": {
-    "@cookiemonster/wpp": ["@cookiemonster/wpp@git+ssh://git@github.com/trmosala/CM-WPP-Bits.git#2e470e8190c319f47c86dfb83af829eb869908bf", { "peerDependencies": { "@opencode/plugin": "*", "@opencode/schema": "*", "electron": "44.4.5" }, "optionalPeers": ["@opencode/plugin", "@opencode/schema", "electron"] }, "2e470e8190c319f47c86dfb83af829eb869908bf"],
+    "@cookiemonster/wpp": ["@cookiemonster/wpp@git+ssh://git@github.com/trmosala/CM-WPP-Bits.git#8bb2cd4e7d0588c3ef37735453830e7206f5a455", { "peerDependencies": { "@opencode/plugin": "*", "@opencode/schema": "*", "electron": "44.4.5" }, "optionalPeers": ["@opencode/plugin", "@opencode/schema", "electron"] }, "8bb2cd4e7d0588c3ef37735453830e7206f5a455"],
   }
 }

@@ -158,38 +158,42 @@ describe("Snapshot", () => {
     ),
   )
 
-  testEffect(Layer.empty).live("captures concurrently from independent processes", () =>
-    Effect.acquireUseRelease(
-      Effect.promise(() => tmpdir()),
-      (tmp) =>
-        Effect.gen(function* () {
-          const project = path.join(tmp.path, "project")
-          yield* Effect.promise(async () => {
-            await fs.mkdir(project)
-            await Promise.all(
-              Array.from({ length: 200 }, (_, index) =>
-                fs.writeFile(path.join(project, `f${index}.txt`), `${index}\n`),
-              ),
-            )
-            await initGit(project, true)
-          })
-          // Each layer owns its own Git service, so their in-process locks do not coordinate.
-          const writer = (id: number) =>
-            Effect.gen(function* () {
-              const snapshot = yield* Snapshot.Service
-              return yield* Effect.forEach(
-                Array.from({ length: 8 }, (_, index) => index),
-                (index) =>
-                  Effect.promise(() => fs.writeFile(path.join(project, `writer-${id}.txt`), `${index}\n`)).pipe(
-                    Effect.andThen(snapshot.capture()),
-                  ),
+  // Keep the concurrent Git workload intact while allowing hosted Windows process startup.
+  testEffect(Layer.empty).live(
+    "captures concurrently from independent processes",
+    () =>
+      Effect.acquireUseRelease(
+        Effect.promise(() => tmpdir()),
+        (tmp) =>
+          Effect.gen(function* () {
+            const project = path.join(tmp.path, "project")
+            yield* Effect.promise(async () => {
+              await fs.mkdir(project)
+              await Promise.all(
+                Array.from({ length: 200 }, (_, index) =>
+                  fs.writeFile(path.join(project, `f${index}.txt`), `${index}\n`),
+                ),
               )
-            }).pipe(Effect.provide(snapshotLayer(tmp.path, project)))
-          const results = yield* Effect.all([writer(0), writer(1), writer(2)], { concurrency: "unbounded" })
-          expect(results.flat().every((tree) => tree !== undefined)).toBe(true)
-        }),
-      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
-    ),
+              await initGit(project, true)
+            })
+            // Each layer owns its own Git service, so their in-process locks do not coordinate.
+            const writer = (id: number) =>
+              Effect.gen(function* () {
+                const snapshot = yield* Snapshot.Service
+                return yield* Effect.forEach(
+                  Array.from({ length: 8 }, (_, index) => index),
+                  (index) =>
+                    Effect.promise(() => fs.writeFile(path.join(project, `writer-${id}.txt`), `${index}\n`)).pipe(
+                      Effect.andThen(snapshot.capture()),
+                    ),
+                )
+              }).pipe(Effect.provide(snapshotLayer(tmp.path, project)))
+            const results = yield* Effect.all([writer(0), writer(1), writer(2)], { concurrency: "unbounded" })
+            expect(results.flat().every((tree) => tree !== undefined)).toBe(true)
+          }),
+        (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+      ),
+    { timeout: 15_000 },
   )
 
   testEffect(Layer.empty).live("captures a Location in a directory whose name starts with two dots", () =>

@@ -34,7 +34,7 @@ export function createDesktopPlatform(api: ElectronAPI, windowState: DesktopWind
     version: windowState.version,
     windowID: windowState.id,
 
-    ...createDesktopFiles(api, os),
+    ...createDesktopFiles(api),
     ...createDesktopStorage(api),
     exportDebugLogs: () => api.exportDebugLogs(),
     setForceFocus: (enabled) => api.setForceFocus(enabled),

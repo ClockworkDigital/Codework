@@ -6,6 +6,7 @@ import { Context, Effect, FileSystem, Layer, Path } from "effect"
 import type { DirectoryPickerOptions, FilePickerOptions, SaveFilePickerOptions } from "../../shared/ipc-contract"
 import { scoped } from "../native/logging"
 import { nativeT } from "../native/translations"
+import { resolveAppPath } from "./apps"
 import { assertAttachmentBudget, createPickedFileAuthorizations, readAttachment } from "./attachment-picker"
 import { resolveExternalURL, resolveLocalFilePath } from "./external-url"
 
@@ -87,16 +88,33 @@ function make(fs: FileSystem.FileSystem, path: Path.Path) {
     }),
     openPath: Effect.fn("DesktopFiles.openPath")(function* (target: string, application?: string) {
       if (!application) return yield* Effect.promise(() => shell.openPath(target))
-      yield* Effect.tryPromise(() =>
-        new Promise<void>((resolve, reject) => {
-          const command =
-            process.platform === "darwin"
-              ? { file: "open", arguments: ["-a", application, target] }
-              : { file: application, arguments: [target] }
 
-          execFile(command.file, command.arguments, (error) => (error ? reject(error) : resolve()))
-        }),
+      // The app reads the target as an argument, and an absolute path never starts as an option. Windows apps also
+      // read a leading `/` as one, so there the target must be a drive or UNC path.
+      const absolute =
+        process.platform === "win32" ? /^(?:[A-Za-z]:[\\/]|\\\\[^\\/])/.test(target) : target.startsWith("/")
+
+      if (!absolute) return yield* Effect.fail(nativeT("desktop.openWith.error.notAbsolute"))
+
+      const executable = yield* resolveAppPath(application).pipe(
+        Effect.provideService(FileSystem.FileSystem, fs),
+        Effect.provideService(Path.Path, path),
       )
+
+      // Windows opens with the default app when it cannot locate an allowed app.
+      if (!executable) return yield* Effect.promise(() => shell.openPath(target))
+      // Only the rejections above reach the renderer as messages to show; a launch that fails stays a defect.
+      yield* Effect.tryPromise(
+        () =>
+          new Promise<void>((resolve, reject) => {
+            const command =
+              process.platform === "darwin"
+                ? { file: "open", arguments: ["-a", executable, target] }
+                : { file: executable, arguments: [target] }
+
+            execFile(command.file, command.arguments, (error) => (error ? reject(error) : resolve()))
+          }),
+      ).pipe(Effect.orDie)
     }),
     revealPath: Effect.fn("DesktopFiles.revealPath")(function* (target: string) {
       const exists = yield* fs.exists(target).pipe(Effect.orElseSucceed(() => false))

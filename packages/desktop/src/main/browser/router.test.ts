@@ -228,6 +228,7 @@ test.each(["check", "resolve"] as const)(
         {
           signal: controller.signal,
           authority: {
+            kind: "task",
             check() {
               if (stage === "check") throw new Error("Private authority detail")
             },
