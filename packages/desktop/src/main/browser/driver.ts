@@ -10,7 +10,7 @@ import {
   type Modifier,
   type PageRequest,
   type Response,
-} from "@cookiemonster/cm-browser/protocol"
+} from "@codework/browser/protocol"
 import {
   boundedJpeg,
   newVisualRef,

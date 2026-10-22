@@ -97,8 +97,8 @@ async function exportBackup(win: BrowserWindow, check: () => void) {
   if (!matches) throw new VaultBackupUserError(nativeT("desktop.browser.backup.passphraseMismatch"))
   const chosen = await dialog.showSaveDialog(win, {
     title: nativeT("desktop.browser.backup.exportTitle"),
-    defaultPath: `CookieMonster-passwords-${new Date().toISOString().slice(0, 10)}.cmbvault`,
-    filters: [{ name: "CookieMonster encrypted password backup", extensions: ["cmbvault"] }],
+    defaultPath: `Codework-passwords-${new Date().toISOString().slice(0, 10)}.cmbvault`,
+    filters: [{ name: "Codework encrypted password backup", extensions: ["cmbvault"] }],
   })
   check()
   if (chosen.canceled || !chosen.filePath) return
@@ -125,7 +125,7 @@ async function importBackup(win: BrowserWindow, check: () => void) {
   const chosen = await dialog.showOpenDialog(win, {
     title: nativeT("desktop.browser.backup.importTitle"),
     properties: ["openFile"],
-    filters: [{ name: "CookieMonster encrypted password backup", extensions: ["cmbvault"] }],
+    filters: [{ name: "Codework encrypted password backup", extensions: ["cmbvault"] }],
   })
   check()
   if (chosen.canceled || !chosen.filePaths[0]) return

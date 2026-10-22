@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { MAX_SNAPSHOT_BYTES, type BrowserState } from "@cookiemonster/cm-browser/protocol"
+import { MAX_SNAPSHOT_BYTES, type BrowserState } from "@codework/browser/protocol"
 import { execute, shouldShowBrowserContextMenu, screenshotDecoder, type DriverContents, type Target } from "./driver"
 import { parseSnapshot, snapshotScript } from "./snapshot"
 import { DESKTOP_NATIVE_ENGLISH, createDesktopNativeBundle } from "@opencode-ai/app/i18n/desktop-native"

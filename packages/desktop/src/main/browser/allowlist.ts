@@ -5,7 +5,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, rmSync } from "node:fs"
 import { randomUUID } from "node:crypto"
 import { dirname } from "node:path"
-import { DEFAULT_ALLOWLIST, allowlistPath, hostAllowed, parseAllowlist } from "@cookiemonster/cm-browser/protocol"
+import { DEFAULT_ALLOWLIST, allowlistPath, hostAllowed, parseAllowlist } from "@codework/browser/protocol"
 
 /** Seeds the file on first boot, then always reads what is on disk so user edits win. */
 export function loadAllowlist(path = allowlistPath()): readonly string[] {

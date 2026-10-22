@@ -196,9 +196,7 @@ export const TaskTool = Tool.define(
       if (msg.info.role !== "assistant") return yield* Effect.fail(new Error("Not an assistant message"))
       const variant = msg.info.variant
 
-      // Keep delegated work on the model that initiated the task. The previous hard-coded
-      // o1-code/o1-code-builder alias is no longer part of the CookieMonster provider roster and
-      // caused every task call to fail before the subagent could start.
+      // Keep delegated work on the model that initiated the task.
       const model = {
         providerID: msg.info.providerID,
         modelID: msg.info.modelID,

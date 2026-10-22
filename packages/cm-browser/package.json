@@ -1,8 +1,8 @@
 {
   "$schema": "https://json.schemastore.org/package.json",
-  "name": "@cookiemonster/cm-browser",
+  "name": "@codework/browser",
   "version": "1.18.4",
-  "description": "CookieMonster-only agent control surface for the embedded browser panel",
+  "description": "Codework-only agent control surface for the embedded browser panel",
   "private": true,
   "type": "module",
   "license": "MIT",

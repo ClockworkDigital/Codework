@@ -12,7 +12,7 @@ import {
   type ActionStatus,
   type ActionFailureCause,
   type Response,
-} from "@cookiemonster/cm-browser/protocol"
+} from "@codework/browser/protocol"
 import { browserInputFailure, execute } from "./driver"
 import {
   browserTabs,

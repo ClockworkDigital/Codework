@@ -3,7 +3,7 @@ import { once } from "node:events"
 import { createServer } from "node:http"
 import { setTimeout } from "node:timers/promises"
 import { BrowserWindow, WebContentsView } from "electron"
-import type { Request, WriteRequest } from "@cookiemonster/cm-browser/protocol"
+import type { Request, WriteRequest } from "@codework/browser/protocol"
 import { registerBrowserTab, setBrowserAgentEnabled, type BrowserRegistration } from "./registry"
 import { routeBrowserRequest, type BrowserOperation } from "./router"
 

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 import { EventEmitter, getEventListeners } from "node:events"
-import { failure, success, type BrowserIpcRequest, type BrowserIpcResult } from "@cookiemonster/cm-browser/protocol"
+import { failure, success, type BrowserIpcRequest, type BrowserIpcResult } from "@codework/browser/protocol"
 import { attachBrowserBridge } from "./bridge"
 
 test("sidecar owns ID/session cancellation, rejects duplicates, and cleans up on exit", async () => {

@@ -195,7 +195,7 @@ test("tab snapshots update loading, error, title fallbacks and pin state in plac
   })
   expect(tabs()[1]).toBe(docs)
   expect(docs.getAttribute("aria-busy")).toBe("true")
-  expect(docs.querySelector("[data-slot=browser-tab-spinner]")).not.toBeNull()
+  expect(docs.querySelector("[data-loading-animation=clockwork]")).not.toBeNull()
   expect(docs.querySelector("[data-slot=browser-tab-initial]")).toBeNull()
 
   update({
@@ -203,7 +203,7 @@ test("tab snapshots update loading, error, title fallbacks and pin state in plac
     tabs: [state.tabs[0], { ...state.tabs[1], loading: false, loadFailed: true }, state.tabs[2]],
   })
   expect(docs.getAttribute("aria-busy")).toBe("false")
-  expect(docs.querySelector("[data-slot=browser-tab-spinner]")).toBeNull()
+  expect(docs.querySelector("[data-loading-animation=clockwork]")).toBeNull()
   expect(docs.querySelector("[data-slot=browser-tab-icon] svg")).not.toBeNull()
   expect(docs.querySelector("[data-slot=browser-tab-initial]")).toBeNull()
   expect(docs.querySelector(".sr-only")?.textContent).toBe(
@@ -288,7 +288,7 @@ test("unloading routes an inactive tab and shows its recoverable state without a
   update({ ...state, tabs: [state.tabs[0], { ...state.tabs[1], id: "recovered", unloaded: true }, state.tabs[2]] })
   expect(tabs()[1].getAttribute("aria-label")).toBe("Docs (unloaded)")
   expect(tabs()[1].getAttribute("aria-busy")).toBe("false")
-  expect(tabs()[1].querySelector("[data-slot=browser-tab-spinner]")).toBeNull()
+  expect(tabs()[1].querySelector("[data-loading-animation=clockwork]")).toBeNull()
   expect(tabs()[0].getAttribute("aria-selected")).toBe("true")
   tabs()[1].click()
   expect(calls.at(-1)).toEqual({ op: "select", tabID: "recovered" })

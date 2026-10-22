@@ -45,7 +45,7 @@ export function ipcPort(parent = (process as NodeJS.Process & { parentPort?: Par
     if (malformed.type !== "browser_result" || typeof malformed.id !== "string") return
     const entry = pending.get(malformed.id)
     entry?.finish({
-      ...failure("bad_request", "CookieMonster browser acknowledgement was malformed."),
+      ...failure("bad_request", "Codework browser acknowledgement was malformed."),
       ...(entry.action ? { actionStatus: "dispatched_uncertain", actionCause: "transport_unknown" } : {}),
     })
   }
@@ -59,7 +59,7 @@ export function ipcPort(parent = (process as NodeJS.Process & { parentPort?: Par
         })
       if (!parent)
         return Promise.resolve({
-          ...failure("unavailable", "CookieMonster parent IPC is unavailable."),
+          ...failure("unavailable", "Codework parent IPC is unavailable."),
           ...(actionRequest(request) ? { actionStatus: "not_dispatched" as const } : {}),
         })
       const id = randomUUID()
@@ -126,7 +126,7 @@ export function ipcPort(parent = (process as NodeJS.Process & { parentPort?: Par
         } catch {
           finish(
             {
-              ...failure("unavailable", "CookieMonster parent IPC is unavailable."),
+              ...failure("unavailable", "Codework parent IPC is unavailable."),
               ...(actionRequest(request)
                 ? { actionStatus: "dispatched_uncertain" as const, actionCause: "transport_unknown" as const }
                 : {}),

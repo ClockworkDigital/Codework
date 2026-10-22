@@ -26,7 +26,7 @@ try {
     async function run() {
     await app.whenReady()
     const win = new BrowserWindow({width: 500, height: 180, webPreferences: {sandbox:true, contextIsolation:true, nodeIntegration:false}})
-    await win.loadURL(${JSON.stringify("data:text/html,<title>CookieMonster authentication test</title><p>" + instruction + " This test does not access saved passwords.</p>")})
+    await win.loadURL(${JSON.stringify("data:text/html,<title>Codework authentication test</title><p>" + instruction + " This test does not access saved passwords.</p>")})
     await new Promise((resolve) => setTimeout(resolve, ${expectedCancellation ? 2000 : 0}))
     try {
       await vaultAuthentication.verify(win)

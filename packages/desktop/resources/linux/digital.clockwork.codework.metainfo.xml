@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>digital.clockwork.codework</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>Codework</name>
+  <summary>Clockwork Digital AI coding application</summary>
+  <developer id="digital.clockwork">
+    <name>Clockwork Digital</name>
+  </developer>
+  <description>
+    <p>
+      Codework is a desktop AI coding application built on OpenCode by Clockwork Digital.
+    </p>
+  </description>
+  <launchable type="desktop-id">digital.clockwork.codework.desktop</launchable>
+  <content_rating type="oars-1.1" />
+</component>

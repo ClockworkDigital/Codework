@@ -314,7 +314,7 @@ export class Scheduler {
         const request = await this.serialize(async () => {
           const announce = item.state !== "awaiting_auth"
           item.state = "awaiting_auth"
-          item.detail = "Waiting for WPP sign-in"
+          item.detail = "Waiting for provider sign-in"
           const first = !item.loginRequested
           item.loginRequested = true
           await this.save()
@@ -323,7 +323,7 @@ export class Scheduler {
         if (request.first) {
           await this.adapter.requestLogin().catch(async () => {
             await this.serialize(async () => {
-              item.detail = "Waiting for WPP sign-in; the login window could not be opened"
+              item.detail = "Waiting for provider sign-in; the login window could not be opened"
               item.loginRequested = false
               await this.save()
             })

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 import { EventEmitter, getEventListeners } from "node:events"
-import { ipcPort } from "@cookiemonster/cm-browser/port"
+import { ipcPort } from "@codework/browser/port"
 import { attachBrowserBridge } from "./bridge"
 import type { ToolContext } from "@opencode-ai/plugin"
 import {
@@ -10,8 +10,8 @@ import {
   type BrowserIpcRequest,
   type Request,
   type WriteRequest,
-} from "@cookiemonster/cm-browser/protocol"
-import { browserTools } from "@cookiemonster/cm-browser/tools"
+} from "@codework/browser/protocol"
+import { browserTools } from "@codework/browser/tools"
 import {
   registerBrowserTab,
   browserAccessAllowed,

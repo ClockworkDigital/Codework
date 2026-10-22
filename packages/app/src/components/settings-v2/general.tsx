@@ -1,4 +1,3 @@
-import { SettingsWppChat } from "../settings-wpp-chat"
 import { Component, Show, createMemo, createResource } from "solid-js"
 import { createMediaQuery } from "@solid-primitives/media"
 import { ButtonV2 } from "@opencode-ai/ui/v2/button-v2"
@@ -328,7 +327,6 @@ export const SettingsGeneralV2: Component<{
   const GeneralSection = () => (
     <div class="settings-v2-section">
       <SettingsListV2>
-        <SettingsWppChat modern />
         <SettingsRowV2
           title={language.t("settings.general.row.quietCompanion.title")}
           description={language.t("settings.general.row.quietCompanion.description")}

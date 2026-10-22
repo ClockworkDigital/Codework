@@ -1,5 +1,5 @@
 import type { EventEmitter } from "node:events"
-import type { ConsoleObservation } from "@cookiemonster/cm-browser/protocol"
+import type { ConsoleObservation } from "@codework/browser/protocol"
 
 export async function observeConsole(
   contents: EventEmitter,

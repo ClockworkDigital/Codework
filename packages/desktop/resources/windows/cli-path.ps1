@@ -22,7 +22,7 @@ function Normalize-PathEntry([string]$Entry) {
 
 function Transform-Path([string]$Value, [string]$Owned, [bool]$Install) {
   $normalized = Normalize-PathEntry $Owned
-  if ([string]::IsNullOrWhiteSpace($normalized)) { throw "The CookieMonster CLI directory is invalid." }
+  if ([string]::IsNullOrWhiteSpace($normalized)) { throw "The Codework CLI directory is invalid." }
   $entries = if ($Value.Length -eq 0) { @() } else { @($Value.Split([char]';')) }
   $found = $false
   $result = @($entries | ForEach-Object {
@@ -61,11 +61,11 @@ function Write-UserPath([AllowNull()][string]$Value) {
 }
 
 function Send-EnvironmentChange {
-  if (-not ([System.Management.Automation.PSTypeName]'CookieMonster.EnvironmentChange').Type) {
+  if (-not ([System.Management.Automation.PSTypeName]'Codework.EnvironmentChange').Type) {
     Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
-namespace CookieMonster {
+namespace Codework {
 public static class EnvironmentChange {
   [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
   public static extern IntPtr SendMessageTimeout(IntPtr window, uint message, IntPtr wParam, string lParam, uint flags, uint timeout, out IntPtr result);
@@ -74,10 +74,10 @@ public static class EnvironmentChange {
 '@
   }
   $result = [IntPtr]::Zero
-  $broadcast = [CookieMonster.EnvironmentChange]::SendMessageTimeout([IntPtr]0xffff, 0x001a, [IntPtr]::Zero, "Environment", 2, 5000, [ref]$result)
+  $broadcast = [Codework.EnvironmentChange]::SendMessageTimeout([IntPtr]0xffff, 0x001a, [IntPtr]::Zero, "Environment", 2, 5000, [ref]$result)
   if ($broadcast -eq [IntPtr]::Zero) {
     $code = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
-    throw "CookieMonster updated PATH, but could not notify running applications (Windows error $code). Restart your Windows session and rerun the installer."
+    throw "Codework updated PATH, but could not notify running applications (Windows error $code). Restart your Windows session and rerun the installer."
   }
 }
 
@@ -100,7 +100,7 @@ if ($Action -eq "Status") {
 
 if ($Action -eq "Install" -or $Action -eq "Validate") {
   if ([string]::IsNullOrWhiteSpace($CliPath) -or -not (Test-Path -LiteralPath $CliPath -PathType Leaf)) {
-    throw "The bundled CookieMonster CLI is missing."
+    throw "The bundled Codework CLI is missing."
   }
   $start = New-Object System.Diagnostics.ProcessStartInfo
   $start.FileName = $CliPath
@@ -111,9 +111,9 @@ if ($Action -eq "Install" -or $Action -eq "Validate") {
   try {
     if (-not $process.WaitForExit(30000)) {
       $process.Kill()
-      throw "The bundled CookieMonster CLI validation timed out."
+      throw "The bundled Codework CLI validation timed out."
     }
-    if ($process.ExitCode -ne 0) { throw "The bundled CookieMonster CLI failed validation." }
+    if ($process.ExitCode -ne 0) { throw "The bundled Codework CLI failed validation." }
   } finally {
     $process.Dispose()
   }

@@ -4,7 +4,7 @@ import {
   MAX_SITE_TOOL_RESULT_BYTES,
   parseSiteToolArguments,
   type SiteTool,
-} from "@cookiemonster/cm-browser/protocol"
+} from "@codework/browser/protocol"
 
 type DebuggerMessage = (event: unknown, method: string, params: unknown) => void
 type DebuggerDetach = () => void

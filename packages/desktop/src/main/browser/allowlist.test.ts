@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { DEFAULT_ALLOWLIST } from "@cookiemonster/cm-browser/protocol"
+import { DEFAULT_ALLOWLIST } from "@codework/browser/protocol"
 import { allowed, hostPolicyRevision, loadAllowlist, updateAgentHost } from "./allowlist"
 
 const temp = () => join(mkdtempSync(join(tmpdir(), "cm-browser-")), "allowlist.json")

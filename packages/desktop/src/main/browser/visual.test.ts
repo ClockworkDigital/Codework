@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { MAX_SCREENSHOT_BYTES } from "@cookiemonster/cm-browser/protocol"
+import { MAX_SCREENSHOT_BYTES } from "@codework/browser/protocol"
 import {
   boundedJpeg,
   newVisualRef,

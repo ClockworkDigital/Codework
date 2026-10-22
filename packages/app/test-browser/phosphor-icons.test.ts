@@ -26,7 +26,7 @@ test("both icon renderers use Regular assets with the correct scale and panel or
           <Icon name="terminal-active" />
           <v2.Icon name="outline-copy" />
           <v2.Icon name="sidebar-right" />
-          <ProviderIcon id="cookiemonster" />
+          <ProviderIcon id="codework" />
           <FileIcon node={{ path: "report.pdf", type: "file" }} />
           <AppIcon id="terminal" alt="Terminal" />
         </>, host)

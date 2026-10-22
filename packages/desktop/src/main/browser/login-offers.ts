@@ -28,7 +28,7 @@ export function watchLoginOffers(
   changed: () => void,
 ) {
   const binding = `cmLoginOffer${randomUUID().replaceAll("-", "")}`
-  const world = `CookieMonster login offers ${randomUUID()}`
+  const world = `Codework login offers ${randomUUID()}`
   let revision = 0
   let captureRevision = 0
   let context: number | undefined

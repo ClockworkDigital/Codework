@@ -1,4 +1,4 @@
-import { CMLoading } from "@/components/cm-loading"
+import { CodeworkLoading } from "@/components/codework-loading"
 import { For, Show, createEffect, createMemo, on, onCleanup, onMount } from "solid-js"
 import { createStore } from "solid-js/store"
 import { makeEventListener } from "@solid-primitives/event-listener"
@@ -230,7 +230,7 @@ export function TerminalPanelV2(props: { stacked?: boolean } = {}) {
                 </div>
               </div>
               <div class="flex-1 flex flex-col items-center justify-center gap-3 text-text-weak">
-                <CMLoading class="size-12" />
+                <CodeworkLoading class="size-12" />
                 {language.t("terminal.loading")}
               </div>
             </div>

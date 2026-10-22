@@ -3,19 +3,21 @@
 body:has(.cm3-live),
 .cm3-live,
 [data-component="session-tab-popover"][data-cm3] {
-  --cm3-bg: #ffffff;
-  --cm3-nav: #fcfcfc;
+  --cm3-bg: #fdf2dc;
+  --cm3-nav: #f6e9ce;
   --cm3-surface: #ffffff;
-  --cm3-subtle: #f7f7f7;
-  --cm3-selected: #efefef;
-  --cm3-bubble: #f3f3f3;
-  --cm3-border: #e8e8e8;
-  --cm3-border-strong: #d4d4d4;
-  --cm3-text: #0d0d0d;
-  --cm3-muted: #666666;
-  --cm3-action: #0d0d0d;
+  --cm3-subtle: #f0eee8;
+  /* CI Dawn is the shared hover/selection highlight in both colour schemes. */
+  --cm3-selected: #8ec6ff;
+  --cm3-layer-02: #e6e3db;
+  --cm3-bubble: #eeece5;
+  --cm3-border: #e3e0d8;
+  --cm3-border-strong: #d4d0c6;
+  --cm3-text: #07091b;
+  --cm3-muted: #77756e;
+  --cm3-action: #254dff;
   --cm3-on-action: #ffffff;
-  --cm3-focus: #0169cc;
+  --cm3-focus: #254dff;
   --cm3-landing-bg: var(--cm3-bg);
   --cm3-landing-surface: var(--cm3-surface);
   --cm3-landing-border: var(--cm3-border);
@@ -36,7 +38,7 @@ body:has(.cm3-live),
   --background-stronger: var(--cm3-bg);
   --background-weak: var(--cm3-subtle);
   --surface-base: var(--cm3-surface);
-  --surface-base-hover: var(--cm3-subtle);
+  --surface-base-hover: var(--cm3-selected);
   --surface-base-active: var(--cm3-selected);
   --surface-raised-base: var(--cm3-surface);
   --surface-raised-base-hover: var(--cm3-selected);
@@ -61,10 +63,15 @@ body:has(.cm3-live),
   --v2-background-bg-base: var(--cm3-bg);
   --v2-background-bg-deep: var(--cm3-bg);
   --v2-background-bg-layer-01: var(--cm3-subtle);
-  --v2-background-bg-layer-02: var(--cm3-selected);
+  --v2-background-bg-layer-02: var(--cm3-layer-02);
+  --v2-overlay-simple-overlay-hover: var(--cm3-selected);
+  --v2-overlay-simple-overlay-pressed: var(--cm3-selected);
   --v2-background-bg-layer-03: var(--cm3-border);
   --v2-background-bg-layer-04: var(--cm3-border-strong);
   --v2-background-bg-button-neutral: var(--cm3-surface);
+  --v2-background-bg-accent: var(--cm3-action);
+  --v2-text-text-accent: var(--cm3-action);
+  --v2-icon-icon-accent: var(--cm3-action);
   --v2-text-text-base: var(--cm3-text);
   --v2-text-text-muted: var(--cm3-muted);
   --v2-text-text-faint: var(--cm3-muted);
@@ -82,26 +89,30 @@ body:has(.cm3-live),
   min-height: 0;
   background: var(--cm3-bg);
   color: var(--cm3-text);
-  font: 12px/1.6 var(--font-family-sans, system-ui, sans-serif);
+  font:
+    14px/1.5 "Inter",
+    var(--font-family-sans, system-ui, sans-serif);
+  font-stretch: normal;
   color-scheme: light;
 }
 
 html[data-color-scheme="dark"] body:has(.cm3-live),
 html[data-color-scheme="dark"] .cm3-live,
 html[data-color-scheme="dark"] [data-component="session-tab-popover"][data-cm3] {
-  --cm3-bg: #181818;
-  --cm3-nav: #171717;
-  --cm3-surface: #242424;
-  --cm3-subtle: #222222;
-  --cm3-selected: #292929;
-  --cm3-bubble: #1b3d6d;
-  --cm3-border: #303030;
-  --cm3-border-strong: #454545;
-  --cm3-text: #ffffff;
-  --cm3-muted: #a3a3a3;
-  --cm3-action: #ededed;
-  --cm3-on-action: #181818;
-  --cm3-focus: #3a83f7;
+  --cm3-bg: #07091b;
+  --cm3-nav: #060817;
+  --cm3-surface: #12162c;
+  --cm3-subtle: #1b2038;
+  --cm3-selected: #8ec6ff;
+  --cm3-layer-02: #292f49;
+  --cm3-bubble: #1b2038;
+  --cm3-border: #282d43;
+  --cm3-border-strong: #3a415c;
+  --cm3-text: #fdf2dc;
+  --cm3-muted: #a7adc3;
+  --cm3-action: #8ec6ff;
+  --cm3-on-action: #07091b;
+  --cm3-focus: #8ec6ff;
   --text-interactive-base: #3a83f7;
   --syntax-diff-add: #40c977;
   --syntax-diff-delete: #fa423e;
@@ -131,7 +142,7 @@ html[data-color-scheme="dark"] [data-component="session-tab-popover"][data-cm3] 
   inset-block: 0;
   inset-inline-start: 0;
   z-index: 31;
-  width: var(--cm3-sidebar-width, 260px);
+  width: var(--cm3-sidebar-width, 288px);
 }
 
 .cm3-live [data-cm3-legacy-layout] > :not(.cm3-sidebar):not(:has(> main)) {
@@ -139,7 +150,7 @@ html[data-color-scheme="dark"] [data-component="session-tab-popover"][data-cm3] 
 }
 
 .cm3-live [data-cm3-legacy-layout] > :has(> main) {
-  inset-inline-start: var(--cm3-sidebar-width, 260px);
+  inset-inline-start: var(--cm3-sidebar-width, 288px);
 }
 
 .cm3-live .cm3-live-route {
@@ -178,16 +189,12 @@ html[data-color-scheme="dark"] [data-component="session-tab-popover"][data-cm3] 
   position: relative;
   display: flex;
   flex-direction: column;
-  flex: 0 0 var(--cm3-sidebar-width, 260px);
+  flex: 0 0 var(--cm3-sidebar-width, 288px);
   min-width: 0;
   min-height: 0;
-  padding: 0 10px 10px;
+  padding: 0 8px 8px;
   border-inline-end: 1px solid var(--cm3-border);
   background: var(--cm3-nav);
-}
-
-html[data-color-scheme="dark"] .cm3-sidebar {
-  --cm3-selected: #292929;
 }
 
 .cm3-sidebar-brand {
@@ -213,6 +220,10 @@ html[data-color-scheme="dark"] .cm3-sidebar {
 
 .cm3-sidebar-resize::after {
   background: var(--cm3-border);
+}
+
+.cm3-live:has([data-cm3-thread="false"]) .cm3-sidebar-content > .cm3-sidebar-action:first-child {
+  background: var(--cm3-selected);
 }
 
 .cm3-sidebar-content {
@@ -288,7 +299,7 @@ html[data-color-scheme="dark"] .cm3-sidebar {
     inset-block: 8px;
     inset-inline-start: 100%;
     z-index: 40;
-    width: var(--cm3-sidebar-expanded-width, 260px);
+    width: var(--cm3-sidebar-expanded-width, 288px);
     max-width: calc(100vw - 64px);
     padding: 10px;
     border: 1px solid var(--cm3-border-strong);
@@ -332,8 +343,13 @@ html[data-color-scheme="dark"] .cm3-sidebar {
 }
 
 .cm3-sidebar-logo {
-  display: block;
-  inline-size: 144px;
+  min-height: 36px;
+  color: var(--cm3-text);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 18px;
+  inline-size: 172px;
   max-inline-size: 100%;
   min-inline-size: 0;
   block-size: auto;
@@ -346,7 +362,7 @@ html[data-color-scheme="dark"] .cm3-sidebar {
 }
 
 .cm3-sidebar :is(button, a) {
-  border-radius: 5px;
+  border-radius: 8px;
   text-align: start;
 }
 
@@ -354,8 +370,8 @@ html[data-color-scheme="dark"] .cm3-sidebar {
   display: flex;
   align-items: center;
   min-width: 0;
-  min-height: 31px;
-  gap: 8px;
+  min-height: 32px;
+  gap: 12px;
   padding: 5px 8px;
   border: 0;
   background: transparent;
@@ -374,7 +390,7 @@ html[data-color-scheme="dark"] .cm3-sidebar {
   display: flex;
   align-items: center;
   min-width: 0;
-  border-radius: 5px;
+  border-radius: 8px;
 }
 
 .cm3-sidebar-session:is(:hover, :has(.cm3-sidebar-task[data-active="true"])) {
@@ -576,7 +592,9 @@ html[data-color-scheme="dark"] .cm3-sidebar {
 }
 
 .cm3-sidebar-footer {
-  display: flex;
+  border-top: 1px solid var(--cm3-border);
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
@@ -623,15 +641,45 @@ html[data-color-scheme="dark"] .cm3-sidebar {
 .cm3-live :is([data-cm3-region="composer"], [data-component="session-prompt-dock"]) form,
 .cm3-live form[data-component="prompt-input-v2"] {
   border: 1px solid var(--cm3-border-strong);
-  border-radius: 24px;
+  border-radius: 14px;
   background: var(--cm3-surface);
-  box-shadow: 0 2px 8px rgb(0 0 0 / 3%);
+  box-shadow: none;
 }
 
 .cm3-live [data-component="prompt-input"] {
   color: var(--cm3-text);
+  font-size: 15px;
+  line-height: 21px;
+}
+
+/* Match the entry and toolbar rhythm while keeping the application palette. */
+.cm3-live form[data-component="prompt-input-v2"] {
+  min-height: 103px;
+}
+
+.cm3-live form[data-component="prompt-input-v2"] > div:has(> [data-component="prompt-input"]) {
+  min-height: 61px;
+}
+
+.cm3-live form[data-component="prompt-input-v2"] [data-component="prompt-input"],
+.cm3-live form[data-component="prompt-input-v2"] [data-component="prompt-input"] + div {
+  padding: 12px 16px 8px;
+  font-size: 15px;
+  line-height: 21px;
+  font-weight: 400;
+}
+
+.cm3-live form[data-component="prompt-input-v2"] [data-slot="prompt-toolbar"] {
+  min-height: 40px;
+  padding: 0 8px 8px;
+  column-gap: 6px;
+}
+
+.cm3-live form[data-component="prompt-input-v2"] [data-slot="prompt-toolbar"] button {
+  min-height: 32px;
+  border-radius: 8px;
   font-size: 13px;
-  line-height: 1.65;
+  line-height: 17px;
 }
 
 .prompt-permission-toggle {
@@ -661,7 +709,7 @@ html[data-color-scheme="dark"] .cm3-sidebar {
     [data-component="prompt-model-control"],
     [data-component="prompt-variant-control"]
   ) {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--cm3-muted);
 }
 
@@ -740,9 +788,9 @@ html[data-color-scheme="dark"] .cm3-sidebar {
 }
 
 .cm3-live [data-cm3-thread="false"] [data-cm3-region="session-panel"] > .cm3-starters {
-  width: min(520px, calc(100% - 48px));
+  width: min(640px, calc(100% - 48px));
   margin-inline: auto;
-  margin-block: 12px 32px;
+  margin-block: 32px;
 }
 
 .cm3-live .cm3-thread-actions {
@@ -767,56 +815,66 @@ html[data-color-scheme="dark"] .cm3-sidebar {
 }
 
 .cm3-live .cm3-thread-actions button:is(:hover, [aria-pressed="true"]) {
-  background: var(--cm3-subtle);
+  background: var(--cm3-selected);
   color: var(--cm3-text);
 }
 
-.cm3-live .cm3-landing-heading {
+.cm3-live .cm3-landing-heading,
+.cm3-live [data-component="cm3-legacy-landing"] .text-20-medium {
   margin: 0;
   color: var(--cm3-text);
-  font-size: clamp(22px, 2vw, 28px);
-  font-weight: 500;
+  font-family: "Anybody", var(--font-family-sans, system-ui, sans-serif);
+  font-stretch: normal;
+  font-size: clamp(28px, 3vw, 38px);
+  font-weight: 400;
   line-height: 1.25;
-  letter-spacing: -0.04em;
+  letter-spacing: -0.035em;
   text-align: center;
   overflow-wrap: anywhere;
 }
 
+/* The sidebar carries the brand; the landing page keeps the reference's quiet heading. */
+.cm3-live [data-component="session-new-design"] [data-component="codework-banner"] {
+  display: none;
+}
+
 .cm3-live [data-component="session-new-design"] > div:first-child > div {
-  width: min(520px, 100%);
+  width: min(640px, 100%);
 }
 
 .cm3-live .cm3-starters {
-  display: grid;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
   margin: 0;
-  padding: 0 8px;
+  padding: 0;
   list-style: none;
-}
-
-.cm3-live .cm3-starters li + li {
-  border-top: 1px solid var(--cm3-landing-border);
 }
 
 .cm3-live .cm3-starters button {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   width: 100%;
-  min-height: 34px;
-  padding: 6px 2px;
-  color: var(--cm3-muted);
-  font-size: 11px;
+  min-height: 32px;
+  padding: 5px 8px;
+  border: 1px solid var(--cm3-border);
+  border-radius: 8px;
+  background: var(--cm3-subtle);
+  color: var(--cm3-text);
+  font-size: 13px;
   text-align: start;
   cursor: pointer;
 }
 
 .cm3-live .cm3-starters button:hover {
-  color: var(--cm3-text);
-  background: var(--cm3-subtle);
+  border-color: var(--cm3-border-strong);
+  background: var(--cm3-selected);
 }
 
 .cm3-live [data-component="cm3-legacy-landing"] {
-  width: min(520px, calc(100% - 48px));
+  width: min(640px, calc(100% - 48px));
   height: auto;
   margin-inline: auto;
   padding-block: 0 24px;
@@ -845,7 +903,7 @@ html[data-color-scheme="dark"] .cm3-sidebar {
 }
 
 .cm3-live [data-cm3-thread="false"] [data-cm3-region="composer"] > div {
-  max-width: 544px;
+  max-width: 664px;
   margin-inline: auto;
 }
 
@@ -885,6 +943,58 @@ html[data-color-scheme="dark"] .cm3-sidebar {
   position: relative;
   top: auto;
   padding-block: clamp(40px, calc(29svh - var(--cm3-header-height, 40px)), 260px) 40px;
+}
+
+/* Keep Midnight text and icons legible on Dawn highlights in dark mode. */
+html[data-color-scheme="dark"] body:has(.cm3-live) [data-component="titlebar-appearance"] button:hover,
+html[data-color-scheme="dark"]
+  body:has(.cm3-live)
+  [data-component="titlebar-appearance"]
+  button:first-child[aria-checked="true"],
+html[data-color-scheme="dark"]
+  .cm3-live:has([data-cm3-thread="false"])
+  .cm3-sidebar-content
+  > .cm3-sidebar-action:first-child,
+html[data-color-scheme="dark"]
+  .cm3-live
+  :is(
+    .cm3-sidebar :is(button, a):is(:hover, [data-active="true"]),
+    .cm3-sidebar-session:is(:hover, :has(.cm3-sidebar-task[data-active="true"])),
+    .cm3-sidebar-project-slot:is(:hover, :focus-within, :has(.cm3-sidebar-project[data-active="true"])),
+    .cm3-sidebar-tabs
+      [data-titlebar-tab]:is(
+        :hover,
+        :focus-within,
+        [data-active="true"],
+        [data-dragging="true"],
+        [data-editing="true"]
+      ),
+    .cm3-thread-actions button:is(:hover, [aria-pressed="true"]),
+    .cm3-starters button:hover,
+    [data-component="button-v2"]:is(:hover, :active, [data-state="hover"], [data-state="pressed"], [data-expanded]):not(
+        :disabled
+      ),
+    [data-component="icon-button-v2"]:is(
+        :hover,
+        :active,
+        [data-state="hover"],
+        [data-state="pressed"],
+        [data-expanded]
+      ):not(:disabled)
+  ) {
+  --cm3-text: #07091b;
+  --cm3-muted: #07091b;
+  --text-base: #07091b;
+  --text-strong: #07091b;
+  --text-weak: #07091b;
+  --icon-base: #07091b;
+  --icon-strong: #07091b;
+  --v2-text-text-base: #07091b;
+  --v2-text-text-muted: #07091b;
+  --v2-text-text-faint: #07091b;
+  --v2-icon-icon-base: #07091b;
+  --v2-icon-icon-muted: #07091b;
+  color: #07091b;
 }
 
 .cm3-live :is(button, a, input, textarea, [tabindex]):focus-visible {
@@ -966,5 +1076,98 @@ html[data-color-scheme="dark"] .cm3-sidebar {
   }
   .cm3-live [data-cm3-thread="false"] [data-cm3-region="session-panel"]:has([data-component="cm3-legacy-landing"]) {
     padding-top: 40px;
+  }
+}
+
+.cm3-sidebar[data-collapsed="true"] .cm3-sidebar-logo > span {
+  display: block;
+  width: 1ch;
+  overflow: hidden;
+}
+
+.cm3-sidebar .codework-company-brand {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 4px 0;
+}
+
+.cm3-sidebar .codework-company-icon {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  padding: 4px;
+}
+
+.cm3-sidebar .codework-company-wordmark {
+  display: block;
+  width: 156px;
+  height: auto;
+  padding: 12px;
+}
+
+/* Body scope includes portalled menus and settings. Component-specific state
+   rules otherwise restore neutral backgrounds or light icon colours. */
+body:has(.cm3-live)
+  :is(
+    button,
+    [role="button"],
+    [role="menuitem"],
+    [role="menuitemcheckbox"],
+    [role="menuitemradio"],
+    [role="option"],
+    [role="tab"],
+    [role="treeitem"],
+    [data-component="menu-v2-item"],
+    [data-component="select-v2"],
+    [data-slot="select-select-trigger"],
+    [data-slot="tabs-v2-trigger-wrapper"],
+    [data-slot="dropdown-menu-sub-trigger"],
+    [data-slot="switch-control"],
+    [data-slot="browser-tab"],
+    [data-titlebar-tab],
+    .command-palette-v2-row
+  ):is(
+    :hover,
+    :active,
+    [data-highlighted]:not([data-highlighted="false"]),
+    [data-selected]:not([data-selected="false"]),
+    [data-checked]:not([data-checked="false"]),
+    [data-active]:not([data-active="false"]),
+    [aria-selected="true"],
+    [aria-pressed="true"],
+    [aria-checked="true"],
+    [data-state="hover"],
+    [data-state="pressed"],
+    [data-expanded]:not([data-expanded="false"]),
+    [data-slot="tabs-v2-trigger-wrapper"]:has(> [data-selected]:not([data-selected="false"]))
+  ):not(:disabled, [data-disabled]:not([data-disabled="false"]), [aria-disabled="true"]) {
+  --text-base: #07091b;
+  --text-strong: #07091b;
+  --text-weak: #07091b;
+  --text-weaker: #07091b;
+  --icon-base: #07091b;
+  --icon-strong: #07091b;
+  --icon-weak: #07091b;
+  --icon-invert-base: #07091b;
+  --v2-text-text-base: #07091b;
+  --v2-text-text-muted: #07091b;
+  --v2-text-text-faint: #07091b;
+  --v2-text-text-contrast: #07091b;
+  --v2-text-text-accent: #07091b;
+  --v2-icon-icon-base: #07091b;
+  --v2-icon-icon-muted: #07091b;
+  --v2-icon-icon-accent: #07091b;
+  --menu-v2-fg: #07091b;
+  --menu-v2-fg-muted: #07091b;
+  --menu-v2-fg-subtle: #07091b;
+  --menu-v2-icon: #07091b;
+  --menu-v2-accent: #07091b;
+  background: #8ec6ff !important;
+  color: #07091b !important;
+
+  :is(svg, [data-slot="icon"], [data-slot="icon-svg"]) {
+    color: #07091b !important;
   }
 }

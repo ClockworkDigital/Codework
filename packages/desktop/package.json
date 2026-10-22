@@ -4,10 +4,9 @@
   "version": "1.18.34",
   "type": "module",
   "license": "MIT",
-  "homepage": "https://opencode.ai",
+  "homepage": "https://github.com/ClockworkDigital/Codework",
   "author": {
-    "name": "OpenCode",
-    "email": "hello@opencode.ai"
+    "name": "Clockwork Digital"
   },
   "scripts": {
     "typecheck": "tsgo -b",
@@ -37,7 +36,7 @@
   },
   "devDependencies": {
     "@actions/artifact": "4.0.0",
-    "@cookiemonster/cm-browser": "workspace:*",
+    "@codework/browser": "workspace:*",
     "@lydell/node-pty": "catalog:",
     "@opencode-ai/app": "workspace:*",
     "@opencode-ai/ui": "workspace:*",

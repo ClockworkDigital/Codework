@@ -19,8 +19,6 @@ export type DesktopMenuAction =
   | "view.zoomIn"
   | "view.zoomOut"
   | "view.toggleFullscreen"
-  | "view.toggleLoginBrowser"
-  | "view.toggleWorkerWindows"
   | "window.new"
   | "window.close"
   | "window.minimize"
@@ -50,7 +48,7 @@ export type DesktopMenuRole =
 export type DesktopMenuItem = {
   type: "item"
   labelKey?: DesktopNativeKey
-  // CookieMonster-only entries have no upstream translation key; render this literal instead.
+  // Codework-only entries have no upstream translation key; render this literal instead.
   label?: string
   command?: string
   action?: DesktopMenuAction
@@ -133,7 +131,7 @@ export const DESKTOP_MENU: DesktopMenu[] = [
       { type: "separator" },
       { type: "item", labelKey: "desktop.menu.closeWindow", action: "window.close", role: "close" },
       { type: "separator", platforms: ["windows"] },
-      { type: "item", label: "Close CookieMonster", action: "app.quit", platforms: ["windows"] },
+      { type: "item", labelKey: "desktop.menu.quitCodework", action: "app.quit", platforms: ["windows"] },
     ],
   },
   {
@@ -229,8 +227,6 @@ export const DESKTOP_MENU: DesktopMenu[] = [
         accelerator: { windows: "Ctrl+-" },
       },
       { type: "separator" },
-      { type: "item", label: "Toggle Login Browser", action: "view.toggleLoginBrowser" },
-      { type: "item", label: "Toggle Worker Windows", action: "view.toggleWorkerWindows" },
       {
         type: "item",
         labelKey: "desktop.menu.toggleFullScreen",

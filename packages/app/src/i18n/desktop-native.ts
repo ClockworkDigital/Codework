@@ -229,8 +229,7 @@ export const DESKTOP_NATIVE_ENGLISH = {
     "Task: {{task}}\nTarget: one new about:blank tab\n\nThis creates and selects one private tab. No destination is opened and no page access is granted.",
   "desktop.browser.tabs.targetDetail":
     "Task: {{task}}\nTab: {{tab}}\n\nOnly this tab is affected. This approval does not grant page access. Closing still respects the page's unsaved-changes confirmation.",
-  "desktop.browser.tabs.noTarget":
-    "Open exactly one current task window in CookieMonster before using browser tab actions.",
+  "desktop.browser.tabs.noTarget": "Open exactly one current task window in Codework before using browser tab actions.",
   "desktop.browser.tabs.changed":
     "Browser tab approval expired or its task, owner or source changed. Request approval again.",
   "desktop.browser.tabs.denied": "Browser tab action consent was not granted.",
@@ -278,7 +277,7 @@ export const DESKTOP_NATIVE_ENGLISH = {
   "desktop.browser.contacts.country": "Country code",
   "desktop.browser.account.title": "Saved account",
   "desktop.browser.account.entry":
-    "Enter the website account for {{origin}}, not your Windows password. Existing passwords are never displayed. Nothing is saved until you confirm in CookieMonster.",
+    "Enter the website account for {{origin}}, not your Windows password. Existing passwords are never displayed. Nothing is saved until you confirm in Codework.",
   "desktop.browser.account.confirm": "Save these account changes?",
   "desktop.browser.account.detail":
     "Website: {{origin}}\nAccount: {{username}}\nThis changes only the encrypted vault, not the password on the website.",
@@ -318,14 +317,14 @@ export const DESKTOP_NATIVE_ENGLISH = {
   "desktop.browser.transfer.frameUpload": "Allow file selection for this embedded page?",
   "desktop.browser.transfer.frameUploadDetail":
     "Top page: {{topOrigin}}\nReceiving embedded page: {{origin}}\nOnly files you choose will be shared. The receiving page can read and upload them immediately.",
-  "desktop.browser.openInternal": "Open in CookieMonster",
+  "desktop.browser.openInternal": "Open in Codework",
   "desktop.browser.openExternal": "Open in default browser",
   "desktop.browser.importBookmarks": "Import bookmarks",
   "desktop.browser.exportBookmarks": "Export bookmarks",
   "desktop.browser.bookmarks": "Bookmarks",
   "desktop.browser.clearSite": "Clear browser data for {{origin}}?",
   "desktop.browser.clearSiteDetail":
-    "This removes this origin’s stored data and cache, and Chromium clears cookies for its parent domain, including sibling subdomains. You may be signed out. Matching open pages reload. Bookmarks, history, passwords, permissions, and app/WPP login data are kept.",
+    "This removes this origin’s stored data and cache, and Chromium clears cookies for its parent domain, including sibling subdomains. You may be signed out. Matching open pages reload. Bookmarks, history, passwords, permissions, and app login data are kept.",
   "desktop.browser.fillUsername": "Fill only the username on this page?",
   "desktop.browser.fillPassword": "Fill only the password on this page?",
   "desktop.browser.clearSelected": "Clear the selected browser data? Downloaded files are kept.",
@@ -349,7 +348,7 @@ export const DESKTOP_NATIVE_ENGLISH = {
   "desktop.browser.clearConfirm": "Clear",
   "desktop.browser.saveLogin": "Save this login?",
   "desktop.browser.fillLogin": "Fill this login?",
-  "desktop.browser.unlockReason": "Unlock saved passwords in CookieMonster",
+  "desktop.browser.unlockReason": "Unlock saved passwords in Codework",
   "desktop.browser.fillLoginDetail":
     "Fill the saved password for {{username}} on {{origin}}? This gives the website access to the password.",
   "desktop.browser.fill": "Fill login",
@@ -375,14 +374,14 @@ export const DESKTOP_NATIVE_ENGLISH = {
     "The agent may read and interact with signed-in pages in this tab on allowed hosts. Other tabs remain private. Browser cookies are stored in a separate persistent profile.",
   "desktop.browser.allow": "Allow",
   "desktop.browser.cancel": "Cancel",
-  "desktop.install.title": "Install CookieMonster",
+  "desktop.install.title": "Install Codework",
   "desktop.install.confirm": "Install for My User",
   "desktop.install.detail":
-    "Install CookieMonster at {{destination}} and open it there? No administrator access is needed. Existing apps will not be replaced.",
+    "Install Codework at {{destination}} and open it there? No administrator access is needed. Existing apps will not be replaced.",
   "desktop.install.manual":
-    "Automatic installation cannot safely identify the original disk-image app. Quit, open the mounted CookieMonster disk image in Finder, and copy CookieMonster.app into your home Applications folder (Go > Go to Folder: ~/Applications). Create that folder if needed. Do not replace an existing app. Then open the copied app and eject the disk image.",
+    "Automatic installation cannot safely identify the original disk-image app. Quit, open the mounted Codework disk image in Finder, and copy Codework.app into your home Applications folder (Go > Go to Folder: ~/Applications). Create that folder if needed. Do not replace an existing app. Then open the copied app and eject the disk image.",
   "desktop.install.failed":
-    "CookieMonster could not be installed or opened at {{destination}}. Existing apps were not replaced. If a partial copy was created, inspect it in Finder before removing it and retrying. If the copy is complete, open it in Finder. Follow any macOS security prompts or contact your administrator.",
+    "Codework could not be installed or opened at {{destination}}. Existing apps were not replaced. If a partial copy was created, inspect it in Finder before removing it and retrying. If the copy is complete, open it in Finder. Follow any macOS security prompts or contact your administrator.",
 
   "desktop.menu.app": "OpenCode",
   "desktop.menu.file": "File",
@@ -491,7 +490,7 @@ export const DESKTOP_NATIVE_ENGLISH = {
   "desktop.browser.import.counts":
     "Valid rows: {{valid}}\nDuplicate source rows: {{duplicate}}\nAdd: {{add}}\nReplace: {{replace}}\nUnchanged: {{unchanged}}\nUnsupported rows skipped: {{unsupported}}",
   "desktop.browser.import.scope":
-    "Only the selected category in the shared CookieMonster browser profile is affected, not app or WPP login data. No page or vault permissions are granted. Export files are plaintext and may contain passwords or session credentials; remove them yourself when no longer needed.",
+    "Only the selected category in the shared Codework browser profile is affected, not app login data. No page or vault permissions are granted. Export files are plaintext and may contain passwords or session credentials; remove them yourself when no longer needed.",
   "desktop.browser.import.passwords":
     "Passwords match by normalized origin and username. The last source row wins; changed passwords replace existing values while retaining account IDs. Exact duplicates are skipped.",
   "desktop.browser.import.cookies":
@@ -528,7 +527,7 @@ export const DESKTOP_NATIVE_ENGLISH = {
   "desktop.browser.backup.importTitle": "Import encrypted password backup",
   "desktop.browser.backup.exported": "Encrypted password backup saved",
   "desktop.browser.backup.exportedDetail":
-    "Saved {{file}}. Keep the file and its passphrase separate. CookieMonster cannot recover the passphrase.",
+    "Saved {{file}}. Keep the file and its passphrase separate. Codework cannot recover the passphrase.",
   "desktop.browser.backup.review": "Review encrypted password backup import",
   "desktop.browser.backup.counts":
     "Valid accounts: {{valid}}\nDuplicate source accounts: {{duplicate}}\nAdd: {{add}}\nReplace: {{replace}}\nUnchanged: {{unchanged}}",
@@ -546,7 +545,7 @@ export const DESKTOP_NATIVE_ENGLISH = {
     "The window, task, vault access or password destination changed. No backup import was committed.",
   "desktop.browser.notifications.title": "Allow notifications for {{origin}}?",
   "desktop.browser.notifications.detail":
-    "Task: {{task}}\nTab: {{tab}}\n\nAllow is saved for this exact website. Notifications are permitted only while its private main page is selected and visible in CookieMonster. OS notification settings still apply. Blocking later prevents new notifications but cannot recall delivered notifications.",
+    "Task: {{task}}\nTab: {{tab}}\n\nAllow is saved for this exact website. Notifications are permitted only while its private main page is selected and visible in Codework. OS notification settings still apply. Blocking later prevents new notifications but cannot recall delivered notifications.",
   "desktop.browser.sitePermission.invalid": "Invalid site permission",
   "desktop.browser.sitePermission.limit": "Site limit reached",
   "desktop.browser.diagnosticsConsent": "Share bounded console diagnostics with the agent?",
@@ -556,7 +555,7 @@ export const DESKTOP_NATIVE_ENGLISH = {
   "desktop.browser.diagnosticsDeliveryUnavailable": "Browser diagnostics delivery unavailable.",
   "desktop.browser.siteToolConsent": "Allow this website tool to run?",
   "desktop.browser.siteToolDetail":
-    "Task {{task}} requests website tool {{tool}} in tab {{tab}} at {{url}}.\n\nExact JSON arguments:\n{{arguments}}\n\nThe website supplies this tool and receives these arguments. It may change website or account data. CookieMonster will return its bounded result to the agent as untrusted content.",
+    "Task {{task}} requests website tool {{tool}} in tab {{tab}} at {{url}}.\n\nExact JSON arguments:\n{{arguments}}\n\nThe website supplies this tool and receives these arguments. It may change website or account data. Codework will return its bounded result to the agent as untrusted content.",
   "desktop.browser.siteToolDenied": "Website tool consent was not granted.",
   "desktop.browser.siteToolDeliveryUnavailable": "Website tool delivery unavailable.",
   "desktop.browser.networkConsent": "Share bounded network counts with the agent?",
@@ -579,7 +578,7 @@ export const DESKTOP_NATIVE_ENGLISH = {
     "Task: {{task}}\nTab: {{tab}}\n\nAllow is saved for this exact website. Apple still asks you to choose a screen or window for each capture. Revoking Allow replaces matching pages to stop active capture before restoring their history.",
   "desktop.browser.clipboard.title": "Allow clipboard access for {{origin}}?",
   "desktop.browser.clipboard.detail":
-    "Task: {{task}}\nTab: {{tab}}\n\nAllow is saved for this exact website. Clipboard access is permitted only while its private main page is selected and visible in CookieMonster, with no agent control or pending operation.",
+    "Task: {{task}}\nTab: {{tab}}\n\nAllow is saved for this exact website. Clipboard access is permitted only while its private main page is selected and visible in Codework, with no agent control or pending operation.",
   // English fallback until reviewed translations are available. Append to preserve indexed locale keys.
   "desktop.browser.tabGrantDetail":
     "Allow Agent Access for this entire tab, currently at {{origin}}? This includes embedded websites, page actions, screenshots of all visible pixels without redaction, diagnostics and site actions, with no further approvals. Access stays on across website changes until revoked or the tab closes. Other tabs, saved passwords and OS capabilities are not granted. File transfer controls still apply. Content already shared cannot be recalled.",
@@ -602,30 +601,15 @@ export const DESKTOP_NATIVE_ENGLISH = {
   "desktop.browser.taskPaused":
     "The user has taken over this task's browser. Browser tools are paused until the user selects Resume agent. Do not open another browser or tab to bypass takeover.",
   "desktop.install.replaceDetail":
-    "Install CookieMonster at {{destination}} and open it there? Quit any installed copy first. An existing app at this location will be replaced after the new copy is complete. Only the immediately previous app is kept in a CookieMonster Backup- folder beside it. Older installer-owned backups are removed after successful replacement. Failed-install recovery copies are left alone, and cleanup failures can leave extra backups. No administrator access is needed. Settings and sign-in data are not changed.",
+    "Install Codework at {{destination}} and open it there? Quit any installed copy first. An existing app at this location will be replaced after the new copy is complete. Only the immediately previous app is kept in a Codework Backup- folder beside it. Older installer-owned backups are removed after successful replacement. Failed-install recovery copies are left alone, and cleanup failures can leave extra backups. No administrator access is needed. Settings and sign-in data are not changed.",
   "desktop.install.replaceManual":
-    "Automatic installation cannot safely identify the original disk-image app. Quit CookieMonster, open the mounted disk image in Finder, and copy CookieMonster.app into your home Applications folder (Go > Go to Folder: ~/Applications). Create that folder if needed. If an app is already there, move it aside before copying or choose Replace in Finder. Then open the copied app and eject the disk image.",
+    "Automatic installation cannot safely identify the original disk-image app. Quit Codework, open the mounted disk image in Finder, and copy Codework.app into your home Applications folder (Go > Go to Folder: ~/Applications). Create that folder if needed. If an app is already there, move it aside before copying or choose Replace in Finder. Then open the copied app and eject the disk image.",
   "desktop.install.replaceFailed":
-    "CookieMonster could not be installed or opened at {{destination}}. If copying failed, the existing app was not moved. If replacement started, look for the previous app in a CookieMonster Backup- folder beside this location. A partial new copy may remain in a CookieMonster Install- folder. Failed installation does not prune backups. If installation succeeded but opening failed, older installer-owned backups may already have been removed; the immediately previous app is retained. Inspect these folders in Finder before removing anything or retrying. If the installed copy is complete, open it in Finder. Follow any macOS security prompts or contact your administrator.",
+    "Codework could not be installed or opened at {{destination}}. If copying failed, the existing app was not moved. If replacement started, look for the previous app in a Codework Backup- folder beside this location. A partial new copy may remain in a Codework Install- folder. Failed installation does not prune backups. If installation succeeded but opening failed, older installer-owned backups may already have been removed; the immediately previous app is retained. Inspect these folders in Finder before removing anything or retrying. If the installed copy is complete, open it in Finder. Follow any macOS security prompts or contact your administrator.",
   // English fallback until reviewed translations are available. Append to preserve indexed locale keys.
-  "desktop.wpp.login.menu": "WPP login",
-  "desktop.wpp.login.use": "Use saved login...",
-  "desktop.wpp.login.save": "Save WPP account...",
-  "desktop.wpp.login.manage": "Manage saved WPP accounts...",
-  "desktop.wpp.login.lock": "Lock saved passwords",
-  "desktop.wpp.login.forget": "Forget this account",
-  "desktop.wpp.login.choose": "Choose a saved WPP account",
-  "desktop.wpp.login.empty": "No WPP account is saved yet.",
-  "desktop.wpp.login.browserManage":
-    "Manage saved accounts in the CookieMonster browser's password settings, then try again.",
-  "desktop.wpp.login.entry":
-    "Enter your WPP work email and Okta password, not your Mac or Windows login password. Nothing is saved until you confirm in CookieMonster.",
-  "desktop.wpp.login.fillDetail":
-    "Account: {{username}}\nWebsite: {{origin}}\nOnly the current login field will be filled. The website can read the filled value. Submit the form and complete MFA yourself.",
-  "desktop.wpp.login.failed":
-    "The saved login operation was cancelled or could not complete. Keep the WPP Okta sign-in window visible, unlock saved passwords, and use the account shown on the page. The page or account may have changed. No sign-in was submitted by CookieMonster.",
   "desktop.browser.account.username": "Username",
   "desktop.browser.account.password": "Password",
+  "desktop.menu.quitCodework": "Close Codework",
 } as const
 
 export type DesktopNativeKey = keyof typeof DESKTOP_NATIVE_ENGLISH

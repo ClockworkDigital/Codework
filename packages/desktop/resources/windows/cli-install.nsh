@@ -4,7 +4,7 @@
   Pop $1
   ${If} $0 != 0
     DetailPrint "$1"
-    MessageBox MB_OK|MB_ICONSTOP "CookieMonster could not install the opencode command.$\r$\n$\r$\n$1"
+    MessageBox MB_OK|MB_ICONSTOP "Codework could not install the opencode command.$\r$\n$\r$\n$1"
     Abort
   ${EndIf}
 !macroend
@@ -15,7 +15,7 @@
   Pop $1
   ${If} $0 != 0
     DetailPrint "$1"
-    MessageBox MB_OK|MB_ICONSTOP "CookieMonster could not remove its opencode command registration.$\r$\n$\r$\n$1"
+    MessageBox MB_OK|MB_ICONSTOP "Codework could not remove its opencode command registration.$\r$\n$\r$\n$1"
     Abort
   ${EndIf}
 !macroend

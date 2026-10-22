@@ -8,7 +8,7 @@ export { vaultAvailable } from "./vault-session"
 
 type Login = BrowserLogin & { id: string }
 const store = () => getStore("cm-browser")
-const context = Buffer.from("CookieMonster browser vault v1")
+const context = Buffer.from("Codework browser vault v1")
 
 // Presence only. Passwords and account metadata stay encrypted until OS authentication.
 export function hasSavedLogins() {

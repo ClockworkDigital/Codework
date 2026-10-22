@@ -1,6 +1,6 @@
 import { realpath } from "node:fs/promises"
 import { isAbsolute } from "node:path"
-import { browserIdentity } from "@cookiemonster/cm-browser/protocol"
+import { browserIdentity } from "@codework/browser/protocol"
 
 export type BrowserOwnerScope = {
   projectID: string

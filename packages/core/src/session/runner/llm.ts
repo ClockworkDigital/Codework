@@ -10,8 +10,6 @@ import {
 } from "@opencode-ai/llm"
 import { Cause, DateTime, Effect, FiberSet, Layer, Option, Semaphore, Stream } from "effect"
 import { AgentV2 } from "../../agent"
-import { Flag } from "../../flag/flag"
-import { RequestIdentity } from "../../util/request-identity"
 import { SessionOwnership } from "../ownership"
 import { Config } from "../../config"
 import { Database } from "../../database/database"
@@ -210,10 +208,6 @@ const layer = Layer.effect(
         model,
         http: {
           headers: {
-            // CookieMonster keys WPP thread ownership on client + runtime; other providers keep upstream headers.
-            ...(model.provider === "cookiemonster"
-              ? { "x-opencode-client": Flag.OPENCODE_CLIENT, "x-opencode-runtime-id": RequestIdentity.id }
-              : {}),
             "x-opencode-session-id": session.id,
             ...(session.parentID ? { "x-opencode-parent-session-id": session.parentID } : {}),
             "x-session-affinity": session.id,

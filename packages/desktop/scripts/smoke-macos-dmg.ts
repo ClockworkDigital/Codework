@@ -22,13 +22,13 @@ import { copyUserApp, macCommand } from "../src/main/macos-user-install"
 // Run with Bun on macOS after packaging, optionally passing one DMG path.
 assert.equal(process.platform, "darwin", "The DMG smoke test requires macOS")
 assert(process.getuid!() > 0 && process.geteuid!() > 0, "Run the DMG smoke test as a non-root user")
-assert(process.argv.length <= 3, "Usage: bun scripts/smoke-macos-dmg.ts [CookieMonster.dmg]")
+assert(process.argv.length <= 3, "Usage: bun scripts/smoke-macos-dmg.ts [Codework.dmg]")
 
 const dist = resolve(import.meta.dir, "../dist")
 const artifacts = process.argv[2]
   ? [resolve(process.argv[2])]
-  : (await readdir(dist)).filter((name) => /^cookiemonster-mac-.*\.dmg$/.test(name)).map((name) => join(dist, name))
-assert.equal(artifacts.length, 1, "Expected exactly one cookiemonster-mac-*.dmg in dist; pass a DMG path explicitly")
+  : (await readdir(dist)).filter((name) => /^codework-mac-.*\.dmg$/.test(name)).map((name) => join(dist, name))
+assert.equal(artifacts.length, 1, "Expected exactly one codework-mac-*.dmg in dist; pass a DMG path explicitly")
 const dmg = artifacts[0]
 assert(dmg && dmg.endsWith(".dmg") && (await lstat(dmg)).isFile(), `Not a DMG file: ${dmg}`)
 
@@ -43,12 +43,12 @@ const asar: {
 const root = await mkdtemp(join(await realpath(homedir()), ".cm-dmg-smoke-"))
 const mount = join(root, "DMG Mount")
 const applications = join(root, "Applications With Spaces")
-const destination = join(applications, "CookieMonster.app")
+const destination = join(applications, "Codework.app")
 await mkdir(mount)
 try {
   await macCommand("/usr/bin/hdiutil", ["attach", "-readonly", "-nobrowse", "-mountpoint", mount, dmg])
-  const source = join(mount, "CookieMonster.app")
-  assert((await lstat(source)).isDirectory(), "The DMG must contain CookieMonster.app")
+  const source = join(mount, "Codework.app")
+  assert((await lstat(source)).isDirectory(), "The DMG must contain Codework.app")
   const expected = await fingerprint(source)
 
   for (const attempt of [1, 2]) {
@@ -85,27 +85,23 @@ try {
       await writeFile(join(destination, "stale-install-sentinel"), `previous bundle ${replacement}`)
       await chmod(destination, 0o555)
       const previous = await fingerprint(destination)
-      const backupsBefore = (await readdir(applications)).filter((name) => name.startsWith("CookieMonster Backup-"))
+      const backupsBefore = (await readdir(applications)).filter((name) => name.startsWith("Codework Backup-"))
       assert.equal(await copyUserApp(source, applications, copy), destination)
       assert.equal((await lstat(destination)).mode & 0o777, 0o555, "Replacement root mode was not restored")
       assert.equal(await fingerprint(destination), expected, "Replacement differs from the mounted app")
-      const backups = (await readdir(applications)).filter((name) => name.startsWith("CookieMonster Backup-"))
+      const backups = (await readdir(applications)).filter((name) => name.startsWith("Codework Backup-"))
       assert.equal(backups.length, 1, "Replacement must retain exactly one immediately previous bundle")
       const backup = join(applications, backups[0])
-      assert.equal(await fingerprint(join(backup, "CookieMonster.app")), previous, "Previous bundle was not preserved")
-      assert.equal(
-        (await lstat(join(backup, "CookieMonster.app"))).mode & 0o777,
-        0o555,
-        "Backup root mode was not restored",
-      )
+      assert.equal(await fingerprint(join(backup, "Codework.app")), previous, "Previous bundle was not preserved")
+      assert.equal((await lstat(join(backup, "Codework.app"))).mode & 0o777, 0o555, "Backup root mode was not restored")
       for (const name of backupsBefore) {
         await assert.rejects(lstat(join(applications, name)), { code: "ENOENT" })
       }
       await assert.rejects(lstat(join(destination, "stale-install-sentinel")), { code: "ENOENT" })
     }
-    const backups = (await readdir(applications)).filter((name) => name.startsWith("CookieMonster Backup-"))
+    const backups = (await readdir(applications)).filter((name) => name.startsWith("Codework Backup-"))
     assert.equal(backups.length, 1)
-    await chmod(join(applications, backups[0], "CookieMonster.app"), 0o755)
+    await chmod(join(applications, backups[0], "Codework.app"), 0o755)
     await rm(join(applications, backups[0]), { recursive: true })
     await chmod(destination, 0o755)
     await rm(destination, { recursive: true })
@@ -130,7 +126,7 @@ try {
 }
 await assert.rejects(lstat(root), { code: "ENOENT" })
 console.log(
-  "DMG copy, repeated replacement, one-backup retention, removal, recopy and cleanup passed. App startup and WPP were not tested.",
+  "DMG copy, repeated replacement, one-backup retention, removal, recopy and cleanup passed. App startup and provider authentication were not tested.",
 )
 
 // Include names, modes, file bytes and symlink targets without following bundle symlinks.

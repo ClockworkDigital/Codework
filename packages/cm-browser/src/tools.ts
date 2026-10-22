@@ -186,18 +186,22 @@ export function browserTools(port: BrowserPort): Record<string, ToolDefinition> 
         const request = parsePanelRequest({ ...args, op: "set_panel" })
         if (!request || "op" in args) throw new Error("Invalid desktop panel request.")
         await ask(context, { permission: "desktop_set_panel", patterns: ["*"], always: ["*"], metadata: request })
-        const response = tabState.extend({ panelResult: tool.schema.unknown() })
+        const response = tabState
+          .extend({ panelResult: tool.schema.unknown() })
           .safeParse(await run(port, context, request))
         const completed = response.success ? parsePanelResult(response.data.panelResult) : undefined
-        if (!completed || completed.view !== request.view ||
-          (request.view === "browser" && (completed.view !== "browser" || completed.tabID !== request.tabID)))
+        if (
+          !completed ||
+          completed.view !== request.view ||
+          (request.view === "browser" && (completed.view !== "browser" || completed.tabID !== request.tabID))
+        )
           throw new Error("Invalid desktop panel result.")
         return JSON.stringify(completed)
       },
     }),
     browser_create_tab: tool({
       description:
-        "Open CookieMonster's built-in browser and create one agent-controlled blank tab in this task. Ready for browser_navigate without a tab-access prompt. Uses the shared CM browser profile and existing website logins. User takeover blocks creation until resumed. Returns the opaque tab ID; no automatic retry.",
+        "Open Codework's built-in browser and create one agent-controlled blank tab in this task. Ready for browser_navigate without a tab-access prompt. Uses the shared CM browser profile and existing website logins. User takeover blocks creation until resumed. Returns the opaque tab ID; no automatic retry.",
       args: {},
       execute: (args, context) => runTab(port, context, "create_tab", args),
     }),
@@ -238,7 +242,7 @@ export function browserTools(port: BrowserPort): Record<string, ToolDefinition> 
     }),
     browser_read_state: tool({
       description:
-        "Use CookieMonster's built-in CM Browser first for browser tasks. Without tabID, list accessible task tabs; if none, use browser_create_tab then browser_navigate. With tabID, read bounded top-document and embedded-document content with native frame refs and explicit omission/truncation statuses. Nested and cross-origin documents share the tab grant; geometry does not hide readable content. Optional selector reads one matching subtree with a separate bounded budget, recovering controls omitted from aggregate output. Selectors support one ASCII compound tag/#id/.class, at most 512 characters; no combinators, attributes, pseudos, escapes or lists. An explicit frameRef selects that exact native document. Private tabs are never exposed. Visual-only omissions require screenshots.",
+        "Use Codework's built-in CM Browser first for browser tasks. Without tabID, list accessible task tabs; if none, use browser_create_tab then browser_navigate. With tabID, read bounded top-document and embedded-document content with native frame refs and explicit omission/truncation statuses. Nested and cross-origin documents share the tab grant; geometry does not hide readable content. Optional selector reads one matching subtree with a separate bounded budget, recovering controls omitted from aggregate output. Selectors support one ASCII compound tag/#id/.class, at most 512 characters; no combinators, attributes, pseudos, escapes or lists. An explicit frameRef selects that exact native document. Private tabs are never exposed. Visual-only omissions require screenshots.",
       args: {
         tabID: tabID.optional(),
         selector: tool.schema.string().min(1).max(512).optional(),

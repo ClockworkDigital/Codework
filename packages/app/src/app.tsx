@@ -5,10 +5,10 @@ import { DialogProvider } from "@opencode-ai/ui/context/dialog"
 import { FileComponentProvider } from "@opencode-ai/ui/context/file"
 import { File } from "@opencode-ai/session-ui/file"
 import { Font } from "@opencode-ai/ui/font"
-import { CookieLoader } from "@opencode-ai/ui/cookie-loader"
+import { Spinner } from "@opencode-ai/ui/spinner"
 import { Splash } from "@opencode-ai/ui/logo"
 import { LoadingAnimationProvider } from "@opencode-ai/ui/loading"
-import { cmLoading } from "@/components/cm-loading"
+import { codeworkLoading } from "@/components/codework-loading"
 import { ThemeProvider } from "@opencode-ai/ui/theme/context"
 import { MetaProvider } from "@solidjs/meta"
 import {
@@ -416,7 +416,7 @@ export function AppBaseProviders(
   }>,
 ) {
   return (
-    <LoadingAnimationProvider value={import.meta.env.VITE_CM_BRAND ? cmLoading : undefined}>
+    <LoadingAnimationProvider value={codeworkLoading}>
       <MetaProvider>
         <Font />
         <ThemeProvider
@@ -512,9 +512,7 @@ function ConnectionGate(props: ParentProps<{ disableHealthCheck?: boolean; start
       </Show>
       <Show when={loading()}>
         <div class="fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-background-base">
-          <Show when={import.meta.env.VITE_CM_BRAND} fallback={<Splash class="w-16 h-20 opacity-50 animate-pulse" />}>
-            <CookieLoader class="text-icon-base" />
-          </Show>
+          <Spinner class="size-16 text-icon-base" />
         </div>
       </Show>
     </>

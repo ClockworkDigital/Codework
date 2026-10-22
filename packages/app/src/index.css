@@ -11,6 +11,14 @@
 }
 
 @font-face {
+  font-family: "Anybody";
+  src: url("/assets/Anybody-Variable.ttf") format("truetype");
+  font-weight: 100 900;
+  font-stretch: 50% 150%;
+  font-display: swap;
+}
+
+@font-face {
   font-family: "Inter";
   src: url("/assets/Inter.ttf") format("truetype");
   font-weight: 100 900;
@@ -329,4 +337,19 @@
       animation-range: 0 0.1px;
     }
   }
+}
+
+[data-component="codework-banner"] {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: "Anybody", var(--font-family-sans, system-ui, sans-serif);
+  font-stretch: 125%;
+  font-weight: 700;
+  letter-spacing: -0.04em;
+}
+
+.codework-landing-brand {
+  justify-content: center;
+  font-size: 48px;
 }

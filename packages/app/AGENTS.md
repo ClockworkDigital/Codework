@@ -40,7 +40,7 @@
 
 ## Browser Automation
 
-Use CookieMonster's `browser_*` tools for web automation when running in the desktop app.
+Use Codework's `browser_*` tools for web automation when running in the desktop app.
 These tools are top-level plugin tools, outside the `execute` MCP catalog. Chrome DevTools is opt-in for explicitly requested debugging.
 
 Core workflow:

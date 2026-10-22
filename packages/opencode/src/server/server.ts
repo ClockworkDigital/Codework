@@ -77,7 +77,7 @@ export async function listen(opts: ListenOptions): Promise<Listener> {
     await scheduling?.startScheduler()
   } catch (error) {
     // A damaged scheduling store must not prevent ordinary chats from opening.
-    console.error("CookieMonster scheduler could not start", error)
+    console.error("Codework scheduler could not start", error)
   }
   return {
     hostname: listener.hostname,

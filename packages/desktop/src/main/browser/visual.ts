@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto"
-import { MAX_SCREENSHOT_BYTES } from "@cookiemonster/cm-browser/protocol"
+import { MAX_SCREENSHOT_BYTES } from "@codework/browser/protocol"
 
 export const VISUAL_MIN_SCALE = 0.5
 export const VISUAL_QUALITY_STEPS = [82, 72, 62, 52] as const

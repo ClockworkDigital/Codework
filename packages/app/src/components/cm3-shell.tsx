@@ -23,13 +23,15 @@ import { SessionTabAvatarView } from "@/pages/layout/session-tab-avatar"
 import { useSessionTabAvatarState } from "@/pages/layout/project-avatar-state"
 import { useDirectoryPicker } from "./directory-picker"
 import { useSettingsDialog } from "./settings-dialog"
+import { CodeworkBrand } from "./codework-brand"
+import iconDark from "@/assets/codework-icon-dark.svg"
+import iconLight from "@/assets/codework-icon-light.svg"
+import wordmarkDark from "@/assets/clockwork-wordmark-dark.svg"
+import wordmarkLight from "@/assets/clockwork-wordmark-light.svg"
+import { useTheme } from "@opencode-ai/ui/theme"
 import { Cm3Icon } from "./cm3-icon"
-import { WppAuthControl } from "./wpp-auth-control"
 import { Icon } from "@opencode-ai/ui/v2/icon"
 import { MenuV2 } from "@opencode-ai/ui/v2/menu-v2"
-import { useTheme } from "@opencode-ai/ui/theme"
-import cookieMonsterBannerLight from "@/assets/cookie-monster-banner-light.svg"
-import cookieMonsterBannerDark from "@/assets/cookie-monster-banner-dark.svg"
 import { useScheduling } from "./scheduling-panel"
 
 const PROJECT_SESSIONS_PAGE = 5
@@ -39,11 +41,11 @@ type ProjectChat = { key: string; title: string; updated: number } & (
 )
 
 export function Cm3Shell() {
+  const theme = useTheme()
   const scheduling = useScheduling()
   const home = createHomeController()
   const sessions = createHomeSessionsController(home, { registerPalette: false, allProjects: true })
   const language = useLanguage()
-  const theme = useTheme()
   const settings = useSettings()
   const layout = useLayout()
   const server = useServer()
@@ -62,7 +64,7 @@ export function Cm3Shell() {
       { defer: true },
     ),
   )
-  const [sidebar, setSidebar] = persisted(Persist.global("cm3.sidebar"), createStore({ collapsed: false, width: 260 }))
+  const [sidebar, setSidebar] = persisted(Persist.global("cm3.sidebar"), createStore({ collapsed: false, width: 288 }))
   const refs: { toggle?: HTMLButtonElement; nav?: HTMLElement; search?: HTMLInputElement } = {}
   createEffect(() => {
     refs.nav?.parentElement?.style.setProperty("--cm3-sidebar-width", `${sidebar.collapsed ? 48 : sidebar.width}px`)
@@ -473,13 +475,7 @@ export function Cm3Shell() {
         }}
       >
         <div class="cm3-sidebar-brand">
-          <img
-            class="cm3-sidebar-logo"
-            src={theme.mode() === "dark" ? cookieMonsterBannerDark : cookieMonsterBannerLight}
-            alt={language.t("quietCompanion.brand")}
-            width={720}
-            height={180}
-          />
+          <CodeworkBrand class="cm3-sidebar-logo" />
           <button
             class="cm3-sidebar-collapse"
             type="button"
@@ -638,7 +634,6 @@ export function Cm3Shell() {
             </section>
           </div>
           <div class="cm3-sidebar-footer">
-            <WppAuthControl />
             <button type="button" onClick={projects.utility.help}>
               <Cm3Icon name="question" />
               {language.t("sidebar.help")}
@@ -647,6 +642,22 @@ export function Cm3Shell() {
               <Cm3Icon name="gear" />
               {language.t("quietCompanion.settings")}
             </button>
+            <div class="codework-company-brand">
+              <img
+                class="codework-company-icon"
+                src={theme.mode() === "dark" ? iconDark : iconLight}
+                alt=""
+                width={448}
+                height={448}
+              />
+              <img
+                class="codework-company-wordmark"
+                src={theme.mode() === "dark" ? wordmarkDark : wordmarkLight}
+                alt={language.t("codework.company")}
+                width={992}
+                height={78}
+              />
+            </div>
           </div>
         </div>
         <ResizeHandle

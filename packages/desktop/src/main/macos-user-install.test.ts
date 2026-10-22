@@ -18,29 +18,24 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { copyUserApp, diskImageSource, installFromDiskImage } from "./macos-user-install"
 
-const executable = "/Volumes/CM/CookieMonster.app/Contents/MacOS/CookieMonster"
+const executable = "/Volumes/CM/Codework.app/Contents/MacOS/Codework"
 const info = JSON.stringify({ images: [{ "system-entities": [{ "mount-point": "/Volumes/CM" }] }] })
 const run = async () => info
 
 test("only identifies actual disk-image mounts, with path boundaries", async () => {
-  expect(await diskImageSource(executable, run)).toBe("/Volumes/CM/CookieMonster.app")
+  expect(await diskImageSource(executable, run)).toBe("/Volumes/CM/Codework.app")
   expect(await diskImageSource(executable.replace("/CM/", "/CM-other/"), run)).toBe("none")
-  expect(await diskImageSource("/Users/me/Applications/CookieMonster.app/Contents/MacOS/CookieMonster", run)).toBe(
-    "none",
-  )
+  expect(await diskImageSource("/Users/me/Applications/Codework.app/Contents/MacOS/Codework", run)).toBe("none")
   expect(await diskImageSource(executable, async () => '{"images":[]}')).toBe("none")
   expect(await diskImageSource(executable, async () => "invalid")).toBe("manual")
   for (const result of ["invalid", "{}"]) {
     expect(
-      await diskImageSource(
-        "/Users/me/Applications/CookieMonster.app/Contents/MacOS/CookieMonster",
-        async () => result,
-      ),
+      await diskImageSource("/Users/me/Applications/Codework.app/Contents/MacOS/Codework", async () => result),
     ).toBe("none")
   }
-  expect(
-    await diskImageSource("/private/var/AppTranslocation/id/d/CookieMonster.app/Contents/MacOS/CookieMonster", run),
-  ).toBe("manual")
+  expect(await diskImageSource("/private/var/AppTranslocation/id/d/Codework.app/Contents/MacOS/Codework", run)).toBe(
+    "manual",
+  )
 })
 
 test("confirmation, failure handling and lock handoff precede launch", async () => {
@@ -49,7 +44,7 @@ test("confirmation, failure handling and lock handoff precede launch", async () 
     const handled = await installFromDiskImage({
       executable:
         scenario === "manual"
-          ? "/private/var/AppTranslocation/id/d/CookieMonster.app/Contents/MacOS/CookieMonster"
+          ? "/private/var/AppTranslocation/id/d/Codework.app/Contents/MacOS/Codework"
           : scenario === "installed"
             ? executable.replace("/Volumes/CM", "/Applications")
             : executable,
@@ -73,11 +68,11 @@ test("confirmation, failure handling and lock handoff precede launch", async () 
       copy: async () => {
         events.push("copy")
         if (scenario === "copy-fails") throw new Error("copy")
-        return "/Users/me/Applications/CookieMonster.app"
+        return "/Users/me/Applications/Codework.app"
       },
       run: async (file, args) => {
         if (file !== "/usr/bin/open") return info
-        expect(args).toEqual(["-n", "/Users/me/Applications/CookieMonster.app"])
+        expect(args).toEqual(["-n", "/Users/me/Applications/Codework.app"])
         events.push("open")
         if (scenario === "open-fails") throw new Error("open")
         return ""
@@ -102,9 +97,9 @@ test("confirmation, failure handling and lock handoff precede launch", async () 
 
 test("replaces the whole app, retains the previous bundle and preserves unrelated data", async () => {
   const root = await mkdtemp(join(tmpdir(), "cm-install-test-"))
-  const source = join(root, "Source", "CookieMonster.app")
+  const source = join(root, "Source", "Codework.app")
   const applications = join(root, "Applications With Spaces")
-  const destination = join(applications, "CookieMonster.app")
+  const destination = join(applications, "Codework.app")
   const calls: string[][] = []
   try {
     await mkdir(source, { recursive: true })
@@ -123,12 +118,12 @@ test("replaces the whole app, retains the previous bundle and preserves unrelate
     expect(await copyUserApp(source, applications, copy)).toBe(destination)
     expect(await readFile(join(destination, "version"), "utf8")).toBe("new")
     await expect(lstat(join(destination, "sentinel"))).rejects.toMatchObject({ code: "ENOENT" })
-    const backups = (await readdir(applications)).filter((name) => name.startsWith("CookieMonster Backup-"))
+    const backups = (await readdir(applications)).filter((name) => name.startsWith("Codework Backup-"))
     expect(backups).toHaveLength(1)
-    expect(await readFile(join(applications, backups[0], "CookieMonster.app", "version"), "utf8")).toBe("old")
-    expect(await readFile(join(applications, backups[0], "CookieMonster.app", "sentinel"), "utf8")).toBe("existing")
+    expect(await readFile(join(applications, backups[0], "Codework.app", "version"), "utf8")).toBe("old")
+    expect(await readFile(join(applications, backups[0], "Codework.app", "sentinel"), "utf8")).toBe("existing")
     expect(await readFile(join(applications, "settings"), "utf8")).toBe("untouched")
-    expect((await readdir(applications)).some((name) => name.startsWith("CookieMonster Install-"))).toBe(false)
+    expect((await readdir(applications)).some((name) => name.startsWith("Codework Install-"))).toBe(false)
   } finally {
     await rm(root, { recursive: true, force: true })
   }
@@ -137,7 +132,7 @@ test("replaces the whole app, retains the previous bundle and preserves unrelate
 test("moves read-only bundle roots and restores their modes without changing the source", async () => {
   const root = await mkdtemp(join(tmpdir(), "cm-install-test-"))
   const source = join(root, "Source")
-  const destination = join(root, "CookieMonster.app")
+  const destination = join(root, "Codework.app")
   try {
     await mkdir(source)
     await writeFile(join(source, "version"), "new")
@@ -163,21 +158,21 @@ test("moves read-only bundle roots and restores their modes without changing the
       expect((await lstat(source)).mode & 0o777).toBe(0o555)
       expect((await lstat(destination)).mode & 0o777).toBe(0o555)
       expect(await readFile(join(destination, "version"), "utf8")).toBe(String(attempt))
-      const backups = (await readdir(root)).filter((name) => name.startsWith("CookieMonster Backup-"))
+      const backups = (await readdir(root)).filter((name) => name.startsWith("Codework Backup-"))
       expect(backups).toHaveLength(attempt === 1 ? 0 : 1)
       if (attempt > 1) {
-        expect(await readFile(join(root, backups[0], "CookieMonster.app", "version"), "utf8")).toBe(String(attempt - 1))
-        expect((await lstat(join(root, backups[0], "CookieMonster.app"))).mode & 0o777).toBe(0o555)
+        expect(await readFile(join(root, backups[0], "Codework.app", "version"), "utf8")).toBe(String(attempt - 1))
+        expect((await lstat(join(root, backups[0], "Codework.app"))).mode & 0o777).toBe(0o555)
       }
     }
-    const backup = (await readdir(root)).find((name) => name.startsWith("CookieMonster Backup-"))
+    const backup = (await readdir(root)).find((name) => name.startsWith("Codework Backup-"))
     if (!backup) throw new Error("Missing previous bundle")
-    expect((await lstat(join(root, backup, "CookieMonster.app"))).mode & 0o777).toBe(0o555)
+    expect((await lstat(join(root, backup, "Codework.app"))).mode & 0o777).toBe(0o555)
   } finally {
     await chmod(source, 0o755)
     await chmod(destination, 0o755).catch(() => {})
-    for (const name of (await readdir(root)).filter((name) => /CookieMonster (?:Backup|Install)-/.test(name))) {
-      await chmod(join(root, name, "CookieMonster.app"), 0o755).catch(() => {})
+    for (const name of (await readdir(root)).filter((name) => /Codework (?:Backup|Install)-/.test(name))) {
+      await chmod(join(root, name, "Codework.app"), 0o755).catch(() => {})
     }
     await rm(root, { recursive: true, force: true })
   }
@@ -186,7 +181,7 @@ test("moves read-only bundle roots and restores their modes without changing the
 test("backup cleanup is best-effort and retries after a later successful replacement", async () => {
   const root = await mkdtemp(join(tmpdir(), "cm-install-test-"))
   const source = join(root, "Source")
-  const destination = join(root, "CookieMonster.app")
+  const destination = join(root, "Codework.app")
   const copy = async (_file: string, args: string[]) => {
     await cp(args[3], args[4], { recursive: true })
     await chmod(args[4], 0o555)
@@ -198,7 +193,7 @@ test("backup cleanup is best-effort and retries after a later successful replace
     await copyUserApp(source, root, copy)
     await writeFile(join(source, "version"), "2")
     await copyUserApp(source, root, copy)
-    const older = (await readdir(root)).find((name) => name.startsWith("CookieMonster Backup-"))
+    const older = (await readdir(root)).find((name) => name.startsWith("Codework Backup-"))
     if (!older) throw new Error("Missing older backup")
     const cleanup: { path: string; backupMode: number; installedMode: number; installedVersion: string }[] = []
     await writeFile(join(source, "version"), "3")
@@ -215,24 +210,24 @@ test("backup cleanup is best-effort and retries after a later successful replace
     ).toBe(destination)
     expect(cleanup).toEqual([
       {
-        path: join(root, older, "CookieMonster.app"),
+        path: join(root, older, "Codework.app"),
         backupMode: 0o755,
         installedMode: 0o555,
         installedVersion: "3",
       },
     ])
-    expect((await readdir(root)).filter((name) => name.startsWith("CookieMonster Backup-"))).toHaveLength(2)
-    expect((await lstat(join(root, older, "CookieMonster.app"))).mode & 0o777).toBe(0o555)
-    expect(await readFile(join(root, older, "CookieMonster.app", "version"), "utf8")).toBe("1")
+    expect((await readdir(root)).filter((name) => name.startsWith("Codework Backup-"))).toHaveLength(2)
+    expect((await lstat(join(root, older, "Codework.app"))).mode & 0o777).toBe(0o555)
+    expect(await readFile(join(root, older, "Codework.app", "version"), "utf8")).toBe("1")
     await writeFile(join(source, "version"), "4")
     await copyUserApp(source, root, copy)
-    const backups = (await readdir(root)).filter((name) => name.startsWith("CookieMonster Backup-"))
+    const backups = (await readdir(root)).filter((name) => name.startsWith("Codework Backup-"))
     expect(backups).toHaveLength(1)
-    expect(await readFile(join(root, backups[0], "CookieMonster.app", "version"), "utf8")).toBe("3")
+    expect(await readFile(join(root, backups[0], "Codework.app", "version"), "utf8")).toBe("3")
   } finally {
     await chmod(destination, 0o755).catch(() => {})
-    for (const name of (await readdir(root)).filter((name) => name.startsWith("CookieMonster Backup-"))) {
-      await chmod(join(root, name, "CookieMonster.app"), 0o755).catch(() => {})
+    for (const name of (await readdir(root)).filter((name) => name.startsWith("Codework Backup-"))) {
+      await chmod(join(root, name, "Codework.app"), 0o755).catch(() => {})
     }
     await rm(root, { recursive: true, force: true })
   }
@@ -263,15 +258,15 @@ test("pruning leaves unowned, changed, symlinked and unrelated backup candidates
       await copyUserApp(source, root, copy)
       await writeFile(join(source, "version"), "2")
       await copyUserApp(source, root, copy)
-      const name = (await readdir(root)).find((name) => name.startsWith("CookieMonster Backup-"))
+      const name = (await readdir(root)).find((name) => name.startsWith("Codework Backup-"))
       if (!name) throw new Error("Missing backup candidate")
       const candidate = join(root, name)
-      const marker = join(candidate, ".cookiemonster-backup")
+      const marker = join(candidate, ".codework-backup")
       const target = join(root, "Private")
       await mkdir(target)
       await writeFile(join(target, "sentinel"), "unrelated")
-      await mkdir(join(root, "CookieMonster Install-private"))
-      await writeFile(join(root, "CookieMonster Install-private", "partial"), "staging")
+      await mkdir(join(root, "Codework Install-private"))
+      await writeFile(join(root, "Codework Install-private", "partial"), "staging")
       if (change === "unmarked") await rm(marker)
       if (change === "extra") await writeFile(join(candidate, "sentinel"), "user")
       if (change === "record") await writeFile(marker, "not an ownership record")
@@ -285,8 +280,8 @@ test("pruning leaves unowned, changed, symlinked and unrelated backup candidates
         await symlink(join(target, "marker"), marker)
       }
       if (change === "app-link") {
-        await rename(join(candidate, "CookieMonster.app"), join(target, "CookieMonster.app"))
-        await symlink(join(target, "CookieMonster.app"), join(candidate, "CookieMonster.app"))
+        await rename(join(candidate, "Codework.app"), join(target, "Codework.app"))
+        await symlink(join(target, "Codework.app"), join(candidate, "Codework.app"))
       }
       if (change === "container-link") {
         await rename(candidate, join(target, "Backup"))
@@ -297,17 +292,17 @@ test("pruning leaves unowned, changed, symlinked and unrelated backup candidates
         await copy(file, args)
         if (change === "during-copy") await writeFile(join(candidate, "sentinel"), "user")
         if (change === "bundle-changed") {
-          await rename(join(candidate, "CookieMonster.app"), join(target, "Original.app"))
-          await cp(join(target, "Original.app"), join(candidate, "CookieMonster.app"), { recursive: true })
+          await rename(join(candidate, "Codework.app"), join(target, "Original.app"))
+          await cp(join(target, "Original.app"), join(candidate, "Codework.app"), { recursive: true })
         }
         return ""
       })
-      expect((await readdir(root)).filter((entry) => entry.startsWith("CookieMonster Backup-"))).toHaveLength(2)
+      expect((await readdir(root)).filter((entry) => entry.startsWith("Codework Backup-"))).toHaveLength(2)
       expect(await readFile(join(target, "sentinel"), "utf8")).toBe("unrelated")
-      expect(await readFile(join(root, "CookieMonster Install-private", "partial"), "utf8")).toBe("staging")
-      expect(await readFile(join(candidate, "CookieMonster.app", "version"), "utf8")).toBe("1")
+      expect(await readFile(join(root, "Codework Install-private", "partial"), "utf8")).toBe("staging")
+      expect(await readFile(join(candidate, "Codework.app", "version"), "utf8")).toBe("1")
       if (change === "container-link") expect((await lstat(candidate)).isSymbolicLink()).toBe(true)
-      if (change === "app-link") expect((await lstat(join(candidate, "CookieMonster.app"))).isSymbolicLink()).toBe(true)
+      if (change === "app-link") expect((await lstat(join(candidate, "Codework.app"))).isSymbolicLink()).toBe(true)
       if (change === "marker-link") expect((await lstat(marker)).isSymbolicLink()).toBe(true)
     } finally {
       await rm(root, { recursive: true, force: true })
@@ -318,7 +313,7 @@ test("pruning leaves unowned, changed, symlinked and unrelated backup candidates
 test("backup ownership-write failure leaves older backups without failing the published install", async () => {
   const root = await mkdtemp(join(tmpdir(), "cm-install-test-"))
   const source = join(root, "Source")
-  const destination = join(root, "CookieMonster.app")
+  const destination = join(root, "Codework.app")
   const copy = async (_file: string, args: string[]) => {
     await cp(args[3], args[4], { recursive: true })
     return ""
@@ -329,25 +324,25 @@ test("backup ownership-write failure leaves older backups without failing the pu
     await copyUserApp(source, root, copy)
     await writeFile(join(source, "version"), "2")
     await copyUserApp(source, root, copy)
-    const older = (await readdir(root)).find((name) => name.startsWith("CookieMonster Backup-"))
+    const older = (await readdir(root)).find((name) => name.startsWith("Codework Backup-"))
     if (!older) throw new Error("Missing completed backup")
     await writeFile(join(source, "version"), "3")
     expect(
       await copyUserApp(source, root, copy, async (from, to) => {
         await rename(from, to)
-        if (String(to).includes("CookieMonster Backup-")) {
-          await writeFile(join(String(to), "..", ".cookiemonster-backup"), "user data")
+        if (String(to).includes("Codework Backup-")) {
+          await writeFile(join(String(to), "..", ".codework-backup"), "user data")
         }
       }),
     ).toBe(destination)
     expect(await readFile(join(destination, "version"), "utf8")).toBe("3")
-    expect(await readFile(join(root, older, "CookieMonster.app", "version"), "utf8")).toBe("1")
-    const backups = (await readdir(root)).filter((name) => name.startsWith("CookieMonster Backup-"))
+    expect(await readFile(join(root, older, "Codework.app", "version"), "utf8")).toBe("1")
+    const backups = (await readdir(root)).filter((name) => name.startsWith("Codework Backup-"))
     expect(backups).toHaveLength(2)
     const latest = backups.find((name) => name !== older)
     if (!latest) throw new Error("Missing immediately previous backup")
-    expect(await readFile(join(root, latest, ".cookiemonster-backup"), "utf8")).toBe("user data")
-    expect(await readFile(join(root, latest, "CookieMonster.app", "version"), "utf8")).toBe("2")
+    expect(await readFile(join(root, latest, ".codework-backup"), "utf8")).toBe("user data")
+    expect(await readFile(join(root, latest, "Codework.app", "version"), "utf8")).toBe("2")
   } finally {
     await rm(root, { recursive: true, force: true })
   }
@@ -357,7 +352,7 @@ test("failed staging, moves, permission cleanup and recovery never prune complet
   for (const failure of ["staging", "backup", "publication", "recovery", "chmod", "close"]) {
     const root = await mkdtemp(join(tmpdir(), "cm-install-test-"))
     const source = join(root, "Source")
-    const destination = join(root, "CookieMonster.app")
+    const destination = join(root, "Codework.app")
     const copy = async (_file: string, args: string[]) => {
       await cp(args[3], args[4], { recursive: true })
       await chmod(args[4], 0o555)
@@ -370,7 +365,7 @@ test("failed staging, moves, permission cleanup and recovery never prune complet
       await copyUserApp(source, root, copy)
       await writeFile(join(source, "version"), "2")
       await copyUserApp(source, root, copy)
-      const older = (await readdir(root)).find((name) => name.startsWith("CookieMonster Backup-"))
+      const older = (await readdir(root)).find((name) => name.startsWith("Codework Backup-"))
       if (!older) throw new Error("Missing completed backup")
       await writeFile(join(source, "version"), "3")
       await expect(
@@ -384,15 +379,15 @@ test("failed staging, moves, permission cleanup and recovery never prune complet
           },
           async (from, to) => {
             if (failure === "backup" && String(from) === destination) throw new Error(failure)
-            if (["publication", "recovery"].includes(failure) && String(from).includes("CookieMonster Install-")) {
+            if (["publication", "recovery"].includes(failure) && String(from).includes("Codework Install-")) {
               throw new Error(failure)
             }
-            if (failure === "recovery" && String(from).includes("CookieMonster Backup-")) throw new Error(failure)
+            if (failure === "recovery" && String(from).includes("Codework Backup-")) throw new Error(failure)
             await rename(from, to)
           },
           async (path, flags, mode) => {
             const directory = await open(path, flags, mode)
-            if (!String(path).includes("CookieMonster Install-")) return directory
+            if (!String(path).includes("Codework Install-")) return directory
             const applyMode = directory.chmod.bind(directory)
             const close = directory.close.bind(directory)
             directory.chmod = async (mode) => {
@@ -412,17 +407,15 @@ test("failed staging, moves, permission cleanup and recovery never prune complet
         ),
       ).rejects.toThrow(failure)
       expect(removed).toEqual([])
-      expect(await readFile(join(root, older, "CookieMonster.app", "version"), "utf8")).toBe("1")
-      expect((await lstat(join(root, older, "CookieMonster.app"))).mode & 0o777).toBe(0o555)
-      const recovery = (await readdir(root)).filter(
-        (name) => name.startsWith("CookieMonster Backup-") && name !== older,
-      )
+      expect(await readFile(join(root, older, "Codework.app", "version"), "utf8")).toBe("1")
+      expect((await lstat(join(root, older, "Codework.app"))).mode & 0o777).toBe(0o555)
+      const recovery = (await readdir(root)).filter((name) => name.startsWith("Codework Backup-") && name !== older)
       for (const name of recovery) {
-        await expect(lstat(join(root, name, ".cookiemonster-backup"))).rejects.toMatchObject({ code: "ENOENT" })
+        await expect(lstat(join(root, name, ".codework-backup"))).rejects.toMatchObject({ code: "ENOENT" })
       }
       // Even a later successful replacement must leave failed-install recovery bundles unmarked and intact.
       if (failure === "recovery") {
-        const saved = join(root, recovery[0], "CookieMonster.app")
+        const saved = join(root, recovery[0], "Codework.app")
         expect(await readFile(join(saved, "version"), "utf8")).toBe("2")
         await copyUserApp(source, root, copy)
         await writeFile(join(source, "version"), "4")
@@ -431,8 +424,8 @@ test("failed staging, moves, permission cleanup and recovery never prune complet
       }
     } finally {
       await chmod(destination, 0o755).catch(() => {})
-      for (const name of (await readdir(root)).filter((name) => /CookieMonster (?:Backup|Install)-/.test(name))) {
-        await chmod(join(root, name, "CookieMonster.app"), 0o755).catch(() => {})
+      for (const name of (await readdir(root)).filter((name) => /Codework (?:Backup|Install)-/.test(name))) {
+        await chmod(join(root, name, "Codework.app"), 0o755).catch(() => {})
       }
       await rm(root, { recursive: true, force: true })
     }
@@ -443,7 +436,7 @@ test("backup handle cleanup failures restore the moved app before reporting fail
   for (const failure of ["chmod", "close"]) {
     const root = await mkdtemp(join(tmpdir(), "cm-install-test-"))
     const source = join(root, "Source")
-    const destination = join(root, "CookieMonster.app")
+    const destination = join(root, "Codework.app")
     const moves: string[] = []
     try {
       await mkdir(source)
@@ -481,15 +474,15 @@ test("backup handle cleanup failures restore the moved app before reporting fail
         ),
       ).rejects.toThrow(failure === "chmod" ? "mode restore failed" : "handle close failed")
       expect(moves).toHaveLength(2)
-      expect(moves[1]).toContain("CookieMonster Backup-")
+      expect(moves[1]).toContain("Codework Backup-")
       expect(await readFile(join(destination, "version"), "utf8")).toBe("old")
       // A failed fchmod can leave owner-write enabled; recovery must still restore the bundle.
       expect((await lstat(destination)).mode & 0o777).toBe(failure === "chmod" ? 0o755 : 0o555)
-      const backup = (await readdir(root)).find((name) => name.startsWith("CookieMonster Backup-"))
-      const staging = (await readdir(root)).find((name) => name.startsWith("CookieMonster Install-"))
+      const backup = (await readdir(root)).find((name) => name.startsWith("Codework Backup-"))
+      const staging = (await readdir(root)).find((name) => name.startsWith("Codework Install-"))
       if (!backup || !staging) throw new Error("Missing recovery folders")
-      await expect(lstat(join(root, backup, "CookieMonster.app"))).rejects.toMatchObject({ code: "ENOENT" })
-      expect(await readFile(join(root, staging, "CookieMonster.app", "version"), "utf8")).toBe("new")
+      await expect(lstat(join(root, backup, "Codework.app"))).rejects.toMatchObject({ code: "ENOENT" })
+      expect(await readFile(join(root, staging, "Codework.app", "version"), "utf8")).toBe("new")
     } finally {
       await chmod(destination, 0o755).catch(() => {})
       await rm(root, { recursive: true, force: true })
@@ -502,7 +495,7 @@ test("publication handle cleanup failures retain the complete new app and any pr
     for (const failure of ["chmod", "close"]) {
       const root = await mkdtemp(join(tmpdir(), "cm-install-test-"))
       const source = join(root, "Source")
-      const destination = join(root, "CookieMonster.app")
+      const destination = join(root, "Codework.app")
       try {
         await mkdir(source)
         await writeFile(join(source, "version"), "new")
@@ -523,7 +516,7 @@ test("publication handle cleanup failures retain the complete new app and any pr
             rename,
             async (path, flags, mode) => {
               const directory = await open(path, flags, mode)
-              if (!String(path).includes("CookieMonster Install-")) return directory
+              if (!String(path).includes("Codework Install-")) return directory
               const applyMode = directory.chmod.bind(directory)
               const close = directory.close.bind(directory)
               directory.chmod = async (mode) => {
@@ -540,16 +533,16 @@ test("publication handle cleanup failures retain the complete new app and any pr
         ).rejects.toThrow(failure === "chmod" ? "mode restore failed" : "handle close failed")
         expect(await readFile(join(destination, "version"), "utf8")).toBe("new")
         expect((await lstat(destination)).mode & 0o777).toBe(failure === "chmod" ? 0o755 : 0o555)
-        const backups = (await readdir(root)).filter((name) => name.startsWith("CookieMonster Backup-"))
+        const backups = (await readdir(root)).filter((name) => name.startsWith("Codework Backup-"))
         expect(backups).toHaveLength(existing ? 1 : 0)
         if (existing) {
-          expect(await readFile(join(root, backups[0], "CookieMonster.app", "version"), "utf8")).toBe("old")
-          expect((await lstat(join(root, backups[0], "CookieMonster.app"))).mode & 0o777).toBe(0o555)
+          expect(await readFile(join(root, backups[0], "Codework.app", "version"), "utf8")).toBe("old")
+          expect((await lstat(join(root, backups[0], "Codework.app"))).mode & 0o777).toBe(0o555)
         }
       } finally {
         await chmod(destination, 0o755).catch(() => {})
-        for (const name of (await readdir(root)).filter((name) => name.startsWith("CookieMonster Backup-"))) {
-          await chmod(join(root, name, "CookieMonster.app"), 0o755).catch(() => {})
+        for (const name of (await readdir(root)).filter((name) => name.startsWith("Codework Backup-"))) {
+          await chmod(join(root, name, "Codework.app"), 0o755).catch(() => {})
         }
         await rm(root, { recursive: true, force: true })
       }
@@ -561,7 +554,7 @@ test("permission and move failures are not masked by mode restoration or handle 
   for (const failure of ["chmod", "rename"]) {
     const root = await mkdtemp(join(tmpdir(), "cm-install-test-"))
     const source = join(root, "Source")
-    const destination = join(root, "CookieMonster.app")
+    const destination = join(root, "Codework.app")
     const modes: number[] = []
     const moves: string[] = []
     const closed: string[] = []
@@ -616,7 +609,7 @@ test("permission and move failures are not masked by mode restoration or handle 
 test("failed staging copies leave the installed app intact and can be retried", async () => {
   const root = await mkdtemp(join(tmpdir(), "cm-install-test-"))
   const source = join(root, "Source")
-  const destination = join(root, "CookieMonster.app")
+  const destination = join(root, "Codework.app")
   try {
     await mkdir(source)
     await writeFile(join(source, "version"), "new")
@@ -630,7 +623,7 @@ test("failed staging copies leave the installed app intact and can be retried", 
       }),
     ).rejects.toThrow("disk full")
     expect(await readFile(join(destination, "version"), "utf8")).toBe("old")
-    expect((await readdir(root)).some((name) => name.startsWith("CookieMonster Backup-"))).toBe(false)
+    expect((await readdir(root)).some((name) => name.startsWith("Codework Backup-"))).toBe(false)
     await copyUserApp(source, root, async (_file, args) => {
       await cp(args[3], args[4], { recursive: true })
       return ""
@@ -643,7 +636,7 @@ test("failed staging copies leave the installed app intact and can be retried", 
 
 test("rejects files, live and dangling symlinks without following or changing them", async () => {
   const root = await mkdtemp(join(tmpdir(), "cm-install-test-"))
-  const destination = join(root, "CookieMonster.app")
+  const destination = join(root, "Codework.app")
   const target = join(root, "Target")
   try {
     await mkdir(target)
@@ -667,7 +660,7 @@ test("rejects files, live and dangling symlinks without following or changing th
 test("rejects self-replacement and destinations changed while copying", async () => {
   const root = await mkdtemp(join(tmpdir(), "cm-install-test-"))
   const source = join(root, "Source")
-  const destination = join(root, "CookieMonster.app")
+  const destination = join(root, "Codework.app")
   try {
     await mkdir(source)
     await mkdir(destination)
@@ -692,7 +685,7 @@ test("rejects self-replacement and destinations changed while copying", async ()
 test("concurrent first installs publish only one complete bundle", async () => {
   const root = await mkdtemp(join(tmpdir(), "cm-install-test-"))
   const source = join(root, "Source")
-  const destination = join(root, "CookieMonster.app")
+  const destination = join(root, "Codework.app")
   try {
     await mkdir(source)
     await writeFile(join(source, "version"), "complete")
@@ -716,7 +709,7 @@ test("publication failures restore the old app or retain its backup without over
   for (const scenario of ["restore", "restore-fails", "concurrent-destination"]) {
     const root = await mkdtemp(join(tmpdir(), "cm-install-test-"))
     const source = join(root, "Source")
-    const destination = join(root, "CookieMonster.app")
+    const destination = join(root, "Codework.app")
     try {
       await mkdir(source)
       await writeFile(join(source, "version"), "new")
@@ -733,28 +726,28 @@ test("publication failures restore the old app or retain its backup without over
           },
           async (from, to) => {
             expect((await lstat(from)).mode & 0o200).toBe(0o200)
-            if (String(from).includes("CookieMonster Install-")) {
+            if (String(from).includes("Codework Install-")) {
               if (scenario === "concurrent-destination") await writeFile(join(destination, "sentinel"), "concurrent")
               throw new Error("publication failed")
             }
-            if (scenario === "restore-fails" && String(from).includes("CookieMonster Backup-")) {
+            if (scenario === "restore-fails" && String(from).includes("Codework Backup-")) {
               throw new Error("restoration failed")
             }
             await rename(from, to)
           },
         ),
       ).rejects.toThrow("publication failed")
-      const backup = (await readdir(root)).find((name) => name.startsWith("CookieMonster Backup-"))
+      const backup = (await readdir(root)).find((name) => name.startsWith("Codework Backup-"))
       expect(backup).toBeDefined()
       if (!backup) throw new Error("Missing previous bundle")
       if (scenario === "restore") {
         expect(await readFile(join(destination, "version"), "utf8")).toBe("old")
         expect((await lstat(destination)).mode & 0o777).toBe(0o555)
-        await expect(lstat(join(root, backup, "CookieMonster.app"))).rejects.toMatchObject({ code: "ENOENT" })
+        await expect(lstat(join(root, backup, "Codework.app"))).rejects.toMatchObject({ code: "ENOENT" })
         continue
       }
-      expect(await readFile(join(root, backup, "CookieMonster.app", "version"), "utf8")).toBe("old")
-      expect((await lstat(join(root, backup, "CookieMonster.app"))).mode & 0o777).toBe(0o555)
+      expect(await readFile(join(root, backup, "Codework.app", "version"), "utf8")).toBe("old")
+      expect((await lstat(join(root, backup, "Codework.app"))).mode & 0o777).toBe(0o555)
       if (scenario === "restore-fails") {
         await expect(lstat(destination)).rejects.toMatchObject({ code: "ENOENT" })
         continue
@@ -762,8 +755,8 @@ test("publication failures restore the old app or retain its backup without over
       expect(await readFile(join(destination, "sentinel"), "utf8")).toBe("concurrent")
     } finally {
       await chmod(destination, 0o755).catch(() => {})
-      for (const name of (await readdir(root)).filter((name) => name.startsWith("CookieMonster Backup-"))) {
-        await chmod(join(root, name, "CookieMonster.app"), 0o755).catch(() => {})
+      for (const name of (await readdir(root)).filter((name) => name.startsWith("Codework Backup-"))) {
+        await chmod(join(root, name, "Codework.app"), 0o755).catch(() => {})
       }
       await rm(root, { recursive: true, force: true })
     }

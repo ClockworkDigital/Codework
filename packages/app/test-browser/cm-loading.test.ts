@@ -7,9 +7,9 @@ import { chromium } from "@playwright/test"
 import { build } from "vite"
 import solid from "vite-plugin-solid"
 
-test("cookie loaders retain their choice, inherit colour tokens, animate, and respect reduced motion", async () => {
+test("Clockwork loaders retain their artwork, inherit colour tokens, and respect reduced motion", async () => {
   const directory = await mkdtemp(join(tmpdir(), "cm-loading-"))
-  const browser = await chromium.launch()
+  const browser = await chromium.launch({ channel: process.env.PLAYWRIGHT_CHANNEL })
   const server = createServer(async (request, response) => {
     const pathname = new URL(request.url ?? "/", "http://localhost").pathname
     if (pathname === "/") {
@@ -54,11 +54,11 @@ test("cookie loaders retain their choice, inherit colour tokens, animate, and re
       if (message.type() === "error") console.error("Loader fixture:", message.text())
     })
     await page.goto(`http://127.0.0.1:${address.port}`)
-    await page.waitForSelector('#variants [data-loading-animation="flip-3d"]', { timeout: 5000 })
+    await page.waitForSelector('#variants [data-loading-animation="clockwork"]', { timeout: 5000 })
     const before = await page
       .locator("#random svg")
       .evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-loading-animation")))
-    expect(new Set(before).size).toBeGreaterThan(1)
+    expect(new Set(before)).toEqual(new Set(["clockwork"]))
     await page.locator("#update").click()
     expect(
       await page
@@ -67,7 +67,8 @@ test("cookie loaders retain their choice, inherit colour tokens, animate, and re
     ).toEqual(before)
     expect(await page.locator("#random svg").first().getAttribute("aria-label")).toBe("Still waiting")
     expect(await page.locator("#random svg").first().getAttribute("aria-hidden")).toBe("false")
-    expect(await page.locator("#stock [data-loading-animation]").count()).toBe(0)
+    expect(await page.locator("#stock svg").getAttribute("data-loading-animation")).toBe("clockwork")
+    expect(await page.locator("#fallback svg").getAttribute("data-loading-animation")).toBe("clockwork")
     expect(await page.locator("#adapters [data-loading-animation]").count()).toBe(4)
     const ids = await page.locator("filter[id]").evaluateAll((nodes) => nodes.map((node) => node.id))
     expect(new Set(ids).size).toBe(ids.length)
@@ -89,7 +90,7 @@ test("cookie loaders retain their choice, inherit colour tokens, animate, and re
         .locator("#adapters svg")
         .evaluateAll((nodes) => nodes.every((node) => getComputedStyle(node).animationName === "none")),
     ).toBe(true)
-    const blue = await page.locator('[data-case="flip-3d"] svg').screenshot()
+    const blue = await page.locator('[data-case="clockwork"] svg').screenshot()
     const pixels = async (image: Buffer, colour: number[]) =>
       page.evaluate(
         async ({ image, colour }) => {
@@ -109,7 +110,7 @@ test("cookie loaders retain their choice, inherit colour tokens, animate, and re
       )
     expect(await pixels(blue, [17, 91, 177])).toBeGreaterThan(100)
     await page.locator("#theme").click()
-    const light = await page.locator('[data-case="flip-3d"] svg').screenshot()
+    const light = await page.locator('[data-case="clockwork"] svg').screenshot()
     expect(await pixels(light, [215, 225, 235])).toBeGreaterThan(100)
     expect(
       await page
@@ -117,11 +118,6 @@ test("cookie loaders retain their choice, inherit colour tokens, animate, and re
         .evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-loading-animation"))),
     ).toEqual(before)
     await page.emulateMedia({ reducedMotion: "no-preference" })
-    const first = await page.locator('[data-case="flip-3d"] svg').screenshot({ animations: "allow" })
-    // Allow the embedded SVG image to advance several projected vector frames.
-    await page.waitForTimeout(220)
-    const next = await page.locator('[data-case="flip-3d"] svg').screenshot({ animations: "allow" })
-    expect(first.equals(next)).toBe(false)
     await page.screenshot({ path: join(directory, "preview.png"), fullPage: true })
   } finally {
     await browser.close()

@@ -27,8 +27,6 @@ import { PermissionV1 } from "@opencode-ai/core/v1/permission"
 
 export function provider(model: Provider.Model) {
   const family = `${model.family ?? ""} ${model.api.id}`.toLowerCase()
-  if (model.providerID === "cookiemonster" && family.includes("gpt")) return [PROMPT_GPT]
-  if (model.providerID === "cookiemonster") return [PROMPT_ANTHROPIC]
   if (family.includes("muse")) {
     const name = family.includes("muse-glimmer") ? "Muse Glimmer" : "Muse Spark"
     return [PROMPT_META.replaceAll("{{MODEL_NAME}}", name)]

@@ -7,7 +7,7 @@ import {
   type BrowserIpcRequest,
   type ActionStatus,
   type ActionFailureCause,
-} from "@cookiemonster/cm-browser/protocol"
+} from "@codework/browser/protocol"
 import { browserDeliveryError, browserResponseNeedsDeliveryCheck, routeBrowserRequest } from "./router"
 import { nativeT } from "../native-translations"
 import { createBrowserDelegations } from "./delegation"

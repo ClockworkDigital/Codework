@@ -8,7 +8,7 @@ import {
   type FrameRequest,
   type FrameSelectContext,
   type Modifier,
-} from "@cookiemonster/cm-browser/protocol"
+} from "@codework/browser/protocol"
 import { browserAgentEnabled, browserRegistration, type BrowserRegistration } from "./registry"
 import { markBrowserInputDown, markBrowserInputReleased, suppressBrowserContextMenu } from "./driver"
 import { dragSnapshotScript, parseSnapshot, snapshotScript, selectOptionScript, type PageSnapshot } from "./snapshot"

@@ -13,75 +13,75 @@ make_cli() {
 }
 
 case_root="$root/missing-destination"
-make_cli "$case_root/CookieMonster.app"
-register_cookiemonster_cli "$case_root/CookieMonster.app/Contents/Resources/cli/opencode" "$case_root/bin/opencode"
-test "$(readlink "$case_root/bin/opencode")" = "$case_root/CookieMonster.app/Contents/Resources/cli/opencode"
+make_cli "$case_root/Codework.app"
+register_codework_cli "$case_root/Codework.app/Contents/Resources/cli/opencode" "$case_root/bin/opencode"
+test "$(readlink "$case_root/bin/opencode")" = "$case_root/Codework.app/Contents/Resources/cli/opencode"
 
-register_cookiemonster_cli "$case_root/CookieMonster.app/Contents/Resources/cli/opencode" "$case_root/bin/opencode"
-test "$(readlink "$case_root/bin/opencode")" = "$case_root/CookieMonster.app/Contents/Resources/cli/opencode"
+register_codework_cli "$case_root/Codework.app/Contents/Resources/cli/opencode" "$case_root/bin/opencode"
+test "$(readlink "$case_root/bin/opencode")" = "$case_root/Codework.app/Contents/Resources/cli/opencode"
 
 case_root="$root/missing-parents"
-make_cli "$case_root/CookieMonster.app"
-(umask 077; register_cookiemonster_cli "$case_root/CookieMonster.app/Contents/Resources/cli/opencode" "$case_root/usr/local/bin/opencode")
+make_cli "$case_root/Codework.app"
+(umask 077; register_codework_cli "$case_root/Codework.app/Contents/Resources/cli/opencode" "$case_root/usr/local/bin/opencode")
 test -d "$case_root/usr/local/bin"
-test "$(readlink "$case_root/usr/local/bin/opencode")" = "$case_root/CookieMonster.app/Contents/Resources/cli/opencode"
+test "$(readlink "$case_root/usr/local/bin/opencode")" = "$case_root/Codework.app/Contents/Resources/cli/opencode"
 for directory in "$case_root/usr" "$case_root/usr/local" "$case_root/usr/local/bin"; do
   test "$(LC_ALL=C ls -ld "$directory" | cut -c1-10)" = "drwxr-xr-x"
 done
 chmod 0700 "$case_root/usr/local/bin"
-register_cookiemonster_cli "$case_root/CookieMonster.app/Contents/Resources/cli/opencode" "$case_root/usr/local/bin/opencode"
+register_codework_cli "$case_root/Codework.app/Contents/Resources/cli/opencode" "$case_root/usr/local/bin/opencode"
 test "$(LC_ALL=C ls -ld "$case_root/usr/local/bin" | cut -c1-10)" = "drwx------"
 
 case_root="$root/legacy-link"
-make_cli "$case_root/CookieMonster.app"
+make_cli "$case_root/Codework.app"
 mkdir -p "$case_root/bin"
-ln -s "$case_root/CookieMonster.app/Contents/Resources/opencode-cli" "$case_root/bin/opencode"
-register_cookiemonster_cli "$case_root/CookieMonster.app/Contents/Resources/cli/opencode" "$case_root/bin/opencode"
-test "$(readlink "$case_root/bin/opencode")" = "$case_root/CookieMonster.app/Contents/Resources/cli/opencode"
+ln -s "$case_root/Codework.app/Contents/Resources/opencode-cli" "$case_root/bin/opencode"
+register_codework_cli "$case_root/Codework.app/Contents/Resources/cli/opencode" "$case_root/bin/opencode"
+test "$(readlink "$case_root/bin/opencode")" = "$case_root/Codework.app/Contents/Resources/cli/opencode"
 
 case_root="$root/unrelated-link"
-make_cli "$case_root/CookieMonster.app"
+make_cli "$case_root/Codework.app"
 mkdir -p "$case_root/bin"
 ln -s "$case_root/other-opencode" "$case_root/bin/opencode"
-if register_cookiemonster_cli "$case_root/CookieMonster.app/Contents/Resources/cli/opencode" "$case_root/bin/opencode"; then exit 1; fi
+if register_codework_cli "$case_root/Codework.app/Contents/Resources/cli/opencode" "$case_root/bin/opencode"; then exit 1; fi
 test "$(readlink "$case_root/bin/opencode")" = "$case_root/other-opencode"
 
 case_root="$root/regular-file"
-make_cli "$case_root/CookieMonster.app"
+make_cli "$case_root/Codework.app"
 mkdir -p "$case_root/bin"
 printf 'owned elsewhere' > "$case_root/bin/opencode"
-if register_cookiemonster_cli "$case_root/CookieMonster.app/Contents/Resources/cli/opencode" "$case_root/bin/opencode"; then exit 1; fi
+if register_codework_cli "$case_root/Codework.app/Contents/Resources/cli/opencode" "$case_root/bin/opencode"; then exit 1; fi
 grep -q 'owned elsewhere' "$case_root/bin/opencode"
 
 case_root="$root/missing-cli"
-if register_cookiemonster_cli "$case_root/CookieMonster.app/Contents/Resources/cli/opencode" "$case_root/bin/opencode"; then exit 1; fi
+if register_codework_cli "$case_root/Codework.app/Contents/Resources/cli/opencode" "$case_root/bin/opencode"; then exit 1; fi
 
 case_root="$root/non-executable"
-make_cli "$case_root/CookieMonster.app"
-chmod 0644 "$case_root/CookieMonster.app/Contents/Resources/cli/opencode"
-if register_cookiemonster_cli "$case_root/CookieMonster.app/Contents/Resources/cli/opencode" "$case_root/bin/opencode"; then exit 1; fi
+make_cli "$case_root/Codework.app"
+chmod 0644 "$case_root/Codework.app/Contents/Resources/cli/opencode"
+if register_codework_cli "$case_root/Codework.app/Contents/Resources/cli/opencode" "$case_root/bin/opencode"; then exit 1; fi
 
 case_root="$root/failed-version"
-make_cli "$case_root/CookieMonster.app"
-printf '#!/bin/sh\nexit 1\n' > "$case_root/CookieMonster.app/Contents/Resources/cli/opencode"
-if register_cookiemonster_cli "$case_root/CookieMonster.app/Contents/Resources/cli/opencode" "$case_root/bin/opencode"; then exit 1; fi
+make_cli "$case_root/Codework.app"
+printf '#!/bin/sh\nexit 1\n' > "$case_root/Codework.app/Contents/Resources/cli/opencode"
+if register_codework_cli "$case_root/Codework.app/Contents/Resources/cli/opencode" "$case_root/bin/opencode"; then exit 1; fi
 test ! -e "$case_root/bin/opencode"
 test ! -L "$case_root/bin/opencode"
 
 # A predictable temporary-name collision must never be moved or removed by registration.
 case_root="$root/spaces and collision"
-make_cli "$case_root/CookieMonster.app"
+make_cli "$case_root/Codework.app"
 mkdir -p "$case_root/bin"
-printf 'unrelated temporary file' > "$case_root/bin/.opencode.cookiemonster.$$"
-register_cookiemonster_cli "$case_root/CookieMonster.app/Contents/Resources/cli/opencode" "$case_root/bin/opencode"
-grep -q 'unrelated temporary file' "$case_root/bin/.opencode.cookiemonster.$$"
-test "$(readlink "$case_root/bin/opencode")" = "$case_root/CookieMonster.app/Contents/Resources/cli/opencode"
+printf 'unrelated temporary file' > "$case_root/bin/.opencode.codework.$$"
+register_codework_cli "$case_root/Codework.app/Contents/Resources/cli/opencode" "$case_root/bin/opencode"
+grep -q 'unrelated temporary file' "$case_root/bin/.opencode.codework.$$"
+test "$(readlink "$case_root/bin/opencode")" = "$case_root/Codework.app/Contents/Resources/cli/opencode"
 
 for kind in missing current legacy dangling unrelated regular directory; do
   case_root="$root/removal-$kind"
-  cli="$case_root/CookieMonster.app/Contents/Resources/cli/opencode"
+  cli="$case_root/Codework.app/Contents/Resources/cli/opencode"
   destination="$case_root/bin/opencode"
-  make_cli "$case_root/CookieMonster.app"
+  make_cli "$case_root/Codework.app"
   mkdir -p "$case_root/bin"
   case "$kind" in
     current) ln -s "$cli" "$destination" ;;
@@ -93,7 +93,7 @@ for kind in missing current legacy dangling unrelated regular directory; do
   esac
   case "$kind" in
     unrelated|regular|directory)
-      if unregister_cookiemonster_cli "$cli" "$destination"; then exit 1; fi
+      if unregister_codework_cli "$cli" "$destination"; then exit 1; fi
       case "$kind" in
         unrelated) test "$(readlink "$destination")" = "$case_root/other-cli" ;;
         regular) grep -q 'unrelated command' "$destination" ;;
@@ -101,7 +101,7 @@ for kind in missing current legacy dangling unrelated regular directory; do
       esac
       ;;
     *)
-      unregister_cookiemonster_cli "$cli" "$destination"
+      unregister_codework_cli "$cli" "$destination"
       test ! -e "$destination"
       test ! -L "$destination"
       ;;

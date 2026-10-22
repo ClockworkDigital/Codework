@@ -14,11 +14,11 @@ import {
 
 describe("desktop native translations", () => {
   test("installer copy explains replacement, backup retention and failure recovery", () => {
-    const destination = "/Users/me/Applications/CookieMonster.app"
+    const destination = "/Users/me/Applications/Codework.app"
     const detail = formatDesktopNativeMessage(DESKTOP_NATIVE_ENGLISH["desktop.install.replaceDetail"], { destination })
     expect(detail).toContain(destination)
     expect(detail).toContain("will be replaced after the new copy is complete")
-    expect(detail).toContain("CookieMonster Backup-")
+    expect(detail).toContain("Codework Backup-")
     expect(detail).toContain("Only the immediately previous app")
     expect(detail).toContain("removed after successful replacement")
     expect(detail).toContain("Failed-install recovery copies are left alone")
@@ -28,8 +28,8 @@ describe("desktop native translations", () => {
     const failed = formatDesktopNativeMessage(DESKTOP_NATIVE_ENGLISH["desktop.install.replaceFailed"], { destination })
     expect(failed).toContain(destination)
     expect(failed).toContain("existing app was not moved")
-    expect(failed).toContain("CookieMonster Install-")
-    expect(failed).toContain("CookieMonster Backup-")
+    expect(failed).toContain("Codework Install-")
+    expect(failed).toContain("Codework Backup-")
     expect(failed).toContain("Failed installation does not prune backups")
     expect(failed).toContain("installation succeeded but opening failed")
   })

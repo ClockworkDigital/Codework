@@ -85,7 +85,7 @@ for (const direction of ["ltr", "rtl"] as const) {
     await expect(panel.getByRole("option", { name: "file-00.ts", exact: true })).toBeVisible()
     const originalSidebar = await panel.locator('[data-component="session-review-v2-sidebar-root"]').elementHandle()
 
-    const cm3 = page.getByRole("switch", { name: "CM3 UI", exact: true })
+    const cm3 = page.getByRole("switch", { name: "Codework UI", exact: true })
     await cm3.click()
     await expect(panel.getByRole("tablist")).toBeVisible()
     expect(await list.evaluate((element, original) => element === original, originalList)).toBe(true)

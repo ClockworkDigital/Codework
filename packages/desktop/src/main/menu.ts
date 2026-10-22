@@ -11,9 +11,6 @@ import { UPDATER_ENABLED } from "./constants"
 import { runDesktopMenuAction } from "./desktop-menu-actions"
 import { openExternalURL } from "./windows"
 import { nativeT } from "./native-translations"
-import { subscribeWppLoginMenu, wppLoginMenu } from "./wpp-bridge/login-controls"
-
-let stopLoginMenu: (() => void) | undefined
 
 type Deps = {
   trigger: (id: string) => void
@@ -34,18 +31,7 @@ export function createMenu(deps: Deps) {
     }
   })
 
-  const savedLogin = Menu.buildFromTemplate(wppLoginMenu(undefined, true))
-  const updateLoginMenu = () => {
-    wppLoginMenu(undefined, true).forEach((entry, index) => {
-      savedLogin.items[index].enabled = entry.enabled ?? false
-    })
-  }
-  const menu = Menu.buildFromTemplate([...template, { label: nativeT("desktop.wpp.login.menu"), submenu: savedLogin }])
-  // Cocoa forwards submenu opening to the application menu's delegate.
-  menu.on("menu-will-show", updateLoginMenu)
-  stopLoginMenu?.()
-  stopLoginMenu = subscribeWppLoginMenu(updateLoginMenu)
-  Menu.setApplicationMenu(menu)
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template))
 }
 
 function nativeItem(entry: DesktopMenuEntry, deps: Deps): MenuItemConstructorOptions {

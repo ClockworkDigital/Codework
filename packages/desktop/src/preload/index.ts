@@ -14,23 +14,6 @@ const api: ElectronAPI = {
   killSidecar: () => ipcRenderer.invoke("kill-sidecar"),
   installCli: () => ipcRenderer.invoke("install-cli"),
   awaitInitialization: () => ipcRenderer.invoke("await-initialization"),
-  wppChat: {
-    getMode: () => ipcRenderer.invoke("wpp-chat-mode-get"),
-    setMode: (mode) => ipcRenderer.invoke("wpp-chat-mode-set", mode),
-  },
-  wppAuth: {
-    subscribe: (callback) => {
-      const handler = (_: unknown, state: Parameters<typeof callback>[0]) => callback(state)
-      ipcRenderer.on("wpp-auth-state", handler)
-      void ipcRenderer.invoke("wpp-auth-subscribe")
-      return () => {
-        ipcRenderer.removeListener("wpp-auth-state", handler)
-        void ipcRenderer.invoke("wpp-auth-unsubscribe")
-      }
-    },
-    check: () => ipcRenderer.invoke("wpp-auth-check"),
-    toggleLogin: () => ipcRenderer.invoke("wpp-auth-toggle-login"),
-  },
   wslServers: {
     getState: () => ipcRenderer.invoke("wsl-servers-get-state"),
     subscribe: (cb) => {

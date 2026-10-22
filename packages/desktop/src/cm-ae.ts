@@ -36,6 +36,7 @@ const approvalTools = [
   "ae_reconcile",
 ]
 
+// Compatibility field required by the vendored AE artifact, independent of Codework branding.
 export type CmAePlugin = [string, { releaseMetadata: { cookieMonsterVersion: string } }]
 
 // Read bytes once: syntax checks and staging use these same bytes, never import the artifact.

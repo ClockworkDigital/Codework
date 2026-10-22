@@ -90,7 +90,7 @@ export async function importsSmoke(
     for (const [key, value] of Object.entries(counts))
       assert(review.detail?.includes(`${key}: ${value}`), `${key} count`)
     assert(review.detail?.includes("plaintext"))
-    assert(review.detail?.includes("not app or WPP"))
+    assert(review.detail?.includes("not app login data"))
   }
   try {
     vaultAuthentication.verify = async () => {}

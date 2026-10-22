@@ -1,4 +1,4 @@
-import type { ElementRef } from "@cookiemonster/cm-browser/protocol"
+import type { ElementRef } from "@codework/browser/protocol"
 
 const MAX_ELEMENTS = 200
 const MAX_ELEMENT_TEXT = 160

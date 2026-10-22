@@ -61,7 +61,9 @@ export async function siteDataSmoke(
   })
   await first.contents.session.cookies.set({ url: unrelated, name: "unrelated-cookie", value: "keep" })
   await session.defaultSession.cookies.set({ url: primary, name: "app-cookie", value: "keep" })
-  await session.fromPartition("persist:wpp").cookies.set({ url: primary, name: "wpp-cookie", value: "keep" })
+  await session
+    .fromPartition("persist:unrelated-fixture")
+    .cookies.set({ url: primary, name: "unrelated-cookie", value: "keep" })
   getStore("cm-browser").set("history", [{ id: "site-data-history", url: primary, title: "Keep", time: Date.now() }])
   saveBookmark({ url: primary, title: "Keep", pinned: false })
 
@@ -111,7 +113,9 @@ export async function siteDataSmoke(
   )
   assert.equal((await session.defaultSession.cookies.get({ url: primary, name: "app-cookie" }))[0].value, "keep")
   assert.equal(
-    (await session.fromPartition("persist:wpp").cookies.get({ url: primary, name: "wpp-cookie" }))[0].value,
+    (
+      await session.fromPartition("persist:unrelated-fixture").cookies.get({ url: primary, name: "unrelated-cookie" })
+    )[0].value,
     "keep",
   )
   const history = getStore("cm-browser").get("history", [])

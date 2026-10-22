@@ -1,4 +1,4 @@
-import { CMLoading } from "@/components/cm-loading"
+import { CodeworkLoading } from "@/components/codework-loading"
 import { DialogSelectServer } from "@/components/dialog-select-server"
 import { useDirectoryPicker } from "@/components/directory-picker"
 import { useGlobal } from "@/context/global"
@@ -120,7 +120,7 @@ export function LegacyHome() {
         <Match when={!sync().ready}>
           <div class="mt-30 mx-auto flex flex-col items-center gap-3">
             <div class="text-12-regular text-text-weak">
-              <CMLoading class="size-4 inline-block align-middle mr-2" />
+              <CodeworkLoading class="size-4 inline-block align-middle mr-2" />
               {language.t("common.loading")}
             </div>
             <Button class="px-3" disabled={serverUnreachable()} onClick={chooseProject}>

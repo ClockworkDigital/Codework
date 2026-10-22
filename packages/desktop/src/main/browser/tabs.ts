@@ -113,7 +113,7 @@ import { generateBrowserPassword } from "./password-generation-command"
 import { agentHistory } from "./agent-history"
 import { createTabHandler, type NativeTabAction } from "./agent-tabs"
 import { setBrowserTabHandler, setBrowserPanelHandler } from "./registry"
-import { failure, success, hasFrameTarget, parsePanelRequest, type TabRequest, type PanelRequest, type PanelResult } from "@cookiemonster/cm-browser/protocol"
+import { failure, success, hasFrameTarget, parsePanelRequest, type TabRequest, type PanelRequest, type PanelResult } from "@codework/browser/protocol"
 import { allowDownload, guardUploads, saveTransferRule } from "./transfer-permissions"
 import { transferVaultBackup } from "./vault-backup"
 import { createLeaveConfirmation } from "./leave-confirmation"
@@ -222,7 +222,7 @@ setBrowserHistoryHandler(async (sessionID, request, signal) => {
     (entry) => entry.linkContext?.sessionID === sessionID || entry.groups.has(sessionID),
   )
   if (!owner || owner.shutting || owner.win.isDestroyed())
-    return failure("no_target", "Open this task in CookieMonster before using browser history.")
+    return failure("no_target", "Open this task in Codework before using browser history.")
   return agentHistory(
     owner.win,
     sessionID,
@@ -1130,7 +1130,7 @@ function createTab(
     const profile = session.fromPartition(BROWSER_PARTITION)
     // Electron-created popups ignore per-WebContents/session UA overrides on their
     // first navigation (electron/electron#45897). Keep its fallback Chromium-based too.
-    app.userAgentFallback = app.userAgentFallback.replace(/\s(?:Electron|OpenCodeDev|OpenCode|CookieMonster)\/\S+/g, "")
+    app.userAgentFallback = app.userAgentFallback.replace(/\s(?:Electron|OpenCodeDev|OpenCode|Codework)\/\S+/g, "")
     profile.setUserAgent(app.userAgentFallback)
     profile.setPermissionCheckHandler((contents, permission, requested, details) => {
       const practical =

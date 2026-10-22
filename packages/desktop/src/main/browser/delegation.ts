@@ -5,7 +5,7 @@ import {
   type BrowserState,
   type DelegationRequest,
   type Response,
-} from "@cookiemonster/cm-browser/protocol"
+} from "@codework/browser/protocol"
 import {
   browserAccessAllowed,
   browserAgentEnabled,

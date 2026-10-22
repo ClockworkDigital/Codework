@@ -15,8 +15,8 @@ import {
   type Request,
   type Response,
   type BrowserState,
-} from "@cookiemonster/cm-browser/protocol"
-import { browserTools } from "@cookiemonster/cm-browser/tools"
+} from "@codework/browser/protocol"
+import { browserTools } from "@codework/browser/tools"
 import { browserCommand, browserViewport, registerBrowserOwner } from "./tabs"
 import { browserOperationBusy, browserRegistration, registerBrowserTab, setBrowserAgentEnabled } from "./registry"
 import { routeBrowserRequest } from "./router"

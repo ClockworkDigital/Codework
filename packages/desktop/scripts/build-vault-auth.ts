@@ -20,7 +20,7 @@ if (process.platform === "win32") {
     { encoding: "utf8", windowsHide: true },
   )
   const installation = result.stdout?.trim()
-  // CookieMonster ships macOS-first; Windows vault helpers need VS C++ tools. Skip so local
+  // Codework ships macOS-first; Windows vault helpers need VS C++ tools. Skip so local
   // bridge/dev can still boot — vault Windows Hello prompts will fail until tools are installed.
   if (result.status !== 0 || !installation) {
     console.warn("[vault-auth] Visual Studio C++ build tools missing; skipping Windows vault helper build")

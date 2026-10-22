@@ -31,6 +31,7 @@
     "src/assets/icons/app/*",
     "src/assets/fonts/*",
     "src/assets/audio/*",
+    "src/assets/clockwork/*",
     "LICENSE"
   ],
   "exports": {

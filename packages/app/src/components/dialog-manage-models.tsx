@@ -1,4 +1,4 @@
-import { CMLoading } from "@/components/cm-loading"
+import { CodeworkLoading } from "@/components/codework-loading"
 import { Dialog } from "@opencode-ai/ui/dialog"
 import { List } from "@opencode-ai/ui/list"
 import { Switch } from "@opencode-ai/ui/switch"
@@ -201,7 +201,7 @@ export const DialogManageModelsV2: Component = () => {
               when={!list.grouped.loading}
               fallback={
                 <div class="settings-v2-models-status">
-                  <CMLoading class="size-4 inline-block align-middle mr-2" />
+                  <CodeworkLoading class="size-4 inline-block align-middle mr-2" />
                   {language.t("common.loading")}
                   {language.t("common.loading.ellipsis")}
                 </div>

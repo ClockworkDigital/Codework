@@ -36,7 +36,7 @@ test("does not enable system CLI when the package manifest cannot be read or par
 
 const execFileAsync = promisify(execFile)
 const script = join(import.meta.dir, "../../resources/windows/cli-path.ps1")
-const owned = "C:\\Program Files\\CookieMonster\\resources\\cli"
+const owned = "C:\\Program Files\\Codework\\resources\\cli"
 
 test.skipIf(process.platform !== "win32")("validates a command's real exit code without changing PATH", async () => {
   const run = (command: string) =>
@@ -60,7 +60,7 @@ test.skipIf(process.platform !== "win32")("validates a command's real exit code 
 
   expect((await run(process.execPath)).stdout.trim().length).toBeGreaterThan(0)
   await expect(run(join(process.env.SystemRoot ?? "C:\\Windows", "System32", "where.exe"))).rejects.toThrow(
-    "The bundled CookieMonster CLI failed validation.",
+    "The bundled Codework CLI failed validation.",
   )
 })
 
@@ -82,7 +82,7 @@ test.skipIf(process.platform !== "win32")("environment notification propagates n
     Invoke-Expression $definition.Extent.Text
     Add-Type -TypeDefinition @'
 using System;
-namespace CookieMonster {
+namespace Codework {
   public static class EnvironmentChange {
     public static bool Fail;
     public static IntPtr SendMessageTimeout(IntPtr window, uint message, IntPtr wParam, string lParam, uint flags, uint timeout, out IntPtr result) {
@@ -93,7 +93,7 @@ namespace CookieMonster {
 }
 '@
     Send-EnvironmentChange
-    [CookieMonster.EnvironmentChange]::Fail = $true
+    [Codework.EnvironmentChange]::Fail = $true
     try { Send-EnvironmentChange; throw 'Failure was ignored' }
     catch {
       if ($_.Exception.Message -notlike '*could not notify running applications*') { throw }
@@ -125,25 +125,22 @@ const transform = (action: "TransformInstall" | "TransformUninstall", value: str
     { windowsHide: true },
   ).then((result) => result.stdout.trim())
 
-test.skipIf(process.platform !== "win32")("installs the exact CookieMonster command directory once", async () => {
+test.skipIf(process.platform !== "win32")("installs the exact Codework command directory once", async () => {
   expect(await transform("TransformInstall", "")).toBe(owned)
   expect(await transform("TransformInstall", "C:\\Windows;C:\\Tools")).toBe(`${owned};C:\\Windows;C:\\Tools`)
   expect(await transform("TransformInstall", `${owned};C:\\Windows`)).toBe(`${owned};C:\\Windows`)
   expect(await transform("TransformInstall", `C:\\Windows;${owned};C:\\Tools`)).toBe(`C:\\Windows;${owned};C:\\Tools`)
   expect(
-    await transform("TransformInstall", `C:\\Windows;c:\\program files\\cookiemonster\\resources\\cli\\;${owned}`),
+    await transform("TransformInstall", `C:\\Windows;c:\\program files\\codework\\resources\\cli\\;${owned}`),
   ).toBe(`C:\\Windows;${owned}`)
   expect(await transform("TransformInstall", `"${owned}\\";C:\\Windows`)).toBe(`${owned};C:\\Windows`)
   expect(await transform("TransformInstall", `${owned}-old;C:\\Windows`)).toBe(`${owned};${owned}-old;C:\\Windows`)
 })
 
-test.skipIf(process.platform !== "win32")(
-  "uninstall removes only the exact CookieMonster command directory",
-  async () => {
-    expect(await transform("TransformUninstall", `${owned};C:\\Windows;C:\\Tools`)).toBe("C:\\Windows;C:\\Tools")
-    expect(await transform("TransformUninstall", `C:\\Windows;"${owned}\\";C:\\Tools;${owned}`)).toBe(
-      "C:\\Windows;C:\\Tools",
-    )
-    expect(await transform("TransformUninstall", `${owned}-old;C:\\Windows`)).toBe(`${owned}-old;C:\\Windows`)
-  },
-)
+test.skipIf(process.platform !== "win32")("uninstall removes only the exact Codework command directory", async () => {
+  expect(await transform("TransformUninstall", `${owned};C:\\Windows;C:\\Tools`)).toBe("C:\\Windows;C:\\Tools")
+  expect(await transform("TransformUninstall", `C:\\Windows;"${owned}\\";C:\\Tools;${owned}`)).toBe(
+    "C:\\Windows;C:\\Tools",
+  )
+  expect(await transform("TransformUninstall", `${owned}-old;C:\\Windows`)).toBe(`${owned}-old;C:\\Windows`)
+})

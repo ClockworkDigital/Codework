@@ -27,6 +27,7 @@ export default [
         },
         define: {
           "import.meta.env.VITE_OPENCODE_CHANNEL": JSON.stringify(channel),
+          "import.meta.env.VITE_CODEWORK_BRAND": JSON.stringify(process.env.CODEWORK_BRAND !== "0"),
         },
         worker: {
           format: "es",

@@ -38,7 +38,7 @@ export default defineConfig({
   main: {
     define: {
       "import.meta.env.OPENCODE_CHANNEL": JSON.stringify(channel),
-      "import.meta.env.CM_BRAND": JSON.stringify(process.env.CM_BRAND === "1"),
+      "import.meta.env.CODEWORK_BRAND": JSON.stringify(process.env.CODEWORK_BRAND !== "0"),
     },
     build: {
       rollupOptions: {
@@ -104,7 +104,7 @@ const require = __cjs_mod__.createRequire(import.meta.url);
       ],
     },
     define: {
-      "import.meta.env.VITE_CM_BRAND": JSON.stringify(Boolean(process.env.CM_BRAND)),
+      "import.meta.env.VITE_CODEWORK_BRAND": JSON.stringify(process.env.CODEWORK_BRAND !== "0"),
     },
     publicDir: "../../../app/public",
     root: "src/renderer",

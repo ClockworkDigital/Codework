@@ -1,6 +1,6 @@
 interface ImportMetaEnv {
   readonly OPENCODE_CHANNEL: string
-  readonly CM_BRAND: boolean
+  readonly CODEWORK_BRAND: boolean
 }
 
 interface ImportMeta {

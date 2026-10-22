@@ -4,7 +4,7 @@ import {
   ACCEPTED_FILE_EXTENSIONS,
   AppBaseProviders,
   AppInterface,
-  cmLoading,
+  codeworkLoading,
   loadLocaleDict,
   normalizeLocale,
   type Locale,
@@ -17,15 +17,13 @@ import {
   useLanguage,
 } from "@opencode-ai/app"
 import type { UpdaterState } from "@opencode-ai/app/updater"
-import type { WppAuthState } from "@opencode-ai/app/wpp-auth"
 import * as Sentry from "@sentry/solid"
 import type { AsyncStorage } from "@solid-primitives/storage"
 import { createMemoryHistory, MemoryRouter, type BaseRouterProps } from "@solidjs/router"
 import { createEffect, createMemo, createResource, createSignal, onCleanup, Show } from "solid-js"
 import { render } from "solid-js/web"
-import { createStore } from "solid-js/store"
 import pkg from "../../package.json"
-import cookieMonsterIcon from "../../icons/prod/icon.png?inline"
+import codeworkIcon from "../../icons/prod/icon.png?inline"
 import { t } from "./i18n"
 import { initializationData } from "./initialization"
 import { DesktopFirstLaunchOnboarding } from "./onboarding"
@@ -33,7 +31,7 @@ import { resetZoom, setPinchZoomEnabled, webviewZoom, zoomIn, zoomOut } from "./
 import { windowFullscreen } from "./window-fullscreen"
 import { availableStartupServer, readyWslConnections } from "./wsl/connections"
 import "./styles.css"
-import { CookieLoader } from "@opencode-ai/ui/cookie-loader"
+import { Spinner } from "@opencode-ai/ui/spinner"
 import { useTheme } from "@opencode-ai/ui/theme/context"
 import { LoadingAnimationProvider } from "@opencode-ai/ui/loading"
 
@@ -67,12 +65,6 @@ if (import.meta.env.VITE_SENTRY_DSN) {
 
 const [updaterState, setUpdaterState] = createSignal<UpdaterState>({ status: "disabled" })
 void window.api.updater.subscribe(setUpdaterState)
-const [wppAuthState, setWppAuthState] = createStore<WppAuthState>({
-  status: "unknown",
-  checkedAt: null,
-  loginVisible: false,
-})
-window.api.wppAuth.subscribe((state) => setWppAuthState(state))
 
 const deepLinkEvent = "opencode:deep-link"
 
@@ -180,12 +172,6 @@ const createPlatform = (windowState: DesktopWindowState): Platform => {
     platform: "desktop",
     os,
     browserPanel: window.api.browserPanel,
-    wppChat: window.api.wppChat,
-    wppAuth: {
-      state: () => wppAuthState,
-      check: () => window.api.wppAuth.check(),
-      toggleLogin: () => window.api.wppAuth.toggleLogin(),
-    },
     version: pkg.version,
     windowID: windowState.id,
 
@@ -275,7 +261,7 @@ const createPlatform = (windowState: DesktopWindowState): Platform => {
 
       const notification = new Notification(title, {
         body: description ?? "",
-        icon: cookieMonsterIcon,
+        icon: codeworkIcon,
       })
       notification.onclick = () => {
         void window.api.showWindow()
@@ -344,12 +330,7 @@ listenForDeepLinks()
 function LoadingSplash() {
   return (
     <div class="h-dvh w-screen flex flex-col items-center justify-center bg-background-base">
-      <Show
-        when={import.meta.env.VITE_CM_BRAND}
-        fallback={<img src={cookieMonsterIcon} alt="" class="w-20 h-20 animate-pulse" />}
-      >
-        <CookieLoader class="text-icon-base" />
-      </Show>
+      <Spinner class="size-16 text-icon-base" />
     </div>
   )
 }
@@ -468,7 +449,7 @@ render(() => {
   })
 
   return (
-    <LoadingAnimationProvider value={import.meta.env.VITE_CM_BRAND ? cmLoading : undefined}>
+    <LoadingAnimationProvider value={codeworkLoading}>
       <Show when={windowState.latest} fallback={<LoadingSplash />} keyed>
         {(state) => <DesktopRoot windowState={state} />}
       </Show>

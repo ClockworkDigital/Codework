@@ -42,7 +42,7 @@ if (process.env.CM_LOGIN_ENTRY_TEST_CHILD !== "1") {
     return win
   }
   function response() {
-    const username = Buffer.from("fixture@wpp.test", "utf16le")
+    const username = Buffer.from("fixture@example.test", "utf16le")
     const password = Buffer.from("fixture-secret", "utf16le")
     const lengths = Buffer.alloc(8)
     lengths.writeUInt32LE(username.length)
@@ -62,24 +62,24 @@ if (process.env.CM_LOGIN_ENTRY_TEST_CHILD !== "1") {
   })
 
   test("decodes bounded native data and rejects truncated or empty responses", () => {
-    expect(decodeLoginEntry("https://wpp.okta.com", response())).toEqual({
-      origin: "https://wpp.okta.com",
-      username: "fixture@wpp.test",
+    expect(decodeLoginEntry("https://login.example.test", response())).toEqual({
+      origin: "https://login.example.test",
+      username: "fixture@example.test",
       password: "fixture-secret",
     })
-    expect(() => decodeLoginEntry("https://wpp.okta.com", response().subarray(0, 10))).toThrow()
-    expect(() => decodeLoginEntry("https://wpp.okta.com", Buffer.alloc(8))).toThrow()
+    expect(() => decodeLoginEntry("https://login.example.test", response().subarray(0, 10))).toThrow()
+    expect(() => decodeLoginEntry("https://login.example.test", Buffer.alloc(8))).toThrow()
   })
   test("an already-aborted signal prevents the native helper from starting", async () => {
     await expect(
-      loginEntry.prompt(window(), "https://wpp.okta.com", "", "fixture detail", AbortSignal.abort()),
+      loginEntry.prompt(window(), "https://login.example.test", "", "fixture detail", AbortSignal.abort()),
     ).rejects.toThrow("Account entry cancelled")
     expect(spawn).not.toHaveBeenCalled()
   })
   test("aborting kills the helper and rejects even a late successful secret response", async () => {
     const kill = spyOn(child, "kill").mockReturnValue(true)
     const signal = new AbortController()
-    const pending = loginEntry.prompt(window(), "https://wpp.okta.com", "", "fixture detail", signal.signal)
+    const pending = loginEntry.prompt(window(), "https://login.example.test", "", "fixture detail", signal.signal)
     signal.abort()
     expect(kill).toHaveBeenCalledTimes(1)
     const stdout = response()
@@ -91,7 +91,7 @@ if (process.env.CM_LOGIN_ENTRY_TEST_CHILD !== "1") {
   })
   test("vault locking kills native entry and prevents late disclosure", async () => {
     const kill = spyOn(child, "kill").mockReturnValue(true)
-    const pending = loginEntry.prompt(window(), "https://wpp.okta.com", "")
+    const pending = loginEntry.prompt(window(), "https://login.example.test", "")
     access.lock()
     expect(kill).toHaveBeenCalledTimes(1)
     const stdout = response()
@@ -100,12 +100,12 @@ if (process.env.CM_LOGIN_ENTRY_TEST_CHILD !== "1") {
     expect(stdout.every((byte) => byte === 0)).toBe(true)
   })
   test("successful native entry resolves a login and clears its binary buffers", async () => {
-    const pending = loginEntry.prompt(window(), "https://wpp.okta.com", "")
+    const pending = loginEntry.prompt(window(), "https://login.example.test", "")
     const stdout = response()
     finish(null, stdout, Buffer.alloc(0))
     expect(await pending).toEqual({
-      origin: "https://wpp.okta.com",
-      username: "fixture@wpp.test",
+      origin: "https://login.example.test",
+      username: "fixture@example.test",
       password: "fixture-secret",
     })
     expect(stdout.every((byte) => byte === 0)).toBe(true)
@@ -113,19 +113,19 @@ if (process.env.CM_LOGIN_ENTRY_TEST_CHILD !== "1") {
 
   test("Linux saves through a native masked-password form without putting secrets in arguments", async () => {
     Object.defineProperty(process, "platform", { value: "linux" })
-    const pending = loginEntry.prompt(window(), "https://wpp.okta.com", "")
+    const pending = loginEntry.prompt(window(), "https://login.example.test", "")
     expect(spawn.mock.calls[0][1]).toContain("--forms")
     expect(spawn.mock.calls[0][1].some((arg) => arg.startsWith("--add-password="))).toBe(true)
-    const stdout = Buffer.from("fixture@wpp.test\nfixture-secret\n")
+    const stdout = Buffer.from("fixture@example.test\nfixture-secret\n")
     finish(null, stdout, Buffer.alloc(0))
     expect(await pending).toEqual({
-      origin: "https://wpp.okta.com",
-      username: "fixture@wpp.test",
+      origin: "https://login.example.test",
+      username: "fixture@example.test",
       password: "fixture-secret",
     })
     expect(spawn.mock.calls[0][1].some((arg) => arg.includes("fixture-secret"))).toBe(false)
     expect(stdout.every((byte) => byte === 0)).toBe(true)
-    expect(() => decodeLoginEntry("https://wpp.okta.com", Buffer.from("user\nsecret\nextra\n"), true)).toThrow()
-    expect(() => decodeLoginEntry("https://wpp.okta.com", Buffer.from("user\n\n"), true)).toThrow()
+    expect(() => decodeLoginEntry("https://login.example.test", Buffer.from("user\nsecret\nextra\n"), true)).toThrow()
+    expect(() => decodeLoginEntry("https://login.example.test", Buffer.from("user\n\n"), true)).toThrow()
   })
 }

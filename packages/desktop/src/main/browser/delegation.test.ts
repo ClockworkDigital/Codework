@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test"
 import { EventEmitter } from "node:events"
 import { randomUUID } from "node:crypto"
-import type { BrowserIpcResult, Request, WriteRequest } from "@cookiemonster/cm-browser/protocol"
+import type { BrowserIpcResult, Request, WriteRequest } from "@codework/browser/protocol"
 import { attachBrowserBridge } from "./bridge"
 import { resolveBrowserOwnerScope, setBrowserOwnerScopeResolver } from "./session-resolver"
 import { createBrowserDelegations } from "./delegation"

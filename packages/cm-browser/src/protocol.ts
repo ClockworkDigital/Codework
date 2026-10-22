@@ -1,7 +1,7 @@
 import { isAbsolute, join } from "node:path"
 
 export const ALLOWLIST_FILENAME = "cm-browser-allowlist.json"
-export const STATE_DIRECTORY_NAME = "CookieMonster"
+export const STATE_DIRECTORY_NAME = "Codework"
 export const MAX_URL_LENGTH = 2_048
 export const MAX_TYPED_TEXT = 10_000
 export const MAX_SNAPSHOT_BYTES = 64 * 1024

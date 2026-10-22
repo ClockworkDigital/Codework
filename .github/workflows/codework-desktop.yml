@@ -1,0 +1,148 @@
+name: codework-desktop
+
+# Builds unsigned Codework macOS app-only DMG/zip artifacts; uploads only the validated DMG.
+#
+# macOS is the sole supported Codework target.
+# There is no Apple Developer certificate for this fork, so CODEWORK_UNSIGNED=1 strips signing and notarization from
+# packages/desktop/electron-builder.config.ts. Installing an unsigned build therefore trips
+# Gatekeeper on macOS.
+#
+# Runs on manual dispatch only. This repository is private on the GitHub Free plan (~2,000 Actions
+# minutes/month) and macOS minutes bill at 10x, so an automatic per-push trigger would exhaust the
+# monthly allowance quickly. Artifacts expire after 7 days to stay inside the 500 MB cap.
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish installers after native validation"
+        required: true
+        default: false
+        type: boolean
+      revision:
+        description: "Two-digit Codework release revision"
+        required: true
+        default: "01"
+        type: string
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: package (macos)
+    runs-on: macos-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    env:
+      # Codework is branded independently, so prod behavior is safe while CODEWORK_BRAND keeps its
+      # identity, bundled CLI sidecar, and disabled upstream publishing.
+      OPENCODE_CHANNEL: prod
+      CODEWORK_BRAND: "1"
+      CODEWORK_UNSIGNED: "1"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24"
+
+      - name: Setup Bun
+        uses: ./.github/actions/setup-bun
+
+      - name: Build renderer and main
+        # Also runs scripts/prebuild.ts, which copies icons, builds the OpenCode node sidecar and the
+        # cm-browser plugin bundle, then downloads the CLI into resources/.
+        run: bun run build
+        working-directory: packages/desktop
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+
+      - name: Test installer configuration and capabilities
+        run: bun test --timeout 20000 electron-builder.config.test.ts src/main/macos-user-install.test.ts src/main/system-cli.test.ts
+        working-directory: packages/desktop
+        # The tests opt into each branding/signing variant themselves.
+        env:
+          CODEWORK_BRAND: "0"
+          CODEWORK_UNSIGNED: "0"
+          OPENCODE_CHANNEL: dev
+
+      - name: Package installer
+        run: npx electron-builder --mac --publish never --config electron-builder.config.ts
+        working-directory: packages/desktop
+
+      - name: List packaged output
+        run: ls -la packages/desktop/dist
+
+      - name: Test non-root DMG app installation and removal
+        # Validates copying and the private binary, not Electron startup or provider configuration.
+        run: bun scripts/smoke-macos-dmg.ts
+        working-directory: packages/desktop
+
+      - name: Upload installer
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: codework-macos
+          path: packages/desktop/dist/codework-mac-*.dmg
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: publish release
+    needs: package
+    if: inputs.publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Resolve release
+        id: release
+        env:
+          REVISION: ${{ inputs.revision }}
+        run: |
+          if [[ ! "$REVISION" =~ ^[0-9]{2}$ ]]; then
+            echo "Revision must contain exactly two digits." >&2
+            exit 1
+          fi
+          version=$(node -p "require('./packages/desktop/package.json').version")
+          tag="codework-v${version}_${REVISION}"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "name=Codework v${version}_${REVISION}" >> "$GITHUB_OUTPUT"
+
+      - name: Download installers
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: codework-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Create release and upload installers
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_NAME: ${{ steps.release.outputs.name }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          shopt -s nullglob
+          files=(release-assets/codework-mac-*.dmg)
+          if (( ${#files[@]} != 1 )); then
+            echo "Expected exactly one validated Codework DMG." >&2
+            exit 1
+          fi
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release edit "$RELEASE_TAG" --title "$RELEASE_NAME"
+          else
+            gh release create "$RELEASE_TAG" --target "$GITHUB_SHA" --title "$RELEASE_NAME" --generate-notes
+          fi
+          gh release upload "$RELEASE_TAG" "${files[@]}" --clobber
+          echo "### [$RELEASE_NAME](${{ github.server_url }}/${{ github.repository }}/releases/tag/$RELEASE_TAG)" >> "$GITHUB_STEP_SUMMARY"

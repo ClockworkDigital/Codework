@@ -6,7 +6,7 @@ import { Spinner } from "@opencode-ai/ui/spinner"
 import { LoaderV2 } from "@opencode-ai/ui/v2/loader-v2"
 import { Icon } from "@opencode-ai/ui/v2/icon"
 import { SessionProgressIndicatorV2 } from "@opencode-ai/session-ui/v2/session-progress-indicator-v2"
-import { cmLoading } from "../src/components/cm-loading"
+import { codeworkLoading } from "../src/components/codework-loading"
 import "../../ui/src/components/spinner.css"
 
 function Fixture() {
@@ -30,7 +30,12 @@ function Fixture() {
       <section id="stock">
         <Spinner />
       </section>
-      <LoadingAnimationProvider value={cmLoading}>
+      <LoadingAnimationProvider value={undefined}>
+        <section id="fallback">
+          <Spinner />
+        </section>
+      </LoadingAnimationProvider>
+      <LoadingAnimationProvider value={codeworkLoading}>
         <section id="random" style={{ display: "flex", gap: "4px" }}>
           <For each={Array.from({ length: 24 }, (_, i) => i)}>
             {() => <Loading width={32} height={32} aria-label={state.label} aria-hidden="false" />}
@@ -44,10 +49,10 @@ function Fixture() {
         </section>
       </LoadingAnimationProvider>
       <section id="variants" style={{ display: "grid", "grid-template-columns": "repeat(4, 160px)", gap: "16px" }}>
-        <For each={cmLoading.animations}>
+        <For each={codeworkLoading.animations}>
           {(animation) => (
             <div data-case={animation.id}>
-              <LoadingAnimationProvider value={{ animations: [animation], still: cmLoading.still }}>
+              <LoadingAnimationProvider value={{ animations: [animation], still: codeworkLoading.still }}>
                 <Loading width={128} height={128} />
               </LoadingAnimationProvider>
               <div>{animation.id}</div>

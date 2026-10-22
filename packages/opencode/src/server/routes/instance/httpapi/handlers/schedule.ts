@@ -12,7 +12,7 @@ export function scheduleHandlersFor(load: () => Promise<Scheduler>) {
       try: load,
       catch: () =>
         new ServiceUnavailableError({
-          message: "Scheduling is unavailable. Open CookieMonster desktop to manage scheduled tasks.",
+          message: "Scheduling is unavailable. Open Codework desktop to manage scheduled tasks.",
           service: "scheduling",
         }),
     })

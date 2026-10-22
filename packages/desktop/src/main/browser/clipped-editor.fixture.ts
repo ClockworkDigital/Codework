@@ -5,7 +5,7 @@ import { setTimeout } from "node:timers/promises"
 import { BrowserWindow, dialog } from "electron"
 import { browserCommand, browserViewport, registerBrowserOwner } from "./tabs"
 import { routeBrowserRequest } from "./router"
-import type { FrameAction, Request, WriteRequest } from "@cookiemonster/cm-browser/protocol"
+import type { FrameAction, Request, WriteRequest } from "@codework/browser/protocol"
 
 export async function clippedEditorSmoke() {
   assert(process.env.CM_BROWSER_SMOKE_PROFILE, "Only run through the isolated smoke runner")

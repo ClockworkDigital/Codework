@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto"
-import { failure, success, type TabRequest, type BrowserState, type Response } from "@cookiemonster/cm-browser/protocol"
+import { failure, success, type TabRequest, type BrowserState, type Response } from "@codework/browser/protocol"
 import {
   browserAgentEnabled,
   browserAgentEpoch,

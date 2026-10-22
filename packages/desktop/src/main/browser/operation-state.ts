@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto"
-import type { BrowserState, Response } from "@cookiemonster/cm-browser/protocol"
+import type { BrowserState, Response } from "@codework/browser/protocol"
 import type { BrowserRegistration } from "./registry"
 import { browserInputFailure } from "./driver"
 

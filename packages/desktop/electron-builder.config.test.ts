@@ -45,7 +45,11 @@ for (const channel of channels) {
     const previous = process.env.OPENCODE_CHANNEL
     process.env.OPENCODE_CHANNEL = channel.channel
 
+    const previousBrand = process.env.CODEWORK_BRAND
+    process.env.CODEWORK_BRAND = "0"
     const module = await import(`./electron-builder.config.ts?channel=${channel.channel}`)
+    if (previousBrand === undefined) delete process.env.CODEWORK_BRAND
+    else process.env.CODEWORK_BRAND = previousBrand
     const config = module.default as Configuration
 
     if (previous === undefined) delete process.env.OPENCODE_CHANNEL
@@ -64,7 +68,11 @@ test("keeps a hidden prod launcher for old Linux pins", async () => {
   const previous = process.env.OPENCODE_CHANNEL
   process.env.OPENCODE_CHANNEL = "prod"
 
+  const previousBrand = process.env.CODEWORK_BRAND
+  process.env.CODEWORK_BRAND = "0"
   const module = await import("./electron-builder.config.ts?compat=prod")
+  if (previousBrand === undefined) delete process.env.CODEWORK_BRAND
+  else process.env.CODEWORK_BRAND = previousBrand
   const config = module.default as Configuration
 
   if (previous === undefined) delete process.env.OPENCODE_CHANNEL
@@ -116,24 +124,24 @@ test("bundles the CLI outside the dev app archive", async () => {
 
 test("bundles the CLI in branded prod builds", async () => {
   const previousChannel = process.env.OPENCODE_CHANNEL
-  const previousBrand = process.env.CM_BRAND
-  const previousVersion = process.env.CM_VERSION
+  const previousBrand = process.env.CODEWORK_BRAND
+  const previousVersion = process.env.CODEWORK_VERSION
   process.env.OPENCODE_CHANNEL = "prod"
-  process.env.CM_BRAND = "1"
-  process.env.CM_VERSION = "1.18.34-cm.2"
+  process.env.CODEWORK_BRAND = "1"
+  process.env.CODEWORK_VERSION = "1.18.34-codework.2"
   const module = await import("./electron-builder.config.ts?branded-prod-cli-resource")
   const config = module.default as Configuration
   if (previousChannel === undefined) delete process.env.OPENCODE_CHANNEL
   else process.env.OPENCODE_CHANNEL = previousChannel
-  if (previousBrand === undefined) delete process.env.CM_BRAND
-  else process.env.CM_BRAND = previousBrand
-  if (previousVersion === undefined) delete process.env.CM_VERSION
-  else process.env.CM_VERSION = previousVersion
+  if (previousBrand === undefined) delete process.env.CODEWORK_BRAND
+  else process.env.CODEWORK_BRAND = previousBrand
+  if (previousVersion === undefined) delete process.env.CODEWORK_VERSION
+  else process.env.CODEWORK_VERSION = previousVersion
 
-  expect(config.appId).toBe("com.ogilvy.cookiemonster")
-  expect(config.productName).toBe("CookieMonster")
-  expect(config.extraMetadata?.version).toBe("1.18.34-cm.2")
-  expect(config.publish).toEqual({ provider: "github", owner: "trmosala", repo: "opencode", channel: "latest" })
+  expect(config.appId).toBe("digital.clockwork.codework")
+  expect(config.productName).toBe("Codework")
+  expect(config.extraMetadata?.version).toBe("1.18.34-codework.2")
+  expect(config.publish).toEqual({ provider: "github", owner: "ClockworkDigital", repo: "Codework", channel: "latest" })
   expect(config.extraResources).toContainEqual({
     from: "resources/",
     to: "",
@@ -162,7 +170,7 @@ test("bundles the CLI in branded prod builds", async () => {
   expect(config.pkg).toBeUndefined()
   expect(config.dmg?.contents).toEqual([
     { x: 160, y: 160, type: "file" },
-    { x: 380, y: 160, type: "file", path: expect.stringContaining("Install CookieMonster.txt") },
+    { x: 380, y: 160, type: "file", path: expect.stringContaining("Install Codework.txt") },
   ])
   if (process.platform === "darwin") {
     expect(config.files).toContain("!resources/macos/pkg-scripts{,/**/*}")
@@ -170,19 +178,19 @@ test("bundles the CLI in branded prod builds", async () => {
   }
 })
 
-test("CM_UNSIGNED strips every signing and notarization step", async () => {
+test("CODEWORK_UNSIGNED strips every signing and notarization step", async () => {
   const previousChannel = process.env.OPENCODE_CHANNEL
-  const previousUnsigned = process.env.CM_UNSIGNED
+  const previousUnsigned = process.env.CODEWORK_UNSIGNED
   process.env.OPENCODE_CHANNEL = "dev"
-  process.env.CM_UNSIGNED = "1"
+  process.env.CODEWORK_UNSIGNED = "1"
 
   const module = await import("./electron-builder.config.ts?unsigned")
   const config = module.default as Configuration
 
   if (previousChannel === undefined) delete process.env.OPENCODE_CHANNEL
   else process.env.OPENCODE_CHANNEL = previousChannel
-  if (previousUnsigned === undefined) delete process.env.CM_UNSIGNED
-  else process.env.CM_UNSIGNED = previousUnsigned
+  if (previousUnsigned === undefined) delete process.env.CODEWORK_UNSIGNED
+  else process.env.CODEWORK_UNSIGNED = previousUnsigned
 
   expect(config.mac?.identity).toBeNull()
   expect(config.mac?.hardenedRuntime).toBe(false)
@@ -196,16 +204,16 @@ test("CM_UNSIGNED strips every signing and notarization step", async () => {
 
 test("keeps signing enabled by default", async () => {
   const previousChannel = process.env.OPENCODE_CHANNEL
-  const previousUnsigned = process.env.CM_UNSIGNED
+  const previousUnsigned = process.env.CODEWORK_UNSIGNED
   process.env.OPENCODE_CHANNEL = "dev"
-  delete process.env.CM_UNSIGNED
+  delete process.env.CODEWORK_UNSIGNED
 
   const module = await import("./electron-builder.config.ts?signed")
   const config = module.default as Configuration
 
   if (previousChannel === undefined) delete process.env.OPENCODE_CHANNEL
   else process.env.OPENCODE_CHANNEL = previousChannel
-  if (previousUnsigned !== undefined) process.env.CM_UNSIGNED = previousUnsigned
+  if (previousUnsigned !== undefined) process.env.CODEWORK_UNSIGNED = previousUnsigned
 
   expect(config.mac?.hardenedRuntime).toBe(true)
   expect(config.mac?.notarize).toBe(true)
@@ -216,14 +224,15 @@ test("keeps signing enabled by default", async () => {
 for (const channel of ["beta", "prod"] as const) {
   test(`does not bundle the CLI in unbranded ${channel} builds`, async () => {
     const previous = process.env.OPENCODE_CHANNEL
-    const previousBrand = process.env.CM_BRAND
+    const previousBrand = process.env.CODEWORK_BRAND
     process.env.OPENCODE_CHANNEL = channel
-    delete process.env.CM_BRAND
+    process.env.CODEWORK_BRAND = "0"
     const module = await import(`./electron-builder.config.ts?no-cli-resource=${channel}`)
     const config = module.default as Configuration
     if (previous === undefined) delete process.env.OPENCODE_CHANNEL
     else process.env.OPENCODE_CHANNEL = previous
-    if (previousBrand !== undefined) process.env.CM_BRAND = previousBrand
+    if (previousBrand === undefined) delete process.env.CODEWORK_BRAND
+    else process.env.CODEWORK_BRAND = previousBrand
 
     expect(config.extraResources).not.toContainEqual({
       from: "resources/",

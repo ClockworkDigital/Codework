@@ -11,7 +11,6 @@ import { app, BrowserWindow } from "electron"
 import { Deferred, Effect, Fiber } from "effect"
 import contextMenu from "electron-context-menu"
 import { browserLinkMenu } from "./browser/tabs"
-import { wppLoginMenu } from "./wpp-bridge/login-controls"
 
 import type { ServerReadyData } from "../preload/types"
 import { checkAppExists, resolveAppPath } from "./apps"
@@ -51,9 +50,6 @@ import { spawnWslSidecar } from "./wsl/sidecar"
 import { migrate } from "./migrate"
 import { cleanupStoreFiles } from "./store-cleanup"
 import { createTray, destroyTray } from "./tray"
-import { startWppBridge } from "./wpp-bridge"
-import { ensureO1CodeProvider } from "./wpp-bridge/proxy/providerConfig.mjs"
-import { openWppLogin, wppAuth } from "./wpp-bridge/session"
 import { startBackgroundCli } from "./background-cli"
 import { setNativeTranslations } from "./native-translations"
 
@@ -125,7 +121,7 @@ const main = Effect.gen(function* () {
     prepend: (_actions, params, target) => {
       const contents =
         "webContents" in target ? target.webContents : "getURL" in target && "session" in target ? target : undefined
-      return contents ? [...wppLoginMenu(contents), ...browserLinkMenu(contents, params.linkURL)] : []
+      return contents ? browserLinkMenu(contents, params.linkURL) : []
     },
   })
 
@@ -378,32 +374,6 @@ const main = Effect.gen(function* () {
     },
   })
   registerWslIpcHandlers(wslServers)
-  // Boot the in-process WPP bridge proxy (dep-free server.mjs) alongside the OpenCode sidecar.
-  // Fire-and-forget: server.mjs self-handles EADDRINUSE, and a failure here must not block the
-  // app from coming up — it surfaces in logs and the renderer's connection panel instead.
-  void startWppBridge({
-    checkAuth: () => wppAuth.check(),
-    openLogin: () => {
-      openWppLogin()
-    },
-  }).catch((error) => logger.error("wpp bridge proxy failed to start", error))
-  void wppAuth.check()
-  // ponytail: one-time Phase-3 gate scaffolding (dev only). WPP_LOGIN=1 opens a visible
-  // persist:wpp window for interactive SSO; WPP_RECORDER_URL=<chat url> runs the recorder probe
-  // against the now-authenticated partition. Separate runs — log in first, probe on a later
-  // launch. Both go away once the renderer login panel (Phase 5) lands.
-  if (process.env.WPP_LOGIN === "1" || process.env.WPP_RECORDER_URL) {
-    void import("./wpp-bridge/recorder-prototype")
-      .then(async ({ openWppLogin, runRecorderPrototype }) => {
-        if (process.env.WPP_LOGIN === "1") openWppLogin()
-        const probeUrl = process.env.WPP_RECORDER_URL
-        if (probeUrl) {
-          const probe = await runRecorderPrototype(probeUrl)
-          logger.log("wpp recorder probe", { armed: probe.armed, frames: probe.events.length })
-        }
-      })
-      .catch((error) => logger.error("wpp dev gate failed", error))
-  }
   void updater.start()
   const updateTimer = setInterval(() => void updater.check(), 10 * 60 * 1000)
   updateTimer.unref()
@@ -414,9 +384,6 @@ const main = Effect.gen(function* () {
   const loadingTask = yield* Effect.gen(function* () {
     logger.log("sidecar connection started", { version: SIDECAR_VERSION })
 
-    yield* Effect.promise(() =>
-      ensureO1CodeProvider().catch((error) => logger.error("cookiemonster: failed to update opencode.json", error)),
-    )
     ensureLoopbackNoProxy()
     useEnvProxy()
 

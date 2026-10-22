@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import { CM_AE_FILES, resolveCmAePlugin, stageCmAeBundle } from "../cm-ae"
-import { o1CodeConfigContent } from "./wpp-bridge/proxy/providerConfig.mjs"
+import { desktopConfigContent } from "./desktop-config"
 
 test("validated AE bundles compose with browser config in dev and packaged layouts", async () => {
   const root = await mkdtemp(join(tmpdir(), "cm-ae-desktop-"))
@@ -25,14 +25,14 @@ test("validated AE bundles compose with browser config in dev and packaged layou
       { releaseMetadata: { cookieMonsterVersion: options.version } },
     ])
     const browser = "file:///cm-browser/plugin.mjs"
-    const baseline = JSON.parse(o1CodeConfigContent(browser))
-    const config = JSON.parse(o1CodeConfigContent(browser, ae))
+    const baseline = JSON.parse(desktopConfigContent(browser))
+    const config = JSON.parse(desktopConfigContent(browser, ae))
     expect(config.plugin).toEqual([browser, ae])
     expect(config.permission).toEqual(baseline.permission)
     expect(Object.keys(config.permission).some((name) => name.startsWith("ae_"))).toBe(false)
     expect(config.provider).toEqual(baseline.provider)
     expect(config.mcp).toEqual(baseline.mcp)
-    expect(JSON.parse(o1CodeConfigContent(undefined, ae)).plugin).toEqual([ae])
+    expect(JSON.parse(desktopConfigContent(undefined, ae)).plugin).toEqual([ae])
 
     await cp(join(desktop, "resources"), options.resourcesPath, { recursive: true })
     await rm(join(desktop, "resources"), { recursive: true })
@@ -47,7 +47,7 @@ test("validated AE bundles compose with browser config in dev and packaged layou
 
     const missing = resolveCmAePlugin(options)
     expect(missing).toBeUndefined()
-    expect(JSON.parse(o1CodeConfigContent(browser, missing))).toEqual(baseline)
+    expect(JSON.parse(desktopConfigContent(browser, missing))).toEqual(baseline)
     expect(warnings.pop()).toContain("installed bundle absent")
   } finally {
     await rm(root, { recursive: true, force: true })

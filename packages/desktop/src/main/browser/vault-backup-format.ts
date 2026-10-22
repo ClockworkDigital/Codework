@@ -1,9 +1,9 @@
 import crypto from "node:crypto"
 import { loginOrigin, requireLogin, type BrowserLogin } from "./import-data"
 
-const FORMAT = "cookiemonster-password-backup"
-const PAYLOAD_FORMAT = "cookiemonster-password-backup-payload"
-const CONTEXT = "CookieMonster portable password backup v1"
+const FORMAT = "codework-password-backup"
+const PAYLOAD_FORMAT = "codework-password-backup-payload"
+const CONTEXT = "Codework portable password backup v1"
 const MAX_BACKUP_BYTES = 5 * 1024 * 1024
 const MAX_LOGINS = 2000
 const SCRYPT_N = 65536

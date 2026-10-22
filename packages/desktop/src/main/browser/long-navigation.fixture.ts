@@ -5,7 +5,7 @@ import { setTimeout } from "node:timers/promises"
 import { BrowserWindow, dialog } from "electron"
 import { browserCommand, browserViewport, registerBrowserOwner } from "./tabs"
 import { routeBrowserRequest } from "./router"
-import { parseRequest } from "@cookiemonster/cm-browser/protocol"
+import { parseRequest } from "@codework/browser/protocol"
 
 export async function longNavigationSmoke() {
   assert(process.env.CM_BROWSER_SMOKE_PROFILE, "Only run through the isolated smoke runner")

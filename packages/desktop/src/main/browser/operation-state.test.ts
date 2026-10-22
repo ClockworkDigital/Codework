@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { failure, success } from "@cookiemonster/cm-browser/protocol"
+import { failure, success } from "@codework/browser/protocol"
 import type { BrowserRegistration } from "./registry"
 import { startBrowserOperation } from "./operation-state"
 

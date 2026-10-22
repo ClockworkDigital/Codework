@@ -4,7 +4,7 @@ import { createServer } from "node:http"
 import { BrowserWindow, dialog } from "electron"
 import { browserCommand, browserViewport, registerBrowserOwner } from "./tabs"
 import { routeBrowserRequest } from "./router"
-import type { Request } from "@cookiemonster/cm-browser/protocol"
+import type { Request } from "@codework/browser/protocol"
 
 export async function targetedReadSmoke() {
   assert(process.env.CM_BROWSER_SMOKE_PROFILE, "Only run through the isolated smoke runner")

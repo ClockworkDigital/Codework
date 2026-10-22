@@ -9,7 +9,7 @@ import { getLogger } from "./logging"
 import { getUserShell, loadShellEnv } from "./shell-env"
 import { getStore } from "./store"
 import { DEFAULT_SERVER_URL_KEY } from "./store-keys"
-import { o1CodeConfigContent } from "./wpp-bridge/proxy/providerConfig.mjs"
+import { desktopConfigContent } from "./desktop-config"
 import { resolveCmAePlugin } from "../cm-ae"
 import { createSidecarEnv } from "./sidecar-env"
 
@@ -56,7 +56,7 @@ export function preferAppEnv(userDataPath: string) {
     OPENCODE_EXPERIMENTAL_FILEWATCHER: "true",
     // Keep built-in workspace tools (shell/read/apply_patch/etc.) direct, but collapse the large
     // MCP roster behind OpenCode's single `execute` catalog. Sending every browser/MCP schema as
-    // a first-class tool makes WPP coding turns unnecessarily large and increases tool-call dropouts.
+    // a first-class tool makes provider requests unnecessarily large.
     OPENCODE_EXPERIMENTAL_CODE_MODE: process.env.OPENCODE_EXPERIMENTAL_CODE_MODE ?? "true",
     OPENCODE_ENABLE_EXA: process.env.OPENCODE_ENABLE_EXA ?? "true",
     OPENCODE_CLIENT: "desktop",
@@ -231,7 +231,7 @@ export async function checkHealth(url: string, password?: string | null): Promis
 
 function bundledConfigContent() {
   // Bundled plugins are local to this utility process, never global OpenCode/WSL config.
-  return o1CodeConfigContent(
+  return desktopConfigContent(
     browserPluginEntry(),
     resolveCmAePlugin({
       isPackaged: app.isPackaged,

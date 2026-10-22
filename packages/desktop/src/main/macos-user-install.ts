@@ -23,7 +23,7 @@ export async function diskImageSource(executable: string, run = macCommand) {
   // ponytail: no private translocation APIs; never copy a guessed original bundle.
   if (executable.includes("/AppTranslocation/")) return "manual"
   const source = posix.dirname(posix.dirname(posix.dirname(executable)))
-  if (!source.endsWith("/CookieMonster.app")) return "none"
+  if (!source.endsWith("/Codework.app")) return "none"
   try {
     const plist = await run("/usr/bin/hdiutil", ["info", "-plist"])
     const info: unknown = JSON.parse(await run("/usr/bin/plutil", ["-convert", "json", "-o", "-", "-"], plist))
@@ -50,7 +50,7 @@ export async function copyUserApp(
   openDirectory = open,
   remove = rm,
 ) {
-  const destination = posix.join(applications, "CookieMonster.app")
+  const destination = posix.join(applications, "Codework.app")
   await mkdir(applications, { recursive: true })
   const existing = await installedApp(destination)
   if (existing && !existing.isDirectory()) throw new Error("Install destination is not a regular directory")
@@ -62,14 +62,14 @@ export async function copyUserApp(
     existing
       ? await Promise.all(
           (await readdir(applications).catch(() => []))
-            .filter((name) => /^CookieMonster Backup-[A-Za-z0-9]{6}$/.test(name))
+            .filter((name) => /^Codework Backup-[A-Za-z0-9]{6}$/.test(name))
             .map((name) => readUserAppBackup(posix.join(applications, name)).catch(() => undefined)),
         )
       : []
   ).filter((backup) => backup !== undefined)
   // Copy beside the destination, never merge signed bundles or expose an incomplete app.
-  const staging = await mkdtemp(posix.join(applications, "CookieMonster Install-"))
-  const incoming = posix.join(staging, "CookieMonster.app")
+  const staging = await mkdtemp(posix.join(applications, "Codework Install-"))
+  const incoming = posix.join(staging, "Codework.app")
   await run("/usr/bin/ditto", ["--rsrc", "--extattr", "--acl", source, incoming])
   if (!(await lstat(incoming)).isDirectory()) throw new Error("Copied app is not a regular directory")
   const current = await installedApp(destination)
@@ -80,15 +80,15 @@ export async function copyUserApp(
   ) {
     throw new Error("Install destination changed during copying")
   }
-  const backup = existing ? await mkdtemp(posix.join(applications, "CookieMonster Backup-")) : undefined
+  const backup = existing ? await mkdtemp(posix.join(applications, "Codework Backup-")) : undefined
   const record = backup && existing ? userAppBackupRecord(await lstat(backup), existing) : undefined
   try {
-    if (backup) await moveUserApp(destination, posix.join(backup, "CookieMonster.app"), move, openDirectory)
+    if (backup) await moveUserApp(destination, posix.join(backup, "Codework.app"), move, openDirectory)
     await publishUserApp(incoming, destination, move, openDirectory)
   } catch (error) {
     // Also recover when the backup rename succeeded but handle cleanup failed.
     if (backup) {
-      await publishUserApp(posix.join(backup, "CookieMonster.app"), destination, move, openDirectory).catch(() => {})
+      await publishUserApp(posix.join(backup, "Codework.app"), destination, move, openDirectory).catch(() => {})
     }
     throw error
   }
@@ -102,7 +102,7 @@ export async function copyUserApp(
 }
 
 function userAppBackupRecord(directory: Stats, app: Stats) {
-  return `CookieMonster backup v1\n${directory.dev}:${directory.ino}\n${app.dev}:${app.ino}:${app.mtimeMs}\n`
+  return `Codework backup v1\n${directory.dev}:${directory.ino}\n${app.dev}:${app.ino}:${app.mtimeMs}\n`
 }
 
 async function retainUserAppBackup(
@@ -113,9 +113,9 @@ async function retainUserAppBackup(
   remove: typeof rm,
 ) {
   const directory = await lstat(path)
-  const app = await lstat(posix.join(path, "CookieMonster.app"))
+  const app = await lstat(posix.join(path, "Codework.app"))
   if (!directory.isDirectory() || !app.isDirectory() || userAppBackupRecord(directory, app) !== record) return
-  await writeFile(posix.join(path, ".cookiemonster-backup"), record, { flag: "wx", mode: 0o600 })
+  await writeFile(posix.join(path, ".codework-backup"), record, { flag: "wx", mode: 0o600 })
   if ((await readUserAppBackup(path))?.record !== record) return
   await Promise.all(older.map((backup) => pruneUserAppBackup(backup, openDirectory, remove).catch(() => {})))
 }
@@ -124,14 +124,14 @@ async function readUserAppBackup(path: string) {
   const directory = await lstat(path)
   if (!directory.isDirectory()) return undefined
   const entries = await readdir(path)
-  if (entries.length !== 2 || !entries.includes("CookieMonster.app") || !entries.includes(".cookiemonster-backup"))
+  if (entries.length !== 2 || !entries.includes("Codework.app") || !entries.includes(".codework-backup"))
     return undefined
-  const app = await lstat(posix.join(path, "CookieMonster.app"))
+  const app = await lstat(posix.join(path, "Codework.app"))
   if (!app.isDirectory()) return undefined
-  const metadata = await lstat(posix.join(path, ".cookiemonster-backup"))
+  const metadata = await lstat(posix.join(path, ".codework-backup"))
   if (!metadata.isFile() || metadata.size > 256) return undefined
   const marker = await open(
-    posix.join(path, ".cookiemonster-backup"),
+    posix.join(path, ".codework-backup"),
     constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
   )
   try {
@@ -152,7 +152,7 @@ async function pruneUserAppBackup(
 ) {
   const current = await readUserAppBackup(backup.path)
   if (current?.record !== backup.record) return
-  const app = posix.join(backup.path, "CookieMonster.app")
+  const app = posix.join(backup.path, "Codework.app")
   const directory = await openDirectory(app, constants.O_RDONLY | constants.O_NOFOLLOW)
   try {
     const info = await directory.stat()
@@ -169,7 +169,7 @@ async function pruneUserAppBackup(
     await directory.close()
   }
   // Never recursively remove the container: new unrelated entries must survive.
-  await unlink(posix.join(backup.path, ".cookiemonster-backup"))
+  await unlink(posix.join(backup.path, ".codework-backup"))
   await rmdir(backup.path)
 }
 
@@ -241,7 +241,7 @@ type Installer = {
 export async function installFromDiskImage(options: Installer) {
   const source = await diskImageSource(options.executable, options.run)
   if (source === "none") return false
-  const destination = posix.join(options.applications, "CookieMonster.app")
+  const destination = posix.join(options.applications, "Codework.app")
   if (source === "manual") {
     await options.manual(destination)
     options.quit()

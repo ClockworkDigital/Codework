@@ -11,7 +11,7 @@ export function cancelPicker(contents: WebContents) {
   void contents
     .executeJavaScriptInIsolatedWorld(WORLD, [
       {
-        code: "window.__cookieMonsterCancelPickElement?.()",
+        code: "window.__codeworkCancelPickElement?.()",
       },
     ])
     .catch(() => undefined)
@@ -125,7 +125,7 @@ async function browserContext(contents: WebContents, command: "selection" | "pic
 // The picker runs in an isolated world: site JS cannot replace its cancellation hook.
 export function pickElementScript() {
   return `(() => new Promise((resolve) => {
-    window.__cookieMonsterCancelPickElement?.()
+    window.__codeworkCancelPickElement?.()
     let hovered
     let outline = ""
     const cursor = document.documentElement.style.cursor
@@ -142,7 +142,7 @@ export function pickElementScript() {
       document.removeEventListener("click", click, true)
       document.removeEventListener("keydown", keydown, true)
       window.removeEventListener("pagehide", cancel)
-      delete window.__cookieMonsterCancelPickElement
+      delete window.__codeworkCancelPickElement
       resolve(value)
     }
     const cancel = () => finish(undefined)
@@ -171,7 +171,7 @@ export function pickElementScript() {
       cancel()
     }
     const timer = setTimeout(cancel, 30000)
-    window.__cookieMonsterCancelPickElement = cancel
+    window.__codeworkCancelPickElement = cancel
     document.documentElement.style.cursor = "crosshair"
     document.addEventListener("mousemove", move, true)
     document.addEventListener("click", click, true)

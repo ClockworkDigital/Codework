@@ -7,7 +7,7 @@ import {
   type Response,
   type BrowserState,
   type NetworkObservation,
-} from "@cookiemonster/cm-browser/protocol"
+} from "@codework/browser/protocol"
 import { browserPageURL } from "./policy"
 import { nativeT } from "../native-translations"
 import type { createFrameSessions } from "./frame-sessions"
@@ -60,7 +60,7 @@ export function setBrowserHistoryHandler(handler: NonNullable<typeof historyHand
 export function routeBrowserHistory(sessionID: string, request: HistoryRequest, signal?: AbortSignal) {
   return (
     historyHandler?.(sessionID, request, signal) ??
-    Promise.resolve(failure("no_target", "Open this task in CookieMonster before using browser history."))
+    Promise.resolve(failure("no_target", "Open this task in Codework before using browser history."))
   )
 }
 

@@ -21,7 +21,7 @@ import { allowed, updateAgentHost } from "./allowlist"
 import { browserTools } from "../../../../cm-browser/src/tools"
 import type { ToolContext } from "@opencode-ai/plugin"
 import { browserPreferences, browserURL, BROWSER_PARTITION } from "./policy"
-import { MAX_SNAPSHOT_BYTES, type Request, type WriteRequest } from "@cookiemonster/cm-browser/protocol"
+import { MAX_SNAPSHOT_BYTES, type Request, type WriteRequest } from "@codework/browser/protocol"
 import { browserViewportBounds } from "../../../../app/src/components/browser-panel/browser-viewport"
 import { browserProfile, clearBrowserData, saveLogins } from "./profile"
 import { snapshotScript } from "./snapshot"
@@ -288,12 +288,6 @@ async function vaultCapabilitySmoke(win: BrowserWindow) {
 async function run() {
   stage("waiting for Electron ready")
   await app.whenReady()
-  if (process.argv.includes("--wpp-auth")) {
-    const { wppAuthSmoke } = await import("../wpp-bridge/auth-state.fixture")
-    await wppAuthSmoke()
-    stage("PASS WPP authentication")
-    return
-  }
   stage("Electron ready")
   if (process.argv.includes("--drag-regions")) {
     const { dragRegionsSmoke } = await import("./drag-regions.fixture")
@@ -2280,7 +2274,7 @@ async function run() {
         payload?: string
       },
     ) => {
-      if (method === "Runtime.executionContextCreated" && params.context?.name.startsWith("CookieMonster login offers"))
+      if (method === "Runtime.executionContextCreated" && params.context?.name.startsWith("Codework login offers"))
         offerContext = params.context.id
       if (method !== "Runtime.bindingCalled" || !params.name?.startsWith("cmLoginOffer")) return
       captureMessages++
@@ -4341,11 +4335,11 @@ async function run() {
   assert.equal(one.view.webContents.session, two.view.webContents.session)
   assert.equal(one.view.webContents.session, session.fromPartition(BROWSER_PARTITION))
   assert.notEqual(one.view.webContents.session, session.defaultSession)
-  assert.notEqual(one.view.webContents.session, session.fromPartition("persist:wpp"))
+  assert.notEqual(one.view.webContents.session, session.fromPartition("persist:unrelated-fixture"))
   await one.view.webContents.session.cookies.set({ url, name: "smoke", value: "isolated" })
   assert.equal((await two.view.webContents.session.cookies.get({ url, name: "smoke" }))[0].value, "isolated")
   assert.equal((await session.defaultSession.cookies.get({ url, name: "smoke" })).length, 0)
-  assert.equal((await session.fromPartition("persist:wpp").cookies.get({ url, name: "smoke" })).length, 0)
+  assert.equal((await session.fromPartition("persist:unrelated-fixture").cookies.get({ url, name: "smoke" })).length, 0)
   assert.deepEqual(await one.view.webContents.executeJavaScript("[typeof require,typeof process,typeof window.api]"), [
     "undefined",
     "undefined",
@@ -4453,7 +4447,7 @@ async function run() {
   assert.equal(popup.view.webContents.session, one.view.webContents.session)
   const chromium = await one.view.webContents.executeJavaScript("navigator.userAgent")
   assert.match(chromium, /Chrome\/[\d.]+/)
-  assert.doesNotMatch(chromium, /Electron\/|OpenCodeDev\/|CookieMonster\//)
+  assert.doesNotMatch(chromium, /Electron\/|OpenCodeDev\/|Codework\//)
   assert.equal(await popup.view.webContents.executeJavaScript("navigator.userAgent"), chromium)
   assert.equal(userAgents.get("/popup"), chromium)
   assert.equal(await popup.view.webContents.executeJavaScript("window.opener !== null"), true)
@@ -4507,7 +4501,7 @@ async function run() {
   assert.equal(await one.view.webContents.executeJavaScript("document.documentElement.style.cursor"), cursor)
   assert.equal(
     await one.view.webContents.executeJavaScriptInIsolatedWorld(998, [
-      { code: "typeof window.__cookieMonsterCancelPickElement" },
+      { code: "typeof window.__codeworkCancelPickElement" },
     ]),
     "undefined",
   )
@@ -5428,10 +5422,13 @@ async function run() {
   assert.equal(browserProfile().history.length, 0)
   await clearBrowserData(one.view.webContents.session, "history")
   assert.equal(browserProfile().history.length, 0)
-  await session.fromPartition("persist:wpp").cookies.set({ url, name: "retained", value: "yes" })
+  await session.fromPartition("persist:unrelated-fixture").cookies.set({ url, name: "retained", value: "yes" })
   await command({ op: "clear", kind: "cookies" })
   assert.equal((await one.view.webContents.session.cookies.get({ url })).length, 0)
-  assert.equal((await session.fromPartition("persist:wpp").cookies.get({ url, name: "retained" }))[0].value, "yes")
+  assert.equal(
+    (await session.fromPartition("persist:unrelated-fixture").cookies.get({ url, name: "retained" }))[0].value,
+    "yes",
+  )
   await command({ op: "navigate", tabID: first, url })
   stage("beforeunload")
   stage("site controls and bookmarks")
@@ -5446,7 +5443,10 @@ async function run() {
     (await one.view.webContents.session.cookies.get({ url: "https://other.example/", name: "unrelated" }))[0].value,
     "keep",
   )
-  assert.equal((await session.fromPartition("persist:wpp").cookies.get({ url, name: "retained" }))[0].value, "yes")
+  assert.equal(
+    (await session.fromPartition("persist:unrelated-fixture").cookies.get({ url, name: "retained" }))[0].value,
+    "yes",
+  )
   getStore("cm-browser").set("bookmarks", [{ id: "legacy", url: `${url}?legacy`, title: "Legacy root", pinned: true }])
   assert.deepEqual(bookmarks()[0].folder, [])
   assert(JSON.stringify(getStore("cm-browser").get("bookmarks")).includes('"folder":[]'))

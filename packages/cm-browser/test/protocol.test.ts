@@ -713,7 +713,7 @@ test("host policy allows exact hosts and subdomains, not lookalikes or other sch
   expect(hostAllowed("https://eu.teams.microsoft.com/", DEFAULT_ALLOWLIST)).toBe(true)
   expect(hostAllowed("https://notteams.microsoft.com.evil.test/", DEFAULT_ALLOWLIST)).toBe(false)
   expect(hostAllowed("file:///etc/passwd", DEFAULT_ALLOWLIST)).toBe(false)
-  expect(stateDirectory({ APPDATA: "C:\\Users\\x\\AppData\\Roaming" }, "win32")).toContain("CookieMonster")
+  expect(stateDirectory({ APPDATA: "C:\\Users\\x\\AppData\\Roaming" }, "win32")).toContain("Codework")
   expect(stateDirectory({ HOME: "/home/x" }, "linux")).toContain(".config")
 })
 

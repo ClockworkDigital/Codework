@@ -3,7 +3,6 @@ import type { BrowserPanelPlatform } from "@opencode-ai/app/browser-panel"
 import type { WslServersPlatform } from "@opencode-ai/app/wsl/types"
 import type { UpdaterState } from "@opencode-ai/app/updater"
 import type { DesktopNativeBundle } from "@opencode-ai/app/i18n/desktop-native"
-import type { WppAuthState } from "@opencode-ai/app/wpp-auth"
 export type {
   WslDistroProbe,
   WslInstalledDistro,
@@ -50,15 +49,6 @@ export type ElectronAPI = {
   awaitInitialization: () => Promise<ServerReadyData>
   wslServers: WslServersAPI
   updater: UpdaterAPI
-  wppChat: {
-    getMode: () => Promise<"assistant" | "agent">
-    setMode: (mode: "assistant" | "agent") => Promise<{ mode: "assistant" | "agent"; busy: boolean }>
-  }
-  wppAuth: {
-    subscribe: (callback: (state: WppAuthState) => void) => () => void
-    check: () => Promise<WppAuthState>
-    toggleLogin: () => Promise<void>
-  }
   consumeInitialDeepLinks: () => Promise<string[]>
   getDefaultServerUrl: () => Promise<string | null>
   setDefaultServerUrl: (url: string | null) => Promise<void>

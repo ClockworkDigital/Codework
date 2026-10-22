@@ -1,4 +1,4 @@
-import { CMLoading } from "@/components/cm-loading"
+import { CodeworkLoading } from "@/components/codework-loading"
 import type { Session } from "@opencode-ai/sdk/v2/client"
 import { type Accessor, createMemo, For, Show, Suspense } from "solid-js"
 import { Spinner } from "@opencode-ai/ui/spinner"
@@ -542,7 +542,7 @@ function HomeSessionSkeleton(props: { label: string }) {
     <div class="flex min-w-0 flex-col gap-4">
       <div class="flex h-7 min-w-0 items-center justify-between px-4">
         <div class={HOME_SECTION_LABEL}>
-          <CMLoading class="size-6 inline-block align-middle mr-2" />
+          <CodeworkLoading class="size-6 inline-block align-middle mr-2" />
           {props.label}
         </div>
       </div>

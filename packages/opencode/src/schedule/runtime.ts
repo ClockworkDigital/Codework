@@ -25,9 +25,6 @@ const git = promisify(execFile)
 let current: Scheduler | undefined
 let opening: Promise<Scheduler> | undefined
 let failure: unknown
-const bridge = () =>
-  "http://" + (process.env.O1_CODE_PROXY_HOST ?? "127.0.0.1") + ":" + (process.env.O1_CODE_PROXY_PORT ?? "8787")
-
 function inDirectory<A, E, R>(directory: string, effect: Effect.Effect<A, E, R>) {
   return InstanceStore.Service.use((store) => store.provide({ directory }, effect))
 }
@@ -83,27 +80,6 @@ async function normalize(definition: Definition) {
     ),
   )
   return { definition: Definition.parse(resolved), directory: target.directory }
-}
-
-async function authenticate(item: Occurrence) {
-  const row = item.definition.target.type === "existing_session" ? await sessionRow(item.sessionID) : undefined
-  const model = item.definition.target.type === "new_session" ? item.definition.target.model : row?.model
-  const providerID =
-    model?.providerID ??
-    (
-      await AppRuntime.runPromise(
-        inDirectory(
-          item.directory!,
-          Provider.Service.use((providers) => providers.defaultModel()),
-        ),
-      )
-    ).providerID
-  if (providerID !== "cookiemonster") return true
-  const response = await fetch(bridge() + "/bridge/auth", { signal: AbortSignal.timeout(15000) }).catch(() => undefined)
-  if (!response) return false
-  if (!response.ok) return false
-  const state: unknown = await response.json().catch(() => undefined)
-  return !!state && typeof state === "object" && "status" in state && state.status === "signed-in"
 }
 
 async function reconcile(item: Occurrence) {
@@ -227,7 +203,7 @@ export function getScheduler() {
     throw new Error(
       failure instanceof Error
         ? "Scheduler unavailable: " + failure.message
-        : "Scheduling is available in a running CookieMonster desktop sidecar",
+        : "Scheduling is available in a running Codework desktop sidecar",
     )
   return current
 }
@@ -237,13 +213,10 @@ export async function startScheduler() {
   if (current) return current
   opening ??= new Scheduler(path.join(Global.Path.data, "scheduling", "schedules.json"), {
     normalize,
-    authenticate,
+    authenticate: async () => true,
     reconcile,
     execute,
-    requestLogin: async () => {
-      const response = await fetch(bridge() + "/bridge/login", { method: "POST", signal: AbortSignal.timeout(15000) })
-      if (!response.ok) throw new Error("Could not open WPP sign-in")
-    },
+    requestLogin: async () => {},
     notify: async (item) => {
       if (item.state === "completed") return
       GlobalBus.emit("event", {

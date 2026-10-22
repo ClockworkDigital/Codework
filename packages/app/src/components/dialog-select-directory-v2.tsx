@@ -1,4 +1,4 @@
-import { CMLoading } from "@/components/cm-loading"
+import { CodeworkLoading } from "@/components/codework-loading"
 import "@pierre/trees/web-components"
 import { FileTree } from "@pierre/trees"
 import { Dialog, DialogBody, DialogFooter, DialogHeader, DialogTitle } from "@opencode-ai/ui/v2/dialog-v2"
@@ -367,7 +367,7 @@ export function DialogSelectDirectoryV2(props: DialogSelectDirectoryV2Props) {
         >
           <Show when={loading()}>
             <div class="directory-picker-v2-state">
-              <CMLoading class="size-4 inline-block align-middle mr-2" />
+              <CodeworkLoading class="size-4 inline-block align-middle mr-2" />
               {language.t("common.loading")}
             </div>
           </Show>

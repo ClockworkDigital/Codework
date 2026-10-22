@@ -111,14 +111,7 @@ export function BrowserTabStrip(props: {
                 }}
               >
                 <span data-slot="browser-tab-icon" aria-hidden="true">
-                  <Show
-                    when={!tab.loading}
-                    fallback={
-                      <Show when={import.meta.env.VITE_CM_BRAND} fallback={<span data-slot="browser-tab-spinner" />}>
-                        <Spinner class="size-3.5" />
-                      </Show>
-                    }
-                  >
+                  <Show when={!tab.loading} fallback={<Spinner class="size-3.5" />}>
                     <Show when={!tab.loadFailed} fallback={<Icon name="warning" size="small" />}>
                       <Show when={tab.url !== "about:blank"} fallback={<Icon name="plus-small" size="small" />}>
                         <span data-slot="browser-tab-initial" dir="auto">

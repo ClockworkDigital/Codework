@@ -7,11 +7,11 @@ import { promisify } from "node:util"
 import type { Configuration } from "electron-builder"
 import { CM_AE_FILES, stageCmAeBundle } from "./src/cm-ae"
 
-// Fork CI has no Apple certificate and no Azure Trusted Signing account. CM_UNSIGNED=1 strips every
+// Fork CI has no Apple certificate and no Azure Trusted Signing account. CODEWORK_UNSIGNED=1 strips every
 // signing and notarization step so electron-builder emits unsigned installers instead of failing on
 // absent credentials. Upstream release builds leave it unset and keep signing exactly as before.
-const unsigned = process.env.CM_UNSIGNED === "1"
-const branded = process.env.CM_BRAND === "1"
+const unsigned = process.env.CODEWORK_UNSIGNED === "1"
+const branded = process.env.CODEWORK_BRAND !== "0"
 const systemCli = branded && process.platform === "win32"
 
 const execFileAsync = promisify(execFile)
@@ -177,21 +177,21 @@ const getBase = (appId: string): Configuration => ({
   },
 })
 
-// Optional fork branding (CM_BRAND=1): rename the app so it never collides with a real OpenCode
+// Codework branding is the default (CODEWORK_BRAND=0 opts out), separate from an upstream OpenCode
 // install, and point auto-update at the fork's public releases instead of upstream.
 function applyBranding(cfg: Configuration): Configuration {
   if (!branded) return cfg
   return {
     ...cfg,
-    appId: "com.ogilvy.cookiemonster",
-    productName: "CookieMonster",
-    // CM_VERSION is <base>-cm.<revision>, set at package time. Each _NN revision needs its own
+    appId: "digital.clockwork.codework",
+    productName: "Codework",
+    // CODEWORK_VERSION is <base>-codework.<revision>, set at package time. Each _NN revision needs its own
     // semver or electron-updater treats it as already installed (+build metadata is ignored by eq).
     extraMetadata: {
       ...cfg.extraMetadata,
       cmUserInstall: true,
       cmSystemCli: systemCli,
-      ...(process.env.CM_VERSION ? { version: process.env.CM_VERSION } : {}),
+      ...(process.env.CODEWORK_VERSION ? { version: process.env.CODEWORK_VERSION } : {}),
     },
     nsis: { ...cfg.nsis, include: "resources/windows/cli-install.nsh" },
     dmg: {
@@ -200,12 +200,12 @@ function applyBranding(cfg: Configuration): Configuration {
       window: { width: 540, height: 360 },
       contents: [
         { x: 160, y: 160, type: "file" },
-        { x: 380, y: 160, type: "file", path: path.join(packageDir, "resources", "Install CookieMonster.txt") },
+        { x: 380, y: 160, type: "file", path: path.join(packageDir, "resources", "Install Codework.txt") },
       ],
     },
-    artifactName: "cookiemonster-${os}-${arch}.${ext}",
-    // channel pinned so a -cm.N prerelease version still emits latest*.yml, not cm*.yml
-    publish: { provider: "github", owner: "trmosala", repo: "opencode", channel: "latest" },
+    artifactName: "codework-${os}-${arch}.${ext}",
+    // channel pinned so a -codework.N prerelease version still emits latest*.yml, not cm*.yml
+    publish: { provider: "github", owner: "ClockworkDigital", repo: "Codework", channel: "latest" },
   }
 }
 

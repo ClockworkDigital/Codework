@@ -6,7 +6,7 @@ import { browserCommand, browserLinkContext, browserViewport, type registerBrows
 import { browserRegistration, routeBrowserTab } from "./registry"
 import { routeBrowserRequest } from "./router"
 import { startBrowserOperation } from "./operation-state"
-import { success } from "@cookiemonster/cm-browser/protocol"
+import { success } from "@codework/browser/protocol"
 
 export async function leaveConfirmationSmoke(
   win: BrowserWindow,

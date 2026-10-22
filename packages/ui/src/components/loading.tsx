@@ -1,5 +1,7 @@
 import { createContext, createUniqueId, Show, useContext, type ComponentProps, type ParentProps } from "solid-js"
 import { paths } from "./phosphor"
+import spin from "../assets/clockwork/loading.svg?no-inline"
+import still from "../assets/clockwork/loading-still.svg?no-inline"
 import "./loading.css"
 
 export type LoadingAnimationSet = {
@@ -7,10 +9,15 @@ export type LoadingAnimationSet = {
   still: string
 }
 
+export const codeworkLoading = {
+  animations: [{ id: "clockwork", src: spin }],
+  still,
+} satisfies LoadingAnimationSet
+
 const LoadingContext = createContext<LoadingAnimationSet>()
 
 export function useLoadingAnimations() {
-  return useContext(LoadingContext)
+  return useContext(LoadingContext) ?? codeworkLoading
 }
 
 export function LoadingAnimationProvider(props: ParentProps<{ value?: LoadingAnimationSet }>) {

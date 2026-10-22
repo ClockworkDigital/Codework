@@ -29,7 +29,7 @@ for (const platform of ["darwin", "win32", "linux"]) {
         join,
         fileURLToPath,
         process: { platform, resourcesPath: "/packaged/resources" },
-        app: { isPackaged: packaged, getName: () => "CookieMonster" },
+        app: { isPackaged: packaged, getName: () => "Codework" },
         Menu: { buildFromTemplate: () => [] },
         nativeImage: {
           createFromPath(path: string) {

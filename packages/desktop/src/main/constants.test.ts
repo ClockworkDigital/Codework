@@ -1,17 +1,17 @@
 import { expect, test } from "bun:test"
 import { resolveAppIdentity } from "./constants"
 
-test("uses CookieMonster identity for branded packaged builds", () => {
+test("uses Codework identity for branded packaged builds", () => {
   expect(resolveAppIdentity("prod", true, true)).toEqual({
-    name: "CookieMonster",
-    appId: "com.ogilvy.cookiemonster",
+    name: "Codework",
+    appId: "digital.clockwork.codework",
   })
 })
 
 test("keeps the development identity for unpackaged builds", () => {
   expect(resolveAppIdentity("prod", true, false)).toEqual({
-    name: "OpenCode Dev",
-    appId: "ai.opencode.desktop.dev",
+    name: "Codework Dev",
+    appId: "digital.clockwork.codework.dev",
   })
 })
 

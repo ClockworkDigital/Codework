@@ -2,7 +2,7 @@ import assert from "node:assert/strict"
 import { setTimeout } from "node:timers/promises"
 import { BrowserWindow } from "electron"
 import type { DesktopPanelRequest } from "@opencode-ai/app/browser-panel"
-import type { PanelRequest } from "@cookiemonster/cm-browser/protocol"
+import type { PanelRequest } from "@codework/browser/protocol"
 import {
   browserCommand,
   browserLinkContext,

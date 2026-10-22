@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { EventEmitter, once } from "node:events"
 import { attachBrowserBridge } from "./bridge"
-import type { BrowserIpcResult } from "@cookiemonster/cm-browser/protocol"
+import type { BrowserIpcResult } from "@codework/browser/protocol"
 import { createServer } from "node:http"
 import { setTimeout } from "node:timers/promises"
 import { BrowserWindow, WebContentsView, dialog } from "electron"
@@ -12,7 +12,7 @@ import { browserCommand, registerBrowserOwner } from "./tabs"
 import { saveTransferRule } from "./transfer-permissions"
 import { prepareLoginScript } from "./login-form"
 import { browserOperationBusy, setBrowserAgentEnabled } from "./registry"
-import type { Request, WriteRequest } from "@cookiemonster/cm-browser/protocol"
+import type { Request, WriteRequest } from "@codework/browser/protocol"
 import { registerBrowserTab, type BrowserRegistration } from "./registry"
 import { routeBrowserRequest } from "./router"
 import { browserInputFailure } from "./driver"
@@ -867,8 +867,8 @@ export async function framesSmoke() {
               const [frame, sibling] = inventory.result.frames
               assert.notEqual(frame.frameRef, sibling.frameRef)
               assert.equal(frame.origin, sibling.origin, "identical URL siblings remain independent")
-              let observed: import("@cookiemonster/cm-browser/protocol").BrowserState | undefined
-              let readBinding: import("@cookiemonster/cm-browser/protocol").FrameContext | undefined
+              let observed: import("@codework/browser/protocol").BrowserState | undefined
+              let readBinding: import("@codework/browser/protocol").FrameContext | undefined
               let selectionRequest: Request | undefined
               const abort = new AbortController()
               let prompts = 0

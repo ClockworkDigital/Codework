@@ -3,7 +3,7 @@ import {
   MIN_NETWORK_OBSERVATION_MS,
   MAX_NETWORK_OBSERVATION_MS,
   type NetworkObservation,
-} from "@cookiemonster/cm-browser/protocol"
+} from "@codework/browser/protocol"
 
 type Source = Pick<WebContents, "id" | "isDestroyed"> & { readonly mainFrame: Pick<WebFrameMain, "detached"> }
 type Requests = Pick<WebRequest, "onCompleted" | "onErrorOccurred">

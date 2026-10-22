@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { parseRequest } from "@cookiemonster/cm-browser/protocol"
+import { parseRequest } from "@codework/browser/protocol"
 import { browserNavigationURL, browserURL, MAX_BROWSER_NAVIGATION_URL_LENGTH } from "./policy"
 
 test("native authentication navigation keeps the separate agent destination bound", () => {

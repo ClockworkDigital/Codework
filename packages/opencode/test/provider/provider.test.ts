@@ -368,32 +368,6 @@ it.instance(
 )
 
 it.instance(
-  "defaultModel uses Sol High for a fresh CookieMonster configuration",
-  Effect.gen(function* () {
-    const model = yield* Provider.use.defaultModel()
-    expect(String(model.providerID)).toBe("cookiemonster")
-    expect(String(model.modelID)).toBe("CM_GPT-5.6-Sol_High")
-  }),
-  {
-    config: {
-      provider: {
-        cookiemonster: {
-          name: "CookieMonster",
-          npm: "@ai-sdk/openai-compatible",
-          env: [],
-          models: {
-            "CM_GPT6_Astra_Max": { name: "Astra Max" },
-            "CM_GPT-5.6 Sol - Medium": { name: "Sol Medium" },
-            "CM_GPT-5.6-Sol_High": { name: "Sol High" },
-          },
-          options: { apiKey: "test-key", baseURL: "http://127.0.0.1:8787/v1" },
-        },
-      },
-    },
-  },
-)
-
-it.instance(
   "defaultModel treats empty provider config as no allowlist",
   Effect.gen(function* () {
     yield* setProcessEnv("ANTHROPIC_API_KEY", "test-api-key")

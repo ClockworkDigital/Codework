@@ -130,31 +130,10 @@
     padding: 3px 2px 4px;
   }
 
-  [data-slot="browser-tab-spinner"] {
-    width: 13px;
-    height: 13px;
-    border: 2px solid var(--border-weak-base);
-    border-top-color: currentColor;
-    border-radius: 50%;
-    animation: browser-tab-spin 0.8s linear infinite;
-  }
-
   @media (hover: hover) and (pointer: fine) {
     [data-slot="browser-tab"]:not([data-active="true"]):not(:hover):not(:focus-within)
       [data-slot="browser-tab-actions"] {
       opacity: 0;
     }
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    [data-slot="browser-tab-spinner"] {
-      animation: none;
-    }
-  }
-}
-
-@keyframes browser-tab-spin {
-  to {
-    transform: rotate(360deg);
   }
 }

@@ -1,12 +1,6 @@
 import { randomUUID } from "node:crypto"
 import { dialog, type BrowserWindow } from "electron"
-import {
-  failure,
-  success,
-  type HistoryRequest,
-  type BrowserState,
-  type Response,
-} from "@cookiemonster/cm-browser/protocol"
+import { failure, success, type HistoryRequest, type BrowserState, type Response } from "@codework/browser/protocol"
 import { nativeT } from "../native-translations"
 import { browserAgentEnabled, browserTaskPaused, browserTaskEpoch } from "./registry"
 import { browserPreferencesState, browserPreferencesRevision } from "./preferences"

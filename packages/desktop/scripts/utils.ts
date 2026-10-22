@@ -83,17 +83,17 @@ export async function downloadCliToResources() {
     await rm(directory, { recursive: true, force: true })
   }
   if (process.platform !== "win32") await chmod(dest, 0o755)
-  if (process.platform === "win32" && process.env.GITHUB_ACTIONS === "true" && process.env.CM_UNSIGNED !== "1") {
+  if (process.platform === "win32" && process.env.GITHUB_ACTIONS === "true" && process.env.CODEWORK_UNSIGNED !== "1") {
     await $`pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File ../../script/sign-windows.ps1 ${dest}`
   }
   if (process.platform === "darwin") await $`codesign --force --sign - ${dest}`
 
-  if (process.env.CM_BRAND === "1" && process.platform === "win32") {
+  if (process.env.CODEWORK_BRAND === "1" && process.platform === "win32") {
     const command = windowsify("resources/cli/opencode")
     await mkdir(join("resources", "cli"), { recursive: true })
     await copyFile(dest, command)
     const [sidecar, publicCommand] = await Promise.all([readFile(dest), readFile(command)])
-    if (!sidecar.equals(publicCommand)) throw new Error("CookieMonster CLI resource copies differ")
+    if (!sidecar.equals(publicCommand)) throw new Error("Codework CLI resource copies differ")
     console.log(`Copied ${cli.package} to ${command}`)
   }
 

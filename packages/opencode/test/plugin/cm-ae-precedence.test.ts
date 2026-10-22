@@ -20,7 +20,7 @@ import { AccountTest } from "../fake/account"
 import { NpmTest } from "../fake/npm"
 import { disposeAllInstances, TestInstance } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
-import { o1CodeConfigContent } from "../../../desktop/src/main/wpp-bridge/proxy/providerConfig.mjs"
+import { desktopConfigContent } from "../../../desktop/src/main/desktop-config"
 
 // Explicit external input: current AE source or a refreshed bundle, never a developer path in production.
 const entry = process.env.CM_AE_TEST_ENTRY
@@ -215,7 +215,7 @@ export default {
         )
         yield* fs.writeWithDirs(join(directory, "opencode.json"), JSON.stringify(scenario.config))
         const browser = pathToFileURL(resolve(import.meta.dir, "../../../cm-browser/src/plugin.ts")).href
-        const content = o1CodeConfigContent(browser, [
+        const content = desktopConfigContent(browser, [
           pathToFileURL(wrapper).href,
           { releaseMetadata: { cookieMonsterVersion: "1.18.27" } },
         ])

@@ -1,4 +1,4 @@
-import { CMLoading } from "@/components/cm-loading"
+import { CodeworkLoading } from "@/components/codework-loading"
 import { useFilteredList } from "@opencode-ai/ui/hooks"
 import { ProviderIcon } from "@opencode-ai/ui/provider-icon"
 import { Switch } from "@opencode-ai/ui/v2/switch-v2"
@@ -86,7 +86,7 @@ export const SettingsModelsV2: Component = () => {
           when={!list.grouped.loading}
           fallback={
             <div class="settings-v2-models-status">
-              <CMLoading class="size-4 inline-block align-middle mr-2" />
+              <CodeworkLoading class="size-4 inline-block align-middle mr-2" />
               {language.t("common.loading")}
               {language.t("common.loading.ellipsis")}
             </div>

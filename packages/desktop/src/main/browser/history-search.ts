@@ -1,4 +1,4 @@
-import type { HistoryRequest } from "@cookiemonster/cm-browser/protocol"
+import type { HistoryRequest } from "@codework/browser/protocol"
 
 export function searchHistory(
   rows: { id: string; url: string; title: string; time: number }[],

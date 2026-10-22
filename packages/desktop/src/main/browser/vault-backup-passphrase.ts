@@ -18,7 +18,7 @@ export async function promptVaultBackupPassphrase(win: BrowserWindow, confirmati
       helper,
       [
         nativeSecretEntryWindow(win),
-        "CookieMonster password backup",
+        "Codework password backup",
         nativeT("desktop.browser.backup.passphraseTitle"),
         nativeT(
           process.platform === "darwin"
