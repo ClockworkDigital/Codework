@@ -2,7 +2,7 @@ import { expect, test } from "bun:test"
 import { chooseIconName } from "./file-icon"
 import { icons, paths } from "./phosphor"
 
-test("Phosphor aliases preserve control meanings and file categories", () => {
+test("Tabler compatibility aliases preserve control meanings and file categories", () => {
   expect(icons["outline-copy"]).toBe(paths.copy)
   expect(icons["terminal-active"]).toBe(paths["terminal-window"])
   expect(icons["circle-ban-sign"]).toBe(paths.prohibit)

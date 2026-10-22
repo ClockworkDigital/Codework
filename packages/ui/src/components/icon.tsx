@@ -1,7 +1,7 @@
 import { onMount, Show, splitProps, type ComponentProps } from "solid-js"
 import { Loading, useLoadingAnimations } from "./loading"
 
-import { icons } from "./phosphor"
+import { icons } from "./tabler"
 
 const spriteID = "opencode-icon-sprite"
 const symbol = (name: keyof typeof icons) => `opencode-icon-${name}`
